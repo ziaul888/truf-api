@@ -1,0 +1,24 @@
+# Local Postgres for development. Start: `docker compose up -d`
+# Creates `turf_dev` (app) and `turf_test` (e2e tests). Data persists in the `pgdata` volume.
+services:
+  postgres:
+    image: postgres:17-alpine
+    container_name: turf-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: turf
+      POSTGRES_PASSWORD: turf
+      POSTGRES_DB: turf_dev
+    ports:
+      - '5432:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./docker/init-test-db.sql:/docker-entrypoint-initdb.d/init-test-db.sql:ro
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U turf -d turf_dev']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

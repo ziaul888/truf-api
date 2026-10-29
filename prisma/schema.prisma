@@ -1,0 +1,417 @@
+// Turf API — v1 schema. Change it, then run `yarn db:migrate` (never edit the DB by hand).
+// Money is stored as integers in the currency's smallest unit (e.g. 1500 = 15.00).
+
+generator client {
+  provider               = "prisma-client"
+  output                 = "../src/generated/prisma"
+  runtime                = "nodejs"
+  moduleFormat           = "esm"
+  generatedFileExtension = "ts"
+  importFileExtension    = "js"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  admin
+  manager
+}
+
+enum SlotStatus {
+  available
+  /// Reserved for a portal checkout until heldUntil; then booked or released.
+  held
+  booked
+  blocked
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  cancelled
+  /// Confirmed and the slot has ended (set by an hourly job).
+  completed
+}
+
+enum BookingSource {
+  portal
+  staff
+}
+
+/// The booking's overall payment state, recomputed from its payments.
+enum BookingPaymentStatus {
+  unpaid
+  partial
+  paid
+  refunded
+  failed
+}
+
+enum PaymentMethod {
+  card
+  cash
+  bank_transfer
+}
+
+enum BookingEventType {
+  created
+  payment_received
+  confirmed
+  cancelled
+  refunded
+  email_sent
+  completed
+}
+
+/// Why staff blocked a slot (the dashboard's block form list).
+enum BlockReason {
+  maintenance
+  reserved
+  event
+  weather
+  other
+}
+
+enum SlotEventAction {
+  block
+  unblock
+  /// A venue closure blocked the slot / lifting it freed the slot.
+  close
+  reopen
+}
+
+enum PaymentStatus {
+  pending
+  succeeded
+  failed
+  refunded
+}
+
+enum Sport {
+  football
+  cricket
+  badminton
+  tennis
+  hockey
+  basketball
+  other
+}
+
+/// Which days a ground takes bookings. `custom` uses Ground.customDays.
+enum AvailableDays {
+  everyday
+  weekdays
+  weekends
+  custom
+}
+
+enum Weekday {
+  mon
+  tue
+  wed
+  thu
+  fri
+  sat
+  sun
+}
+
+/// Dashboard staff. Customers never log in in v1.
+model User {
+  id           String   @id @default(uuid())
+  email        String   @unique
+  name         String
+  passwordHash String
+  role         UserRole @default(manager)
+  isActive     Boolean  @default(true)
+  /// Embedded in every JWT. Bumping it (logout, password change) invalidates all of the user's tokens.
+  tokenVersion Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  blockedSlots      Slot[]
+  slotEvents        SlotEvent[]
+  bookingsCreated   Booking[]      @relation("BookingCreatedBy")
+  bookingsCancelled Booking[]      @relation("BookingCancelledBy")
+  paymentsRecorded  Payment[]
+  bookingEvents     BookingEvent[]
+  closuresCreated Closure[] @relation("ClosureCreatedBy")
+  closuresLifted  Closure[] @relation("ClosureLiftedBy")
+}
+
+model Ground {
+  id          String   @id @default(uuid())
+  name        String
+  description String?
+  address     String?
+  /// Hourly price, smallest currency unit. The off-peak price when peakPrice is set.
+  hourlyPrice Int
+  /// Whole hours, 0–23. Slots run from openingHour up to closingHour.
+  openingHour Int
+  /// Whole hours, 1–24, greater than openingHour.
+  closingHour Int
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  sport         Sport         @default(other)
+  /// `4x4` … `9x9`, `11x11`, `net`, `court` — validated by the API (not valid Prisma enum names).
+  format        String?
+  /// `outdoor-turf`, `indoor-court`, `covered-net` — validated by the API.
+  surface       String?
+  /// Free text, e.g. "28×18 m".
+  dimensions    String?
+  /// Players.
+  capacity      Int?
+  /// Labels from a fixed list (see grounds.schemas.ts).
+  amenities     String[]      @default([])
+  availableDays AvailableDays @default(everyday)
+  /// Only used when availableDays = custom; otherwise always empty.
+  customDays    Weekday[]     @default([])
+  /// Inactive grounds are hidden from the portal regardless.
+  showOnPortal  Boolean       @default(true)
+  /// Staff only — never returned by public endpoints.
+  internalNotes String?
+
+  /// Hourly price inside peakRanges, smallest currency unit. Set together with peakRanges.
+  peakPrice           Int?
+  /// `[{ fromHour, toHour }]`, inside opening hours, no overlaps — validated by the API.
+  peakRanges          Json     @default("[]")
+  /// 60 or 120. Slots start at openingHour in steps of this length; a trailing partial slot is dropped.
+  slotDurationMinutes Int      @default(60)
+  /// Stored file names, in display order (first = cover). Files live in UPLOAD_DIR/grounds/<id>/.
+  photos              String[] @default([])
+
+  slots      Slot[]
+  bookings   Booking[]
+  slotEvents SlotEvent[]
+
+  @@index([sport])
+}
+
+/// One bookable slot on one ground, in venue-local time (VENUE_TIMEZONE). `status` is the source of truth for availability.
+model Slot {
+  id              String       @id @default(uuid())
+  groundId        String
+  /// Venue-local calendar date.
+  date            DateTime     @db.Date
+  /// Start hour, 0–23; the slot covers [startHour, startHour + durationMinutes / 60).
+  startHour       Int
+  /// 60 or 120 — copied from the ground when the slot was created.
+  durationMinutes Int          @default(60)
+  /// slotPrice() at creation, smallest currency unit. Later price changes don't touch existing bookings.
+  price           Int
+  status          SlotStatus   @default(available)
+  /// The current block; null unless status = blocked. History lives in SlotEvent.
+  blockReason     BlockReason?
+  blockNote       String?
+  blockedById     String?
+  blockedAt       DateTime?
+  /// Set when a venue closure made the block, so lifting the closure frees only its own blocks.
+  closureId       String?
+  /// While status = held: when the hold lapses, and the pending booking holding it.
+  heldUntil       DateTime?
+  heldByBookingId String?
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  ground    Ground      @relation(fields: [groundId], references: [id], onDelete: Restrict)
+  blockedBy User?       @relation(fields: [blockedById], references: [id], onDelete: SetNull)
+  closure   Closure?    @relation(fields: [closureId], references: [id], onDelete: SetNull)
+  bookings  Booking[]
+  events    SlotEvent[]
+
+  @@unique([groundId, date, startHour])
+  @@index([closureId])
+  @@index([heldUntil])
+  @@index([groundId])
+  @@index([date])
+  @@index([status])
+}
+
+/// Audit log of every block and unblock. Keeps the slot's ground, date and hour so history
+/// survives when a free slot is regenerated.
+model SlotEvent {
+  id        String          @id @default(uuid())
+  slotId    String?
+  groundId  String
+  date      DateTime        @db.Date
+  startHour Int
+  action    SlotEventAction
+  reason    BlockReason?
+  note      String?
+  userId    String?
+  createdAt DateTime        @default(now())
+
+  slot   Slot?  @relation(fields: [slotId], references: [id], onDelete: SetNull)
+  ground Ground @relation(fields: [groundId], references: [id], onDelete: Restrict)
+  user   User?  @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([slotId])
+  @@index([groundId, date])
+  @@index([createdAt])
+}
+
+/// Closes some or all grounds for a date range (Eid, a power cut). Stored, so slots generated
+/// later on those days are created already blocked. Lifting sets liftedAt; rows are never deleted.
+model Closure {
+  id          String      @id @default(uuid())
+  fromDate    DateTime    @db.Date
+  toDate      DateTime    @db.Date
+  /// Empty = every ground, including grounds added later.
+  groundIds   String[]    @default([])
+  reason      BlockReason
+  /// Staff only.
+  note        String?
+  /// Shown to customers, e.g. "Closed for Eid".
+  publicLabel String?
+  createdById String?
+  createdAt   DateTime    @default(now())
+  liftedAt    DateTime?
+  liftedById  String?
+
+  createdBy User?  @relation("ClosureCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  liftedBy  User?  @relation("ClosureLiftedBy", fields: [liftedById], references: [id], onDelete: SetNull)
+  slots     Slot[]
+
+  @@index([fromDate, toDate])
+}
+
+/// Venue-wide slot settings. A single row with id = 1; defaults apply until it is saved.
+model SlotSettings {
+  id                      Int      @id @default(1)
+  /// How far ahead customers can book, and how far the auto-generate job creates slots.
+  advanceBookingDays      Int      @default(30)
+  autoGenerate            Boolean  @default(true)
+  /// Customers can't book or cancel a slot that starts within this many hours.
+  cancellationCutoffHours Int      @default(2)
+  notifyCustomerOnBlock   Boolean  @default(true)
+  notifyAdminOnBooking    Boolean  @default(false)
+  /// How long a portal checkout holds its slot before it is released.
+  holdMinutes             Int      @default(15)
+  /// Added to portal bookings, smallest currency unit; stored on each booking.
+  serviceFee              Int      @default(5000)
+  /// Lets portal customers choose "pay cash at the venue" instead of card.
+  portalCashEnabled       Boolean  @default(true)
+  updatedAt               DateTime @updatedAt
+}
+
+model Customer {
+  id               String    @id @default(uuid())
+  name             String
+  email            String
+  /// Normalised, e.g. "+8801711000000" — the lookup key for staff and checkout.
+  phone            String?   @unique
+  stripeCustomerId String?   @unique
+  /// Staff only.
+  adminNote        String?
+  /// Bumped on sign-out, revoking every customer_token issued before.
+  sessionVersion   Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+  deletedAt        DateTime?
+
+  bookings Booking[]
+
+  @@index([email])
+}
+
+/// A slot can have several bookings over time (e.g. cancelled, then rebooked), but at most one
+/// live one: `liveSlotId` equals slotId while the booking is pending, confirmed or completed,
+/// and is cleared on cancel — its unique index is the database-level double-booking guard.
+model Booking {
+  id                      String               @id @default(uuid())
+  /// Short and human-readable, e.g. CT-24A7F. Shown to customers.
+  bookingNumber           String               @unique
+  source                  BookingSource
+  groundId                String
+  slotId                  String
+  liveSlotId              String?              @unique
+  customerId              String
+  /// Contact details given for this booking (portal checkout never overwrites the customer record).
+  contactName             String
+  contactEmail            String
+  contactPhone            String
+  status                  BookingStatus        @default(pending)
+  paymentStatus           BookingPaymentStatus @default(unpaid)
+  /// Slot price at booking time, smallest currency unit.
+  amount                  Int
+  /// Portal service fee at booking time; 0 for staff bookings.
+  serviceFee              Int                  @default(0)
+  /// amount + serviceFee.
+  total                   Int
+  /// Partial payments (staff bookings only).
+  dueDate                 DateTime?            @db.Date
+  dueNote                 String?
+  dueReminderSentAt       DateTime?
+  /// Staff only.
+  notes                   String?
+  stripeCheckoutSessionId String?              @unique
+  /// Portal customer chose to pay cash at the venue: pending until staff confirm.
+  payAtVenue              Boolean              @default(false)
+  createdById             String?
+  confirmedAt             DateTime?
+  cancelledAt             DateTime?
+  cancelReason            String?
+  cancelledById           String?
+  createdAt               DateTime             @default(now())
+  updatedAt               DateTime             @updatedAt
+  deletedAt               DateTime?
+
+  ground      Ground         @relation(fields: [groundId], references: [id], onDelete: Restrict)
+  slot        Slot           @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  customer    Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy   User?          @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  cancelledBy User?          @relation("BookingCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  payments    Payment[]
+  events      BookingEvent[]
+
+  @@index([groundId])
+  @@index([slotId])
+  @@index([customerId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+model Payment {
+  id                    String        @id @default(uuid())
+  bookingId             String
+  method                PaymentMethod
+  /// Card payments only.
+  stripePaymentIntentId String?       @unique
+  cardLast4             String?
+  amount                Int
+  /// ISO 4217, lowercase as Stripe uses it (e.g. "bdt").
+  currency              String
+  status                PaymentStatus @default(pending)
+  stripeRefundId        String?       @unique
+  refundedAt            DateTime?
+  note                  String?
+  recordedById          String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  deletedAt             DateTime?
+
+  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  recordedBy User?   @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+  @@index([status])
+  @@index([createdAt])
+}
+
+/// The booking detail page's activity timeline.
+model BookingEvent {
+  id        String           @id @default(uuid())
+  bookingId String
+  type      BookingEventType
+  detail    String?
+  userId    String?
+  createdAt DateTime         @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+}
