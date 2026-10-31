@@ -105,11 +105,24 @@ describe('Customer sign-in (e2e)', () => {
 
   it('signs in a new number with an httpOnly cookie', async () => {
     const { agent, session, cookie } = await signIn(`${LOCAL}02`);
-    expect(session).toEqual({ phone: `${PHONE}02`, customerId: null, name: null, email: null });
+    expect(session).toEqual({ phone: `${PHONE}02`, customerId: null, name: null, email: null, needsProfile: true });
     expect(cookie.join(';')).toMatch(/customer_token=.+HttpOnly/i);
 
     const me = await agent.get(`${AUTH}/me`).expect(200);
     expect(me.body.data.phone).toBe(`${PHONE}02`);
+  });
+
+  it('creates the customer from sign-up details, or on the profile step', async () => {
+    const agent = request.agent(app.getHttpServer());
+    const res = await agent.post(`${AUTH}/verify`).send({ phone: `${LOCAL}06`, code: CODE, name: 'Nadia Islam', email: 'nadia@example.com' }).expect(200);
+    expect(res.body.data).toMatchObject({ name: 'Nadia Islam', needsProfile: false });
+    expect(await prisma.customer.findUnique({ where: { phone: `${PHONE}06` } })).toMatchObject({ name: 'Nadia Islam', email: 'nadia@example.com' });
+
+    const { agent: later } = await signIn(`${LOCAL}07`);
+    const saved = await later.post(`${AUTH}/profile`).send({ name: 'Arif Khan', email: 'Arif@Example.com' }).expect(200);
+    expect(saved.body.data).toMatchObject({ name: 'Arif Khan', email: 'arif@example.com', needsProfile: false });
+    expect((await later.get(`${AUTH}/me`).expect(200)).body.data.customerId).toBe(saved.body.data.customerId);
+    await http().post(`${AUTH}/profile`).send({ name: 'X', email: 'x@example.com' }).expect(401);
   });
 
   it('lists guest bookings made with the number, with their signed links', async () => {

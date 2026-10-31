@@ -1,16 +1,18 @@
 import { Injectable } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { AppError } from '../common/app-error.js';
+import { upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SmsVerifyService } from '../sms/sms-verify.service.js';
+import type { CustomerProfileInput } from './customer-auth.schemas.js';
 import { toCustomerSession, type CustomerJwtPayload, type CustomerSession } from './customer-auth.types.js';
 
 const unauthenticated = () => new AppError('Please sign in', 401, 'UNAUTHENTICATED');
 
 /**
- * Customer sign-in by SMS code. The session is keyed on the verified phone, so it works before
- * the customer has a record (their first booking creates it) and shows every booking made with
- * that number, guest bookings included.
+ * Customer sign-in by SMS code. The session is keyed on the verified phone, so it shows every
+ * booking made with that number, guest bookings included. A new number's customer record is
+ * created from the name and email given at sign-in, on the profile step, or at first booking.
  */
 @Injectable()
 export class CustomerAuthService {
@@ -25,11 +27,16 @@ export class CustomerAuthService {
     return { sent: true };
   }
 
-  async verify(phone: string, code: string): Promise<{ session: CustomerSession; token: string }> {
+  /** `profile`: name and email for a number with no customer record yet; ignored otherwise. */
+  async verify(phone: string, code: string, profile?: CustomerProfileInput): Promise<{ session: CustomerSession; token: string }> {
     if (!(await this.sms.check(phone, code))) {
       throw new AppError('That code is wrong or has expired', 400, 'INVALID_CODE');
     }
-    const customer = await this.prisma.customer.findUnique({ where: { phone } });
+    let customer = await this.prisma.customer.findUnique({ where: { phone } });
+    if (profile && (!customer || customer.deletedAt)) {
+      await upsertCustomerByPhone(this.prisma, { phone, ...profile }, true);
+      customer = await this.prisma.customer.findUnique({ where: { phone } });
+    }
     const payload: CustomerJwtPayload = { sub: phone, ver: customer?.sessionVersion ?? 0 };
     return { session: toCustomerSession(phone, customer), token: await this.jwt.signAsync(payload) };
   }
@@ -41,6 +48,12 @@ export class CustomerAuthService {
     const customer = await this.prisma.customer.findUnique({ where: { phone: payload.sub } });
     if ((customer?.sessionVersion ?? 0) !== payload.ver) throw unauthenticated();
     return toCustomerSession(payload.sub, customer);
+  }
+
+  /** Creates the signed-in customer's record, or updates their name and email. */
+  async saveProfile(phone: string, profile: CustomerProfileInput): Promise<CustomerSession> {
+    await upsertCustomerByPhone(this.prisma, { phone, ...profile }, true);
+    return toCustomerSession(phone, await this.prisma.customer.findUnique({ where: { phone } }));
   }
 
   /** For public routes that behave differently when a customer is signed in. */

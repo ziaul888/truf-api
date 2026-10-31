@@ -226,6 +226,7 @@ describe('Slots (e2e)', () => {
       expect(res.body.data).toEqual({
         advanceBookingDays: 30, autoGenerate: false, cancellationCutoffHours: 2, notifyCustomerOnBlock: true, notifyAdminOnBooking: false,
         holdMinutes: 15, serviceFee: 5000, portalCashEnabled: true,
+        updatedAt: expect.any(String), updatedBy: { id: expect.any(String), name: 'Admin' },
       });
     });
 

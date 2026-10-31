@@ -5,6 +5,7 @@ import { env } from '../config/env.js';
 import type { Booking } from '../generated/prisma/client.js';
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SystemStateService, type WebhookState } from '../settings/system-state.service.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { dueOf, paymentStatusOf } from './booking-rules.js';
@@ -22,16 +23,25 @@ export class StripeWebhookService {
     private readonly stripe: StripeService,
     private readonly cancellation: BookingCancellationService,
     private readonly notifier: BookingNotifier,
+    private readonly state: SystemStateService,
   ) {}
 
+  /** Signed events only. When each arrived and whether it was handled shows on the Payments page. */
   async handle(rawBody: Buffer, signature: string | undefined): Promise<{ received: true }> {
     const event = this.stripe.parseWebhook(rawBody, signature);
-    switch (event.type) {
-      case 'checkout.session.completed': await this.paid(event.data.object); break;
-      case 'checkout.session.expired': await this.expired(event.data.object); break;
-      case 'payment_intent.payment_failed': await this.failed(event.data.object); break;
-      case 'charge.refunded': await this.refundedInStripe(event.data.object); break;
-      default: break;
+    let ok = false;
+    try {
+      switch (event.type) {
+        case 'checkout.session.completed': await this.paid(event.data.object); break;
+        case 'checkout.session.expired': await this.expired(event.data.object); break;
+        case 'payment_intent.payment_failed': await this.failed(event.data.object); break;
+        case 'charge.refunded': await this.refundedInStripe(event.data.object); break;
+        default: break;
+      }
+      ok = true;
+    } finally {
+      const seen: WebhookState = { lastEventAt: new Date().toISOString(), lastEventOk: ok };
+      await this.state.set('stripe_webhook', seen).catch(() => undefined);
     }
     return { received: true };
   }

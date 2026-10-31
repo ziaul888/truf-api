@@ -7,10 +7,14 @@ import { ChangePasswordSchema, LoginSchema, type ChangePasswordInput, type Login
 import { AuthService } from './auth.service.js';
 import type { AuthUser } from './auth.types.js';
 import { LoginThrottlerGuard } from './login-throttler.guard.js';
+import { PermissionsService } from './permissions.service.js';
 
 @Controller('admin/auth')
 export class AuthController {
-  constructor(private readonly auth: AuthService) {}
+  constructor(
+    private readonly auth: AuthService,
+    private readonly permissions: PermissionsService,
+  ) {}
 
   @Post('login')
   @HttpCode(200)
@@ -37,6 +41,13 @@ export class AuthController {
   @UseGuards(AuthGuard)
   me(@CurrentUser() user: AuthUser): AuthUser {
     return user;
+  }
+
+  /** `{ admin: ["GET /admin/bookings", …], manager: [...] }`, generated from the route guards. */
+  @Get('permissions')
+  @UseGuards(AuthGuard)
+  listPermissions() {
+    return this.permissions.list();
   }
 
   /** Any signed-in user. Keeps this session, signs out the others. */

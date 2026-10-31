@@ -2,6 +2,7 @@ import type { PrismaService } from '../prisma/prisma.service.js';
 import type { StripeService } from '../payments/stripe.service.js';
 import type { BookingCancellationService } from './booking-cancellation.service.js';
 import type { BookingNotifier } from './booking-notifier.service.js';
+import type { SystemStateService } from '../settings/system-state.service.js';
 import { StripeWebhookService } from './stripe-webhook.service.js';
 
 function setup({ existingPayment = null as object | null, booking = { id: 'b-1', status: 'pending', slotId: 's-1', total: 6000, payments: [] } as object | null } = {}) {
@@ -22,6 +23,7 @@ function setup({ existingPayment = null as object | null, booking = { id: 'b-1',
   const service = new StripeWebhookService(
     prisma as unknown as PrismaService, stripe as unknown as StripeService,
     cancellation as unknown as BookingCancellationService, notifier as unknown as BookingNotifier,
+    { set: vi.fn(async () => undefined) } as unknown as SystemStateService,
   );
   const send = (event: object) => {
     stripe.parseWebhook.mockReturnValueOnce(event);

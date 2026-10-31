@@ -154,7 +154,8 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | Method & path | Body / query | Returns |
 |---|---|---|
 | `POST /customer/auth/send-code` | `{ phone }` (any common format) | `{ sent: true }`. An SMS with a 6-digit code, valid 10 minutes |
-| `POST /customer/auth/verify` | `{ phone, code }` | Sets the cookie. Returns the session `{ phone, customerId, name, email }` |
+| `POST /customer/auth/verify` | `{ phone, code, name?, email? }` | Sets the cookie. Returns the session `{ phone, customerId, name, email, needsProfile }`. With `name` + `email`, a **new** number's customer record is created right away (a known customer's details are not changed) |
+| `POST /customer/auth/profile` | `{ name, email }` (signed in) | The updated session. Creates the customer record for a new number, or updates name and email |
 | `GET /customer/auth/me` | — | The session, or `401 UNAUTHENTICATED` when signed out. Call it on page load |
 | `POST /customer/auth/logout` | — | `{ loggedOut: true }`. Clears the cookie and signs out **every device** |
 | `GET /customer/bookings` | `scope` (`upcoming` default, or `past`), `page`, `limit` | `{ data, total, page, limit }`. Each item is the public booking (§2) plus `confirmationUrl` |
@@ -164,9 +165,11 @@ Optional. Guests can still book, and signed links keep working. The session is a
 2. Code field → `verify` → go back to where they came from.
 3. "Resend code" after 60 seconds.
 
-**The session:**
-- `name` and `email` are `null` for a number that has never booked. The first booking fills them in.
-- `customerId` is `null` until then too.
+**The session and new customers:**
+- `needsProfile: true` means the number has no customer record yet (`customerId`, `name`, `email` are `null`).
+- **Right after `verify`, if `needsProfile` is true, show a "Your name and email" step** and post it to `/customer/auth/profile`. That creates the customer, so they appear in the dashboard's Customers list straight away.
+- Or collect name and email on the sign-in form and send them with `verify`. They're used only if the number is new.
+- If neither happens, the first booking still creates the record.
 
 **Checkout when signed in:**
 - **Prefill** name, email and phone from `/customer/auth/me`, and make the phone **read-only**. The booking always goes on the verified phone, whatever is posted.
@@ -217,7 +220,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 
 | Method & path | Body / query | Returns |
 |---|---|---|
-| `GET /admin/bookings` | `status`, `paymentStatus`, `groundId`, `customerId`, `from`+`to` (slot date, together), `search` (booking number, name, phone), `sort` (`created` default, or `slot`), `page`, `limit` | `{ data, total, page, limit, counts: { pending, confirmed, cancelled, completed } }`. The counts ignore `status`, for the stat cards |
+| `GET /admin/bookings` | `status`, `paymentStatus`, `groundId`, `customerId`, `from`+`to` (slot date, together), `search` (booking number, name, phone), `sort` (`created` default, or `slot`), `due` (`overdue`, `today`, `any`; see the dashboard doc), `page`, `limit` | `{ data, total, page, limit, counts: { pending, confirmed, cancelled, completed } }`. The counts ignore `status`, for the stat cards |
 | `GET /admin/bookings/upcoming?limit=5` | — | The next pending or confirmed bookings (dashboard home) |
 | `GET /admin/bookings/:id` | — | Booking plus `payments[]`, `events[]` (timeline, newest first) and `customer.totalBookings` |
 | `POST /admin/bookings` | See "New Booking" below | **201** booking |
@@ -287,7 +290,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
   "bookingsTodayByGround": [{ "groundId": "uuid", "bookings": 3 }]
 }
 ```
-- **Trends** are the % change against the same day last week (customers and grounds: against a week ago).
+- **Trends** are the % change against the same day last week (customers and grounds: against a week ago). A trend is **`null` when last week was 0**: show "New". The attention cards, today-by-ground and recent activity are in [`docs/frontend-dashboard.md`](frontend-dashboard.md).
 - **Revenue** is payments received today minus refunds made today.
 - **`bookingsTodayByGround`** gives the ground cards their "today's bookings" number.
 - **Upcoming list:** use `GET /admin/bookings/upcoming?limit=5`.
@@ -348,7 +351,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 - [ ] Portal checkout loads `/checkout/options`, offers card and (if `cashEnabled`) "Pay at venue", posts `paymentMethod`, and redirects to `checkoutUrl` (card) or `confirmationUrl` (cash); hardcoded ৳50 removed
 - [ ] Bookings list, detail and review queue show a "Pay at venue" badge when `payAtVenue`; settings page has the `portalCashEnabled` switch
 - [ ] Confirmation page uses `GET /bookings/:id?token=` (polls while `pending`); Cancel button when `canCancel`; **"Pay ৳{due} now" button when `canPay`** (calls `POST /bookings/:id/pay`, redirects to `checkoutUrl`)
-- [ ] Customer sign-in (phone → SMS code), `/customer/auth/me` on load, Sign out; checkout prefilled with the phone read-only when signed in
+- [ ] Customer sign-in (phone → SMS code → name/email step when `needsProfile`), `/customer/auth/me` on load, Sign out; checkout prefilled with the phone read-only when signed in
 - [ ] My Bookings page from `GET /customer/bookings` (Upcoming / Past tabs), each row opening its `confirmationUrl`
 - [ ] Bookings list: server-side filters, `counts` for stat cards, inline confirm/cancel through the actions
 - [ ] Booking detail: payments, Activity timeline from `events`, cancel (with refund choice), collect payment, resend confirmation; receipt button hidden

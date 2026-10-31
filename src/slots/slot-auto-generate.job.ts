@@ -1,4 +1,5 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import { trackJob } from '../common/job-runs.js';
 import { env } from '../config/env.js';
 import { SlotGeneratorService } from './slot-generator.service.js';
 
@@ -28,7 +29,7 @@ export class SlotAutoGenerateJob implements OnApplicationBootstrap, OnModuleDest
 
   private async run() {
     try {
-      const generated = await this.generator.fillWindow();
+      const generated = await trackJob('slotGeneration', () => this.generator.fillWindow());
       if (generated > 0) this.logger.log(`Generated ${generated} slots`);
     } catch (err) {
       this.logger.error('Slot auto-generation failed', err instanceof Error ? err.stack : String(err));

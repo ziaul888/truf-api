@@ -4,19 +4,19 @@ import { addDays, toDbDate, venueDayStart, venueNow, type IsoDate } from '../slo
 
 export interface DashboardStats {
   todayRevenue: number;
-  todayRevenueTrend: number;
+  todayRevenueTrend: number | null;
   todayBookings: number;
-  todayBookingsTrend: number;
+  todayBookingsTrend: number | null;
   totalCustomers: number;
-  totalCustomersTrend: number;
+  totalCustomersTrend: number | null;
   activeGrounds: number;
-  activeGroundsTrend: number;
+  activeGroundsTrend: number | null;
   bookingsTodayByGround: { groundId: string; bookings: number }[];
 }
 
-/** % change against the same day last week, one decimal. */
-const trend = (now: number, before: number) =>
-  before === 0 ? (now > 0 ? 100 : 0) : Math.round(((now - before) / before) * 1000) / 10;
+/** % change against the same day last week, one decimal; null when last week was 0 (shown as "New"). */
+const trend = (now: number, before: number): number | null =>
+  before === 0 ? null : Math.round(((now - before) / before) * 1000) / 10;
 
 /** Dashboard home numbers. "Today" is the venue's day. */
 @Injectable()

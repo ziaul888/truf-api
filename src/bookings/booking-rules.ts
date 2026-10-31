@@ -2,12 +2,21 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { AppError } from '../common/app-error.js';
 import { violatedUniqueIndex } from '../common/prisma-errors.js';
 import { env } from '../config/env.js';
-import type { BookingPaymentStatus, PaymentStatus } from '../generated/prisma/client.js';
+import type { BookingPaymentStatus, PaymentStatus, Prisma } from '../generated/prisma/client.js';
 
 export const bookingNotFound = () => new AppError('Booking not found', 404, 'BOOKING_NOT_FOUND');
 export const slotNotAvailable = () => new AppError('That slot is no longer available. Pick another time', 409, 'SLOT_NOT_AVAILABLE');
 export const bookingNotPending = (message = 'Only pending bookings can be confirmed') =>
   new AppError(message, 409, 'BOOKING_NOT_PENDING');
+
+/**
+ * Card checkouts that were never paid (the hold lapsed, the session expired, or the customer
+ * walked away): left out of "My bookings" and every report.
+ */
+export const ABANDONED_CHECKOUT: Prisma.BookingWhereInput = { status: 'cancelled', source: 'portal', payAtVenue: false, confirmedAt: null };
+
+/** A portal card checkout still in Stripe: paid or released within minutes, so never "to confirm" or "due". */
+export const CARD_CHECKOUT_IN_PROGRESS: Prisma.BookingWhereInput = { status: 'pending', source: 'portal', payAtVenue: false };
 
 const NUMBER_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 

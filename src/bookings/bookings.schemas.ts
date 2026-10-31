@@ -4,6 +4,7 @@ import { PaginationSchema } from '../common/schemas.js';
 import { CustomerNameSchema, PhoneSchema } from '../customers/customers.schemas.js';
 import { oneOf } from '../grounds/grounds.schemas.js';
 import { isoDate } from '../slots/slots.schemas.js';
+import { DUE_FILTERS } from './booking-due.js';
 
 export const BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed'] as const;
 export const BOOKING_PAYMENT_STATUSES = ['unpaid', 'partial', 'paid', 'refunded', 'failed'] as const;
@@ -48,8 +49,19 @@ export const ListBookingsQuerySchema = PaginationSchema.extend({
   /** Customer name or phone, or booking number. */
   search: z.string().trim().max(100).optional(),
   sort: oneOf(['slot', 'created'] as const, 'Sort').default('created'),
+  /** Money due: `overdue` (past its due date, or the slot started), `today` (due date today), or `any`. */
+  due: oneOf(DUE_FILTERS, 'Due').optional(),
 }).refine((v) => (v.from === undefined) === (v.to === undefined), { path: ['from'], message: 'Send both from and to' });
 export type ListBookingsQuery = z.infer<typeof ListBookingsQuerySchema>;
+
+export const BOOKING_EVENT_TYPES = ['created', 'payment_received', 'confirmed', 'cancelled', 'refunded', 'email_sent', 'completed'] as const;
+
+/** `type` may repeat (`?type=payment_received&type=refunded`). */
+export const ListBookingEventsQuerySchema = PaginationSchema.extend({
+  limit: z.coerce.number().int().min(1).max(50).default(10),
+  type: z.preprocess((v) => (v === undefined ? undefined : [v].flat()), z.array(oneOf(BOOKING_EVENT_TYPES, 'Type')).optional()),
+});
+export type ListBookingEventsQuery = z.infer<typeof ListBookingEventsQuerySchema>;
 
 export const UpcomingQuerySchema = z.object({ limit: z.coerce.number().int().min(1).max(20).default(5) });
 export type UpcomingQuery = z.infer<typeof UpcomingQuerySchema>;

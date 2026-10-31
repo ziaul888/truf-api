@@ -2,7 +2,7 @@
 
 This guide connects the Next.js frontend (`turf-admin`) to the real backend (`turf-api`, NestJS). It covers what the API offers today, how to connect it, and exactly what to change in the frontend.
 
-Today **authentication**, **staff user management**, **grounds**, **slots**, **bookings**, **checkout**, **customers** and **dashboard stats** are live in the API. Bookings, checkout, customers and the dashboard are documented in [`docs/frontend-bookings.md`](frontend-bookings.md), and the newest slot features (closures, history, bulk actions) in [`docs/frontend-slots-update.md`](frontend-slots-update.md).
+Today **authentication**, **staff user management**, **grounds**, **slots**, **bookings**, **checkout**, **customers** and **dashboard stats** are live in the API. Bookings, checkout, customers and the dashboard are documented in [`docs/frontend-bookings.md`](frontend-bookings.md), reports in [`docs/frontend-reports.md`](frontend-reports.md), the dashboard home in [`docs/frontend-dashboard.md`](frontend-dashboard.md), settings in [`docs/frontend-settings.md`](frontend-settings.md), and the newest slot features (closures, history, bulk actions) in [`docs/frontend-slots-update.md`](frontend-slots-update.md).
 
 ---
 
@@ -617,7 +617,7 @@ const res = await fetch(`${process.env.API_PROXY_TARGET}/api/v1/admin/auth/me`, 
 
 These endpoints don't exist in `turf-api` yet. Keep the current mock data for these pages until they ship:
 
-- Reports beyond the dashboard stats, PDF receipts, and a customer "My bookings" list (customers use the signed link in their email instead)
+- PDF receipts. (Reports are live: see [`docs/frontend-reports.md`](frontend-reports.md). My bookings and customer sign-in: see `docs/frontend-bookings.md` §2a.)
 
 The frontend's mock data differs from the API in places. When switching a page to the real API, map the fields like this:
 

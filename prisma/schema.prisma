@@ -138,6 +138,7 @@ model User {
   bookingEvents     BookingEvent[]
   closuresCreated Closure[] @relation("ClosureCreatedBy")
   closuresLifted  Closure[] @relation("ClosureLiftedBy")
+  settingsEvents  SettingsEvent[]
 }
 
 model Ground {
@@ -414,4 +415,52 @@ model BookingEvent {
   user    User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([bookingId])
+  @@index([createdAt])
+}
+
+/// One JSON document per settings section ("venue", "website", "notifications"), validated by its
+/// Zod schema on read and write. Slot settings keep their own typed table (SlotSettings).
+model SettingsSection {
+  key       String   @id
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
+/// Who changed which settings fields, and when (field names only, never values).
+model SettingsEvent {
+  id        String   @id @default(uuid())
+  /// "venue", "website", "notifications", "slots"
+  section   String
+  fields    String[]
+  /// "update", "upload", "reset"
+  action    String
+  userId    String?
+  createdAt DateTime @default(now())
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([section, createdAt])
+}
+
+/// Small internal state the app keeps between restarts (last Stripe webhook, last due digest).
+/// Not settings: never shown in a form or reset.
+model SystemState {
+  key       String   @id
+  data      Json
+  updatedAt DateTime @updatedAt
+}
+
+/// Every email the app tried to send, for the Notifications page's log.
+model EmailLog {
+  id        String   @id @default(uuid())
+  to        String
+  subject   String
+  /// e.g. "booking_confirmed", "staff_new_booking", "test"
+  kind      String
+  ok        Boolean
+  error     String?
+  bookingId String?
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
 }

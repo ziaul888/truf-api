@@ -4,7 +4,9 @@ import type { Request, Response } from 'express';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { CUSTOMER_COOKIE, clearCustomerCookieOptions, customerCookieOptions } from './customer-cookie.js';
 import { CurrentCustomer, CustomerAuthGuard } from './customer-auth.guard.js';
-import { SendCodeSchema, VerifyCodeSchema, type SendCodeInput, type VerifyCodeInput } from './customer-auth.schemas.js';
+import {
+  CustomerProfileSchema, SendCodeSchema, VerifyCodeSchema, type CustomerProfileInput, type SendCodeInput, type VerifyCodeInput,
+} from './customer-auth.schemas.js';
 import { CustomerAuthService } from './customer-auth.service.js';
 import type { CustomerSession } from './customer-auth.types.js';
 import { OtpThrottlerGuard } from './otp-throttler.guard.js';
@@ -28,10 +30,10 @@ export class CustomerAuthController {
   @HttpCode(200)
   @UseGuards(OtpThrottlerGuard)
   async verify(
-    @Body(new ZodValidationPipe(VerifyCodeSchema)) { phone, code }: VerifyCodeInput,
+    @Body(new ZodValidationPipe(VerifyCodeSchema)) { phone, code, name, email }: VerifyCodeInput,
     @Res({ passthrough: true }) res: Response,
   ): Promise<CustomerSession> {
-    const { session, token } = await this.auth.verify(phone, code);
+    const { session, token } = await this.auth.verify(phone, code, name && email ? { name, email } : undefined);
     res.cookie(CUSTOMER_COOKIE, token, customerCookieOptions());
     return session;
   }
@@ -40,6 +42,17 @@ export class CustomerAuthController {
   @UseGuards(CustomerAuthGuard)
   me(@CurrentCustomer() customer: CustomerSession): CustomerSession {
     return customer;
+  }
+
+  /** Completes sign-up for a new number (`needsProfile`), or changes name and email. */
+  @Post('profile')
+  @HttpCode(200)
+  @UseGuards(CustomerAuthGuard)
+  saveProfile(
+    @CurrentCustomer() customer: CustomerSession,
+    @Body(new ZodValidationPipe(CustomerProfileSchema)) body: CustomerProfileInput,
+  ): Promise<CustomerSession> {
+    return this.auth.saveProfile(customer.phone, body);
   }
 
   /** No guard: works with an expired token. Signs the customer out on every device. */

@@ -17,8 +17,14 @@ const customerRow = (overrides: Partial<Customer> = {}): Customer => ({
 });
 
 function setup(customer: Customer | null, codeOk = true) {
+  let row = customer;
   const prisma = {
-    customer: { findUnique: vi.fn(async () => customer), updateMany: vi.fn(async () => ({ count: 1 })) },
+    customer: {
+      findUnique: vi.fn(async () => row),
+      updateMany: vi.fn(async () => ({ count: 1 })),
+      create: vi.fn(async ({ data }: { data: Partial<Customer> }) => (row = customerRow({ id: 'c-new', ...data }))),
+      update: vi.fn(async ({ data }: { data: Partial<Customer> }) => (row = { ...row!, ...data })),
+    },
   };
   const sms = { send: vi.fn(async () => undefined), check: vi.fn(async () => codeOk) };
   const service = new CustomerAuthService(prisma as unknown as PrismaService, jwt, sms as unknown as SmsVerifyService);
@@ -36,14 +42,37 @@ describe('CustomerAuthService', () => {
     const { service } = setup(customerRow({ sessionVersion: 3 }));
     const { session, token } = await service.verify(PHONE, '123456');
 
-    expect(session).toEqual({ phone: PHONE, customerId: 'c-1', name: 'Rakib', email: 'r@x.test' });
+    expect(session).toEqual({ phone: PHONE, customerId: 'c-1', name: 'Rakib', email: 'r@x.test', needsProfile: false });
     expect(await jwt.verifyAsync(token)).toMatchObject({ sub: PHONE, ver: 3, aud: 'customer' });
   });
 
   it('signs in a number with no customer record yet', async () => {
     const { service } = setup(null);
     const { session } = await service.verify(PHONE, '123456');
-    expect(session).toEqual({ phone: PHONE, customerId: null, name: null, email: null });
+    expect(session).toEqual({ phone: PHONE, customerId: null, name: null, email: null, needsProfile: true });
+  });
+
+  it('creates the customer at sign-in when a new number gives name and email', async () => {
+    const { service, prisma } = setup(null);
+    const { session } = await service.verify(PHONE, '123456', { name: 'Nadia', email: 'n@x.test' });
+    expect(prisma.customer.create).toHaveBeenCalledWith({ data: { phone: PHONE, name: 'Nadia', email: 'n@x.test' } });
+    expect(session).toMatchObject({ customerId: 'c-new', name: 'Nadia', needsProfile: false });
+  });
+
+  it('does not overwrite a known customer from the sign-in form', async () => {
+    const { service, prisma } = setup(customerRow());
+    await service.verify(PHONE, '123456', { name: 'Someone else', email: 'x@x.test' });
+    expect(prisma.customer.update).not.toHaveBeenCalled();
+    expect(prisma.customer.create).not.toHaveBeenCalled();
+  });
+
+  it('saveProfile creates or updates the record for the verified phone', async () => {
+    const created = await setup(null).service.saveProfile(PHONE, { name: 'Nadia', email: 'n@x.test' });
+    expect(created).toMatchObject({ customerId: 'c-new', needsProfile: false });
+    const { service, prisma } = setup(customerRow());
+    const updated = await service.saveProfile(PHONE, { name: 'Rakib H', email: 'rh@x.test' });
+    expect(prisma.customer.update).toHaveBeenCalled();
+    expect(updated).toMatchObject({ customerId: 'c-1', name: 'Rakib H', email: 'rh@x.test' });
   });
 
   it('rejects a wrong or expired code', async () => {

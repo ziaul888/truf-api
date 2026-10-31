@@ -7,7 +7,9 @@ import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { upcomingWhere } from '../slots/slot-rules.js';
 import { toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
-import { bookingNotFound, confirmationUrl, isValidBookingToken } from './booking-rules.js';
+import { BookingNotifier } from './booking-notifier.service.js';
+import { loadOwing, matchesDue, type DueFilter } from './booking-due.js';
+import { ABANDONED_CHECKOUT, bookingNotFound, confirmationUrl, isValidBookingToken } from './booking-rules.js';
 import {
   BOOKING_DETAIL_INCLUDE, BOOKING_INCLUDE, customerCanCancel, customerCanPay, toBookingDetailDto, toBookingDto, toPublicBookingDto,
   type BookingDetailDto, type BookingDto, type PublicBookingDto,
@@ -16,9 +18,6 @@ import type { ListBookingsQuery, MyBookingsQuery } from './bookings.schemas.js';
 
 /** A signed-in customer's booking, with its signed link for view / cancel / pay. */
 export type MyBookingDto = PublicBookingDto & { confirmationUrl: string };
-
-/** Card checkouts that were never paid (hold lapsed or abandoned): noise in "My bookings". */
-const ABANDONED_CHECKOUT: Prisma.BookingWhereInput = { status: 'cancelled', source: 'portal', payAtVenue: false, confirmedAt: null };
 
 export type BookingCounts = Record<Exclude<BookingStatus, never>, number>;
 
@@ -30,11 +29,12 @@ export class BookingQueriesService {
     private readonly settings: SlotSettingsService,
     private readonly cancellation: BookingCancellationService,
     private readonly stripe: StripeService,
+    private readonly notifier: BookingNotifier,
   ) {}
 
   /** `counts` ignore the status filter, for the stat cards. */
   async list(q: ListBookingsQuery): Promise<Paginated<BookingDto> & { counts: BookingCounts }> {
-    const base = listWhere(q);
+    const base: Prisma.BookingWhereInput = { ...listWhere(q), ...(q.due && { id: { in: await this.owingIds(q.due) } }) };
     const where: Prisma.BookingWhereInput = { ...base, ...(q.status && { status: q.status }) };
     const orderBy: Prisma.BookingOrderByWithRelationInput[] = q.sort === 'slot'
       ? [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }]
@@ -47,6 +47,11 @@ export class BookingQueriesService {
     const counts: BookingCounts = { pending: 0, confirmed: 0, cancelled: 0, completed: 0 };
     for (const g of groups) counts[g.status] = (g._count as { _all: number })._all;
     return { data: rows.map(toBookingDto), total, page: q.page, limit: q.limit, counts };
+  }
+
+  private async owingIds(filter: DueFilter): Promise<string[]> {
+    const now = venueNow();
+    return (await loadOwing(this.prisma)).filter((b) => matchesDue(b, filter, now)).map((b) => b.id);
   }
 
   async get(id: string): Promise<BookingDetailDto> {
@@ -107,6 +112,7 @@ export class BookingQueriesService {
     if (!isValidBookingToken(id, token)) throw bookingNotFound();
     const booking = await this.prisma.booking.findUnique({ where: { id } });
     await this.cancellation.cancel(id, { actorId: null, refund: true, notify: true, byCustomer: true });
+    await this.notifier.customerCancelledToStaff(id);
     if (booking?.status === 'pending' && booking.stripeCheckoutSessionId) {
       await this.stripe.expireSession(booking.stripeCheckoutSessionId);
     }

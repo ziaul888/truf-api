@@ -66,6 +66,9 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 - Every booking state change goes through `BookingCancellationService` / `StaffBookingsService` actions and writes a `BookingEvent`; never PATCH a status directly
 - Cancellation = full refund to the original payment method: card via Stripe (502 `REFUND_FAILED` leaves the booking unchanged), cash and bank transfer marked refunded
 - Per-ground hourly price, plus an optional peak price for set hour ranges (`peakPrice` + `peakRanges`); a slot's price is summed hour by hour (`slotPrice` in `grounds/ground-schedule.ts`)
+- Money due is overdue once its `dueDate` has passed, or, with no due date, once the slot has started (completed bookings still count). Portal card checkouts still in Stripe are never "due" or "to confirm" (`booking-due.ts`)
+- Settings (`src/settings/`): venue, website and notification sections are JSON in `SettingsSection`, validated by their Zod schema; slot settings keep their typed table. Admin + manager read, admin writes; every change is audited in `SettingsEvent` (field names only). Secrets (Stripe, SendGrid, Twilio) stay in env and are only ever reported as configured/not. Confirmation and cancellation emails always send. No data wipe or backup endpoints
+- Reports (`/admin/reports`, admin + manager): revenue is dated by when money moved (payments received minus refunds, as the dashboard does), bookings by slot date; abandoned card checkouts never count; weeks start on Saturday; exports are CSV only
 - No other dynamic pricing, coupons, SMS (beyond sign-in codes), wallets, reviews or multi-branch
 
 ## Testing

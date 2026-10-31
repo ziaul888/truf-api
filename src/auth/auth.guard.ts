@@ -6,7 +6,7 @@ import { AUTH_COOKIE } from './auth-cookie.js';
 import { AuthService } from './auth.service.js';
 import type { AuthedRequest, AuthUser } from './auth.types.js';
 
-const ROLES_KEY = 'roles';
+export const ROLES_KEY = 'roles';
 
 /** Restricts a route or controller to the given roles. Use together with `AuthGuard`. */
 export const Roles = (...roles: UserRole[]) => SetMetadata(ROLES_KEY, roles);
