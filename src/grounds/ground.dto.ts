@@ -8,6 +8,7 @@ export interface PublicGroundDto {
   name: string;
   description: string | null;
   address: string | null;
+  mapUrl: string | null;
   hourlyPrice: number;
   peakPrice: number | null;
   peakRanges: PeakRange[];
@@ -43,6 +44,7 @@ export const toPublicGroundDto = (g: Ground): PublicGroundDto => ({
   name: g.name,
   description: g.description,
   address: g.address,
+  mapUrl: g.mapUrl,
   hourlyPrice: g.hourlyPrice,
   peakPrice: g.peakPrice,
   peakRanges: peakRangesOf(g),

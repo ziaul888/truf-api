@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PaginationSchema } from '../common/schemas.js';
+import { httpsUrl } from '../settings/settings-fields.js';
 
 export const SPORTS = ['football', 'cricket', 'badminton', 'tennis', 'hockey', 'basketball', 'other'] as const;
 export const FORMATS = ['4x4', '5x5', '6x6', '7x7', '8x8', '9x9', '11x11', 'net', 'court'] as const;
@@ -30,6 +31,8 @@ const GroundFields = z.object({
   name: z.string().trim().min(1, 'Enter a name').max(100),
   description: optionalText(2000),
   address: optionalText(300),
+  /** https map link; "" or null clears it. */
+  mapUrl: z.union([z.literal('').transform(() => null), httpsUrl.max(500, 'Keep it under 500 characters')]).nullable().optional(),
   /** Smallest currency unit, e.g. 1500 = 15.00. */
   hourlyPrice: z.number().int('Price must be a whole number of the smallest unit').min(1, 'Price must be above 0').max(10_000_000),
   openingHour: hour(0, 23, 'Opening hour'),

@@ -78,7 +78,7 @@ describe('Grounds (e2e)', () => {
       const res = await publicGet('', { search: PREFIX }).expect(200);
       expect(res.body.data).toMatchObject({ total: 1, page: 1, limit: 20 });
       expect(res.body.data.data[0]).toEqual({
-        id: activeId, name: `${PREFIX} Active`, description: null, address: null,
+        id: activeId, name: `${PREFIX} Active`, description: null, address: null, mapUrl: null,
         hourlyPrice: 1500, openingHour: 8, closingHour: 22,
         sport: 'football', format: '5x5', surface: null, dimensions: null, capacity: null,
         amenities: ['Parking'], availableDays: 'everyday', customDays: [],
@@ -176,6 +176,15 @@ describe('Grounds (e2e)', () => {
       await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ slotDurationMinutes: 90 }).expect(400);
 
       await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ peakPrice: null, peakRanges: [], slotDurationMinutes: 60 }).expect(200);
+
+      // Map link: https only, public, "" clears it.
+      const map = 'https://maps.app.goo.gl/abc123';
+      await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ mapUrl: map }).expect(200);
+      expect((await publicGet(`/${activeId}`).expect(200)).body.data.mapUrl).toBe(map);
+      const http = await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ mapUrl: 'http://maps.example.com' }).expect(400);
+      expect(http.body.details[0].field).toBe('mapUrl');
+      const cleared = await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ mapUrl: '' }).expect(200);
+      expect(cleared.body.data.mapUrl).toBeNull();
     });
   });
 

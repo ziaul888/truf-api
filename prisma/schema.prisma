@@ -146,6 +146,8 @@ model Ground {
   name        String
   description String?
   address     String?
+  /// https link to the ground on a map (e.g. Google Maps). Null falls back to the venue's map link.
+  mapUrl      String?
   /// Hourly price, smallest currency unit. The off-peak price when peakPrice is set.
   hourlyPrice Int
   /// Whole hours, 0–23. Slots run from openingHour up to closingHour.

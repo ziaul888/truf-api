@@ -10,6 +10,7 @@ const ground = (overrides: Partial<Ground> = {}): Ground => ({
   name: 'Green Arena',
   description: null,
   address: null,
+  mapUrl: null,
   hourlyPrice: 1500,
   openingHour: 8,
   closingHour: 22,

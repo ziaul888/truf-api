@@ -246,6 +246,7 @@ Notes for the UI:
 ```json
 {
   "id": "uuid", "name": "Green Arena", "description": null, "address": "Road 1, Dhaka",
+  "mapUrl": "https://maps.app.goo.gl/abc123",
   "hourlyPrice": 1500, "openingHour": 6, "closingHour": 23,
   "sport": "football", "format": "5x5", "surface": "outdoor-turf", "dimensions": "28×18 m",
   "capacity": 10, "amenities": ["Floodlights", "Parking"],
@@ -275,6 +276,7 @@ Notes for the UI:
 | `slotDurationMinutes` | `60` or `120` | Default `60`. Slots start at `openingHour` in steps of this length; a last slot that would run past closing is dropped (6–23 with 120 → 6, 8, …, 20) |
 | `photos` | string[] of URLs, read-only | Managed through the photo endpoints below. The first one is the cover. Use the URLs as they are, because they go through the `/api/v1` proxy |
 | `description`, `address` | string | Optional, max 2000 and 300; `null` when empty |
+| `mapUrl` | string | Optional https map link (for example a Google Maps share link), max 500. `""` or `null` clears it. `400` with `field: "mapUrl"` for anything else. On the portal, open it from "Directions"; when it's `null`, fall back to the venue's `mapUrl`, then to a search link built from the address |
 
 The **admin** version also has:
 
