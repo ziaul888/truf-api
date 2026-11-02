@@ -23,6 +23,8 @@ const EnvSchema = z.object({
   JWT_TTL_HOURS: z.coerce.number().int().positive().max(720).default(8),
   /** Folder for uploaded files (ground photos), served at /api/v1/uploads. */
   UPLOAD_DIR: z.string().min(1).default('uploads'),
+  /** Proxies in front of the API (Render: 1). Rate limits then key on the client's IP, not the proxy's. */
+  TRUST_PROXY_HOPS: z.coerce.number().int().min(0).max(5).default(0),
   /** IANA timezone of the venue. Slot dates and hours, "today" and "already started" use it. */
   VENUE_TIMEZONE: z
     .string()

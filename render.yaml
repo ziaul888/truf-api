@@ -1,0 +1,30 @@
+# Render Blueprint: New → Blueprint → pick this repo. Values marked sync: false are asked for on first deploy.
+services:
+  - type: web
+    name: turf-api
+    runtime: docker
+    plan: free
+    healthCheckPath: /api/v1/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: TRUST_PROXY_HOPS
+        value: '1'
+      - key: JWT_SECRET
+        generateValue: true
+      # Neon connection string (direct, not "-pooler"), ending in ?sslmode=require
+      - key: DATABASE_URL
+        sync: false
+      # The frontend's URL, e.g. https://turf-admin.vercel.app
+      - key: CORS_ORIGINS
+        sync: false
+      - key: PUBLIC_APP_URL
+        sync: false
+      - key: VENUE_TIMEZONE
+        value: Asia/Dhaka
+      - key: CURRENCY
+        value: bdt
+      # Free plan has no disk: uploaded photos are lost on every deploy or restart.
+      # On a paid plan, add a disk mounted at /data and set UPLOAD_DIR=/data/uploads.
+      - key: UPLOAD_DIR
+        value: uploads
