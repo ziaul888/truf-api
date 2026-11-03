@@ -15,7 +15,7 @@ const input = {
   paymentMethod: 'card' as 'card' | 'cash',
 };
 
-function setup({ slot = slotRow() as object | null, ground = { id: 'g-1', name: 'Arena' } as object | null, held = 1, cash = true, existing = null as object | null } = {}) {
+function setup({ slot = slotRow() as object | null, ground = { id: 'g-1', name: 'Arena', availableDays: 'everyday', customDays: [] } as object | null, held = 1, cash = true, existing = null as object | null } = {}) {
   const tx = {
     slot: { updateMany: vi.fn(async (_args: { data: object }) => ({ count: held })) },
     customer: { findUnique: vi.fn(async () => null), create: vi.fn(async () => ({ id: 'c-1' })) },
@@ -65,9 +65,17 @@ describe('CheckoutService', () => {
     ['a slot taken a moment ago', { held: 0 }, 'SLOT_NOT_AVAILABLE'],
     ['a slot inside the cutoff', { slot: slotRow({ startHour: 11 }) }, 'OUTSIDE_BOOKING_WINDOW'],
     ['a started slot', { slot: slotRow({ startHour: 9 }) }, 'SLOT_IN_PAST'],
+    ['a free slot on a day the ground is closed', { ground: { id: 'g-1', name: 'Arena', availableDays: 'weekends', customDays: [] } }, 'GROUND_CLOSED'],
   ])('refuses %s', async (_label, options, code) => {
     const date = 'slot' in options && options.slot && (options.slot as { startHour: number }).startHour < 18 ? '2026-10-28' : input.date;
     await expect(setup(options as never).service.start({ ...input, date })).rejects.toMatchObject({ code });
+  });
+
+  it.each(['card', 'cash'] as const)('takes nothing for a %s checkout on a closed day', async (paymentMethod) => {
+    const { service, tx, stripe } = setup({ ground: { id: 'g-1', name: 'Arena', availableDays: 'custom', customDays: ['fri'] } });
+    await expect(service.start({ ...input, paymentMethod })).rejects.toMatchObject({ status: 400, code: 'GROUND_CLOSED' });
+    expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
   });
 
   it('books a signed-in customer on their verified phone, not the one typed in', async () => {

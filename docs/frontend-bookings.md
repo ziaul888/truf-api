@@ -88,6 +88,7 @@ How they move together:
   - `409 SLOT_NOT_AVAILABLE`: just taken. Refresh the picker.
   - `400 OUTSIDE_BOOKING_WINDOW`: beyond the booking window, or within 2 hours of the start.
   - `400 SLOT_IN_PAST`.
+  - `400 GROUND_CLOSED`: the ground doesn't open that day.
   - `404 GROUND_NOT_FOUND`.
   - `502 PAYMENT_PROVIDER_ERROR`: Stripe is unavailable or not configured. Show `error`.
 - **Return URLs:**
@@ -252,9 +253,9 @@ Optional. Guests can still book, and signed links keep working. The session is a
   - `partial`: confirmed and partial. `amount` is the advance and must be below the total.
   - `none`: pending and unpaid.
 - **`method`** is required unless `type` is `none`.
-- **Pick the slot** from `GET /admin/slots?groundId&date&status=available`. The price is the slot's `price`, with no service fee.
+- **Pick the slot** from `GET /admin/slots?groundId&date&status=available&openDaysOnly=true`. The price is the slot's `price`, with no service fee.
 - **The customer** is found or created by phone, and staff edits update the name and email. Send `customer.id` to book for a known customer.
-- **Errors:** `409 SLOT_NOT_AVAILABLE`, `400 SLOT_IN_PAST`, `400 PAYMENT_EXCEEDS_DUE`, `404 CUSTOMER_NOT_FOUND`.
+- **Errors:** `409 SLOT_NOT_AVAILABLE`, `400 SLOT_IN_PAST`, `400 GROUND_CLOSED` (a day the ground doesn't open, with no staff override), `400 PAYMENT_EXCEEDS_DUE`, `404 CUSTOMER_NOT_FOUND`.
 
 ---
 
@@ -331,6 +332,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | 404 | `CUSTOMER_NOT_FOUND` | Unknown customer |
 | 409 | `SLOT_NOT_AVAILABLE` | Slot held, booked or blocked, or just taken |
 | 400 | `OUTSIDE_BOOKING_WINDOW` | Portal: beyond `advanceBookingDays`, or inside the cutoff |
+| 400 | `GROUND_CLOSED` | Portal and staff: a new booking on a day the ground doesn't open |
 | 409 | `BOOKING_NOT_PENDING` | Confirming a booking that isn't pending, a portal booking, or resuming payment after the hold |
 | 409 | `BOOKING_NOT_CONFIRMED` | Resending a confirmation for a booking that isn't confirmed |
 | 409 | `BOOKING_ALREADY_CANCELLED` | Cancelling twice, or paying a cancelled booking |

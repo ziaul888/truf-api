@@ -8,6 +8,15 @@ export const groundNotFound = () => new AppError('Ground not found', 404, 'GROUN
 export const slotInPast = () => new AppError('This slot has already started', 400, 'SLOT_IN_PAST');
 export const groundClosed = (message = 'The ground is closed on that day') => new AppError(message, 400, 'GROUND_CLOSED');
 
+/** Whether the ground opens on that date. About the day alone: an inactive ground still has its days. */
+export const isOpenDay = ({ availableDays, customDays }: Omit<GroundDays, 'isActive'>, date: IsoDate) =>
+  isOpenOn({ isActive: true, availableDays, customDays }, weekdayOf(date));
+
+/** New bookings only: existing ones on a closed day stay honoured. Each booking path has its own rule for inactive grounds. */
+export function assertDayOpen(ground: Omit<GroundDays, 'isActive'>, date: IsoDate) {
+  if (!isOpenDay(ground, date)) throw groundClosed();
+}
+
 /** `from` must not be after `to`, and the range (both ends included) at most `maxDays` long. */
 export function assertRange(from: IsoDate, to: IsoDate, maxDays: number) {
   if (from > to) throw new AppError('Start date must not be after end date', 400, 'INVALID_DATE_RANGE');
@@ -75,7 +84,7 @@ export const UNBLOCK_DATA = {
 
 /** One audit row per slot; keeps ground, date and hour so it outlives the slot. */
 export const eventRows = (
-  slots: Slot[], action: SlotEventAction, userId: string, block?: { reason: BlockReason; note?: string | null },
+  slots: Slot[], action: SlotEventAction, userId: string | null, block?: { reason: BlockReason; note?: string | null },
 ): Prisma.SlotEventCreateManyInput[] =>
   slots.map((s) => ({
     slotId: s.id, groundId: s.groundId, date: s.date, startHour: s.startHour, action, userId,

@@ -5,14 +5,8 @@ import type { Ground, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotGeneratorService, type SlotSync } from '../slots/slot-generator.service.js';
 import { peakRangesOf, toGroundDto, toPublicGroundDto, type GroundDto, type PublicGroundDto } from './ground.dto.js';
-import { assertHours, assertPeakPricing, resolveDays, VISIBLE_GROUND as VISIBLE } from './ground-rules.js';
+import { assertHours, assertPeakPricing, resolveDays, scheduleChanged, VISIBLE_GROUND as VISIBLE } from './ground-rules.js';
 import type { AdminListGroundsQuery, CreateGroundInput, ListGroundsQuery, UpdateGroundInput } from './grounds.schemas.js';
-
-/** Fields that change which slots a ground has, or what they cost. Editing any of them resyncs future free slots. */
-const SCHEDULE_FIELDS = [
-  'openingHour', 'closingHour', 'slotDurationMinutes', 'hourlyPrice', 'peakPrice', 'peakRanges',
-  'availableDays', 'customDays', 'isActive',
-] as const satisfies (keyof UpdateGroundInput)[];
 
 const notFound = () => new AppError('Ground not found', 404, 'GROUND_NOT_FOUND');
 
@@ -55,7 +49,7 @@ export class GroundsService {
 
   /**
    * No delete: deactivate instead (`isActive: false`) so bookings keep their ground.
-   * Schedule changes return `slotSync`: how many future free slots were replaced and how many booked/blocked ones kept.
+   * Saves that really change the schedule return `slotSync`: how many future free slots were replaced and how many booked/blocked ones kept.
    */
   async update(id: string, input: UpdateGroundInput): Promise<GroundDto & { slotSync?: SlotSync }> {
     const ground = await this.findOrThrow(id);
@@ -69,13 +63,16 @@ export class GroundsService {
       peakRanges: input.peakRanges ?? peakRangesOf(ground),
     });
 
-    const data: Prisma.GroundUpdateInput = { ...input };
+    const data: UpdateGroundInput = { ...input };
     if (input.availableDays !== undefined || input.customDays !== undefined) {
       Object.assign(data, resolveDays(input.availableDays ?? ground.availableDays, input.customDays ?? ground.customDays));
     }
-    const updated = toGroundDto(await this.prisma.ground.update({ where: { id }, data }));
-    if (!SCHEDULE_FIELDS.some((field) => input[field] !== undefined)) return updated;
-    return { ...updated, slotSync: await this.slots.resync(id) };
+    if (!scheduleChanged(ground, data)) return toGroundDto(await this.prisma.ground.update({ where: { id }, data }));
+    // Together, so a failed resync leaves the old schedule stored and a retry still sees the change.
+    return this.prisma.$transaction(async (tx) => {
+      const updated = toGroundDto(await tx.ground.update({ where: { id }, data }));
+      return { ...updated, slotSync: await this.slots.resync(tx, id) };
+    }, { timeout: 20_000 });
   }
 
   private async findPage(where: Prisma.GroundWhereInput, page: number, limit: number) {

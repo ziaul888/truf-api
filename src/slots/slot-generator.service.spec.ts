@@ -1,4 +1,5 @@
-import type { Ground } from '../generated/prisma/client.js';
+import { Logger } from '@nestjs/common';
+import type { Ground, Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { SlotGeneratorService } from './slot-generator.service.js';
 import { DEFAULT_SLOT_SETTINGS, SlotSettingsService } from './slot-settings.service.js';
@@ -23,8 +24,8 @@ function setup(found: Ground | null = ground(), settings = DEFAULT_SLOT_SETTINGS
       createMany: vi.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length })),
     },
   };
-  const settingsService = { get: vi.fn(async () => settings) } as unknown as SlotSettingsService;
-  return { service: new SlotGeneratorService(prisma as unknown as PrismaService, settingsService), prisma };
+  const settingsService = { get: vi.fn(async (_db?: unknown) => settings) };
+  return { service: new SlotGeneratorService(prisma as unknown as PrismaService, settingsService as unknown as SlotSettingsService), prisma, settings: settingsService };
 }
 
 beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
@@ -59,7 +60,7 @@ describe('SlotGeneratorService.generate', () => {
 
   it.each([
     ['a past start', { fromDate: '2026-10-27' }, ground(), 'INVALID_DATE_RANGE'],
-    ['a range with no open day', {}, ground({ availableDays: 'weekends' }), 'GROUND_CLOSED'],
+    ['a range with no open day', { toDate: '2026-10-29' }, ground({ availableDays: 'weekends' }), 'GROUND_CLOSED'],
     ['an inactive ground', {}, ground({ isActive: false }), 'GROUND_CLOSED'],
     ['an unknown ground', {}, null, 'GROUND_NOT_FOUND'],
   ])('rejects %s', async (_label, change, found, code) => {
@@ -78,6 +79,77 @@ describe('SlotGeneratorService.fillWindow', () => {
     const { service, prisma } = setup(ground(), { ...DEFAULT_SLOT_SETTINGS, autoGenerate: false });
     await expect(service.fillWindow()).resolves.toBe(0);
     expect(prisma.ground.findMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('SlotGeneratorService.resync', () => {
+  it('does all its reads and writes on the transaction it is given', async () => {
+    const tx = {
+      closure: { findMany: vi.fn(async () => []) },
+      ground: { findUniqueOrThrow: vi.fn(async () => ground()) },
+      slot: {
+        findMany: vi.fn(async () => []),
+        deleteMany: vi.fn(async () => ({ count: 2 })),
+        createMany: vi.fn(async ({ data }: { data: unknown[] }) => ({ count: data.length })),
+        count: vi.fn(async () => 9),
+      },
+    };
+    const { service, prisma, settings } = setup(ground(), { ...DEFAULT_SLOT_SETTINGS, advanceBookingDays: 2 });
+    await expect(service.resync(tx as unknown as Prisma.TransactionClient, 'g-1')).resolves.toEqual({ removed: 2, generated: 9, kept: 0 });
+    expect(settings.get).toHaveBeenCalledWith(tx);
+    expect(prisma.slot.createMany).not.toHaveBeenCalled();
+  });
+});
+
+describe('SlotGeneratorService.retireClosedDays', () => {
+  const thursday = new Date('2026-10-29T00:00:00Z');
+
+  function retireSetup(failing: string[]) {
+    const grounds = ['g-1', 'g-2', 'g-3'].map((id) => ground({ id, availableDays: 'weekends' }));
+    const tx = {
+      slot: {
+        findMany: vi.fn(async ({ where }: { where: { groundId: string } }) => {
+          if (failing.includes(where.groundId)) throw new Error(`boom ${where.groundId}`);
+          return [{ id: `free-${where.groundId}`, date: thursday, _count: { bookings: 0 } }];
+        }),
+        deleteMany: vi.fn(async () => ({ count: 1 })),
+        updateManyAndReturn: vi.fn(async () => []),
+      },
+      slotEvent: { createMany: vi.fn(async () => ({ count: 0 })) },
+    };
+    const prisma = {
+      ground: { findMany: vi.fn(async (_args: object) => grounds) },
+      $transaction: vi.fn(async (work: (t: typeof tx) => unknown) => work(tx)),
+    };
+    const settings = { get: vi.fn() } as unknown as SlotSettingsService;
+    return { service: new SlotGeneratorService(prisma as unknown as PrismaService, settings), tx, prisma };
+  }
+
+  beforeEach(() => vi.spyOn(Logger.prototype, 'error').mockImplementation(() => undefined));
+  afterEach(() => vi.restoreAllMocks());
+
+  it('adds up every ground when all succeed', async () => {
+    await expect(retireSetup([]).service.retireClosedDays()).resolves.toEqual({ removed: 3, blocked: 0 });
+  });
+
+  it('covers every weekends and weekdays ground by default, or only the ones named', async () => {
+    const { service, prisma } = retireSetup([]);
+    const days = { availableDays: { in: ['weekends', 'weekdays'] } };
+    await service.retireClosedDays();
+    expect(prisma.ground.findMany).toHaveBeenLastCalledWith({ where: days });
+    await service.retireClosedDays(['g-2']);
+    expect(prisma.ground.findMany).toHaveBeenLastCalledWith({ where: { ...days, id: { in: ['g-2'] } } });
+  });
+
+  it('carries on past a failing ground, then throws with the totals and the first cause', async () => {
+    const { service, tx } = retireSetup(['g-1']);
+    const err = await service.retireClosedDays().catch((e: Error) => e) as Error;
+
+    expect(tx.slot.findMany).toHaveBeenCalledTimes(3);
+    expect(tx.slot.deleteMany).toHaveBeenCalledTimes(2);
+    expect(err.message).toBe('Closed-day cleanup failed for 1 of 3 grounds (2 free slots removed, 0 blocked)');
+    expect(err.cause).toMatchObject({ message: 'boom g-1' });
+    expect(Logger.prototype.error).toHaveBeenCalledWith('Closed-day cleanup failed for ground g-1', expect.any(String));
   });
 });
 

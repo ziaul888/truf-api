@@ -4,7 +4,7 @@ import { env } from '../config/env.js';
 import { upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import type { PaymentStatus, Prisma, Slot } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { slotInPast, slotNotFound } from '../slots/slot-rules.js';
+import { assertDayOpen, slotInPast, slotNotFound } from '../slots/slot-rules.js';
 import { fromDbDate, hasStarted, toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
@@ -29,10 +29,13 @@ export class StaffBookingsService {
 
   /** Paid in full or in part → confirmed; not paid → pending (the review queue). The slot is booked either way. */
   async create(actorId: string, input: CreateStaffBookingInput): Promise<BookingDto> {
-    const slot = await this.prisma.slot.findUnique({ where: { id: input.slotId } });
+    const slot = await this.prisma.slot.findUnique({
+      where: { id: input.slotId }, include: { ground: { select: { availableDays: true, customDays: true } } },
+    });
     if (!slot) throw slotNotFound();
     if (hasStarted(venueNow(), fromDbDate(slot.date), slot.startHour)) throw slotInPast();
     if (slot.status !== 'available') throw slotNotAvailable();
+    assertDayOpen(slot.ground, fromDbDate(slot.date));
     const paid = paymentAmount(input.payment, slot.price);
     if (input.customer.id && !(await this.prisma.customer.findFirst({ where: { id: input.customer.id, deletedAt: null } }))) {
       throw new AppError('Customer not found', 404, 'CUSTOMER_NOT_FOUND');

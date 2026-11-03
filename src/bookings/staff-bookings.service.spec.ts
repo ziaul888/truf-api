@@ -6,12 +6,15 @@ import { StaffBookingsService } from './staff-bookings.service.js';
 // 04:00 UTC = 10:00 in Dhaka, Wed 28 Oct 2026.
 const NOW = new Date('2026-10-28T04:00:00Z');
 
-const slot = { id: 's-1', groundId: 'g-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18, price: 1000, status: 'available' };
+const slot = {
+  id: 's-1', groundId: 'g-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18, price: 1000, status: 'available',
+  ground: { availableDays: 'everyday', customDays: [] },
+};
 const bookingRow = (overrides: object = {}) => ({
   id: 'b-1', status: 'pending', source: 'staff', total: 1000, payments: [{ amount: 400, status: 'succeeded' }], ...overrides,
 });
 
-function setup(booking: object = bookingRow()) {
+function setup(booking: object = bookingRow(), foundSlot: object = slot) {
   const tx = {
     slot: { updateMany: vi.fn(async () => ({ count: 1 })) },
     customer: { findUnique: vi.fn(async () => null), create: vi.fn(async () => ({ id: 'c-1' })) },
@@ -20,7 +23,7 @@ function setup(booking: object = bookingRow()) {
     bookingEvent: { create: vi.fn(async () => ({})) },
   };
   const prisma = {
-    slot: { findUnique: vi.fn(async () => slot) },
+    slot: { findUnique: vi.fn(async () => foundSlot) },
     customer: { findFirst: vi.fn(async () => ({ id: 'c-1' })) },
     booking: { findFirst: vi.fn(async () => booking), findUniqueOrThrow: vi.fn(async () => { throw new Error('dto not needed'); }) },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -58,6 +61,14 @@ describe('StaffBookingsService', () => {
   it('refuses an advance that covers the whole price', async () => {
     await expect(setup().service.create('u-1', { slotId: 's-1', customer, payment: { type: 'partial', method: 'cash', amount: 1000 } }))
       .rejects.toMatchObject({ status: 400, code: 'PAYMENT_EXCEEDS_DUE' });
+  });
+
+  it('refuses a free slot on a day the ground is closed, and takes nothing', async () => {
+    const { service, tx, notifier } = setup(bookingRow(), { ...slot, ground: { availableDays: 'weekends', customDays: [] } });
+    await expect(service.create('u-1', { slotId: 's-1', customer, payment: { type: 'none' } }))
+      .rejects.toMatchObject({ status: 400, code: 'GROUND_CLOSED' });
+    expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    expect(notifier.confirmed).not.toHaveBeenCalled();
   });
 
   it('refuses a payment above what is due', async () => {

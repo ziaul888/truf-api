@@ -78,7 +78,7 @@ describe('Grounds (e2e)', () => {
       const res = await publicGet('', { search: PREFIX }).expect(200);
       expect(res.body.data).toMatchObject({ total: 1, page: 1, limit: 20 });
       expect(res.body.data.data[0]).toEqual({
-        id: activeId, name: `${PREFIX} Active`, description: null, address: null, mapUrl: null,
+        id: activeId, name: `${PREFIX} Active`, description: null, rules: null, address: null, mapUrl: null,
         hourlyPrice: 1500, openingHour: 8, closingHour: 22,
         sport: 'football', format: '5x5', surface: null, dimensions: null, capacity: null,
         amenities: ['Parking'], availableDays: 'everyday', customDays: [],

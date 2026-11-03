@@ -22,7 +22,7 @@ const today = venueNow().date;
 const d1 = addDays(today, 2);
 const d2 = addDays(today, 3);
 const d3 = addDays(today, 4);
-/** The next Monday at least 2 days out; Mon–Fri of that week has no weekend day. */
+/** The next Monday at least 2 days out; Mon–Thu of that week has no weekend day. */
 const monday = (() => {
   let d = d1;
   while (weekdayOf(d) !== 'mon') d = addDays(d, 1);
@@ -119,7 +119,7 @@ describe('Slots (e2e)', () => {
       ['overwriting', () => ({ ...body, groundId, skipExisting: false }), 'VALIDATION_FAILED'],
       ['a past start', () => ({ ...body, groundId, fromDate: addDays(today, -1) }), 'INVALID_DATE_RANGE'],
       ['over 90 days', () => ({ ...body, groundId, toDate: addDays(d1, 90) }), 'INVALID_DATE_RANGE'],
-      ['a closed range', () => ({ groundId: weekendId, fromDate: monday, toDate: addDays(monday, 4) }), 'GROUND_CLOSED'],
+      ['a closed range', () => ({ groundId: weekendId, fromDate: monday, toDate: addDays(monday, 3) }), 'GROUND_CLOSED'],
     ])('rejects %s', async (_label, send, code) => {
       const agent = await signIn(admin);
       const res = await agent.post(`${SLOTS}/generate`).send(send()).expect(400);

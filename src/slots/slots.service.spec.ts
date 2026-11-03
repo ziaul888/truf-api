@@ -1,6 +1,7 @@
 import { AppError } from '../common/app-error.js';
 import type { Ground, Slot } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
+import { ListSlotsQuerySchema } from './slots.schemas.js';
 import type { SlotSettingsService } from './slot-settings.service.js';
 import { DEFAULT_SLOT_SETTINGS } from './slot-settings.service.js';
 import { SlotsService } from './slots.service.js';
@@ -22,10 +23,10 @@ const ground = {
 
 function setup(slots: Slot[], foundGround: Ground | null = ground, closures: object[] = []) {
   const prisma = {
-    ground: { findFirst: vi.fn(async () => foundGround) },
+    ground: { findFirst: vi.fn(async () => foundGround), findUnique: vi.fn(async () => foundGround) },
     closure: { findMany: vi.fn(async () => closures) },
     slot: {
-      findMany: vi.fn(async () => slots.map((s) => ({ ...s, ground: { name: 'Arena' }, blockedBy: null, bookings: [] }))),
+      findMany: vi.fn(async (_args: { where: object }) => slots.map((s) => ({ ...s, ground: { name: 'Arena' }, blockedBy: null, bookings: [] }))),
       findUnique: vi.fn(async () => null),
       count: vi.fn(async () => slots.length),
       groupBy: vi.fn(async (_args: { where: object }) => [{ status: 'available', _count: { _all: 3 } }, { status: 'blocked', _count: { _all: 1 } }]),
@@ -94,6 +95,49 @@ describe('SlotsService — admin', () => {
     expect(prisma.slot.groupBy.mock.calls[0]![0].where).not.toHaveProperty('status');
     expect(result.stats).toEqual({ total: 4, available: 3, held: 0, booked: 0, blocked: 1 });
     expect(result.data[0]).toMatchObject({ groundName: 'Arena', date: '2026-10-28', endHour: 19, booking: null, block: { reason: 'event' } });
+  });
+
+  describe('openDaysOnly', () => {
+    const list = { page: 1, limit: 20, groundId: 'g-1', from: '2026-10-29', to: '2026-10-31', status: 'available' as const };
+    const weekends = { ...ground, availableDays: 'weekends' } as Ground;
+
+    it('keeps only the days the ground opens, in the list and its total, but not the stats', async () => {
+      const { service, prisma } = setup([], weekends);
+      await service.list({ ...list, openDaysOnly: true });
+
+      const where = { groundId: 'g-1', status: 'available', date: { in: [day('2026-10-30'), day('2026-10-31')] } };
+      expect(prisma.slot.findMany.mock.calls[0]![0].where).toEqual(where);
+      expect(prisma.slot.groupBy.mock.calls[0]![0].where).toEqual({ groundId: 'g-1', date: { gte: day('2026-10-29'), lte: day('2026-10-31') } });
+    });
+
+    it('goes by the days alone for an inactive ground', async () => {
+      const { service, prisma } = setup([], { ...weekends, isActive: false });
+      await service.list({ ...list, openDaysOnly: true });
+      expect(prisma.slot.findMany.mock.calls[0]![0].where).toMatchObject({ date: { in: [day('2026-10-30'), day('2026-10-31')] } });
+    });
+
+    it('does not filter by day unless asked', async () => {
+      const { service, prisma } = setup([], weekends);
+      await service.list(list);
+      expect(prisma.ground.findUnique).not.toHaveBeenCalled();
+      expect(prisma.slot.findMany.mock.calls[0]![0].where).toMatchObject({ date: { gte: day('2026-10-29'), lte: day('2026-10-31') } });
+    });
+
+    const groundId = '3f1c9a54-7f43-4a55-9c8a-0d6f1e2b3c4d';
+
+    it('is parsed from the query string, and off unless "true"', () => {
+      expect(ListSlotsQuerySchema.parse({ groundId, date: '2026-10-29', openDaysOnly: 'true' })).toMatchObject({ openDaysOnly: true, from: '2026-10-29' });
+      expect(ListSlotsQuerySchema.parse({ openDaysOnly: 'false' })).toMatchObject({ openDaysOnly: false });
+      expect(ListSlotsQuerySchema.parse({})).not.toHaveProperty('openDaysOnly');
+    });
+
+    it.each([
+      ['an unknown value', { groundId, date: '2026-10-29', openDaysOnly: 'yes' }],
+      ['no ground', { date: '2026-10-29', openDaysOnly: 'true' }],
+      ['no dates', { groundId, openDaysOnly: 'true' }],
+    ])('rejects %s', (_label, query) => {
+      expect(ListSlotsQuerySchema.safeParse(query).error?.issues[0]?.path).toEqual(['openDaysOnly']);
+    });
   });
 
   it('404s for an unknown slot', async () => {

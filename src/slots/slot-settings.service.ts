@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import type { SlotSettings as SlotSettingsRow } from '../generated/prisma/client.js';
+import type { Prisma, SlotSettings as SlotSettingsRow } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { SlotSettings, UpdateSlotSettingsInput } from './slots.schemas.js';
 
@@ -33,8 +33,9 @@ const toSettings = (row: SlotSettingsRow): SlotSettings => ({
 export class SlotSettingsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async get(): Promise<SlotSettings> {
-    const row = await this.prisma.slotSettings.findUnique({ where: { id: SETTINGS_ID } });
+  /** Pass `db` to read inside a transaction, on its connection. */
+  async get(db: PrismaService | Prisma.TransactionClient = this.prisma): Promise<SlotSettings> {
+    const row = await db.slotSettings.findUnique({ where: { id: SETTINGS_ID } });
     return row ? toSettings(row) : DEFAULT_SLOT_SETTINGS;
   }
 

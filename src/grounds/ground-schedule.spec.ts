@@ -44,10 +44,15 @@ describe('isOpenOn', () => {
   const days = (availableDays: 'everyday' | 'weekdays' | 'weekends' | 'custom', customDays: ('mon' | 'sat')[] = []) =>
     ({ isActive: true, availableDays, customDays });
 
-  it('treats Sat–Sun as the weekend', () => {
+  it('treats Fri–Sat as the weekend and Sun–Thu as weekdays', () => {
+    expect(isOpenOn(days('weekends'), 'fri')).toBe(true);
     expect(isOpenOn(days('weekends'), 'sat')).toBe(true);
-    expect(isOpenOn(days('weekends'), 'fri')).toBe(false);
-    expect(isOpenOn(days('weekdays'), 'fri')).toBe(true);
+    expect(isOpenOn(days('weekends'), 'sun')).toBe(false);
+    expect(isOpenOn(days('weekends'), 'thu')).toBe(false);
+    expect(isOpenOn(days('weekdays'), 'sun')).toBe(true);
+    expect(isOpenOn(days('weekdays'), 'thu')).toBe(true);
+    expect(isOpenOn(days('weekdays'), 'fri')).toBe(false);
+    expect(isOpenOn(days('weekdays'), 'sat')).toBe(false);
     expect(isOpenOn(days('custom', ['mon']), 'mon')).toBe(true);
     expect(isOpenOn({ ...days('everyday'), isActive: false }, 'mon')).toBe(false);
   });

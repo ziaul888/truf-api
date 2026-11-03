@@ -9,6 +9,7 @@ const ground = (overrides: Partial<Ground> = {}): Ground => ({
   id: 'g-1',
   name: 'Green Arena',
   description: null,
+  rules: null,
   address: null,
   mapUrl: null,
   hourlyPrice: 1500,
@@ -44,7 +45,7 @@ function setup(existing: Ground | null = ground()) {
       create: vi.fn(async ({ data }) => ground({ ...data, id: 'new-id' })),
       update: vi.fn(async ({ data }) => ({ ...existing!, ...data })),
     },
-    $transaction: vi.fn((ops: Promise<unknown>[]) => Promise.all(ops)),
+    $transaction: vi.fn((ops: Promise<unknown>[] | ((tx: unknown) => unknown)) => (typeof ops === 'function' ? ops(prisma) : Promise.all(ops))),
   };
   const slots = {
     fillWindow: vi.fn(async () => 0),
@@ -146,7 +147,7 @@ describe('slot sync', () => {
   it('resyncs slots when the schedule changes, and reports it', async () => {
     const { service, slots } = setup();
     await expect(service.update('g-1', { slotDurationMinutes: 120 })).resolves.toMatchObject({ slotSync: { kept: 0 } });
-    expect(slots.resync).toHaveBeenCalledWith('g-1');
+    expect(slots.resync).toHaveBeenCalledWith(expect.anything(), 'g-1');
   });
 
   it('leaves slots alone for other edits', async () => {
@@ -154,6 +155,65 @@ describe('slot sync', () => {
     const dto = await service.update('g-1', { name: 'Renamed' });
     expect(slots.resync).not.toHaveBeenCalled();
     expect(dto).not.toHaveProperty('slotSync');
+  });
+
+  it('leaves slots alone when a save resends the stored schedule', async () => {
+    const stored = ground({
+      availableDays: 'custom', customDays: ['sat', 'fri'], peakPrice: 2500,
+      peakRanges: [{ toHour: 22, fromHour: 17 }, { toHour: 12, fromHour: 10 }] as unknown as Ground['peakRanges'],
+    });
+    const { service, slots } = setup(stored);
+    const dto = await service.update('g-1', {
+      openingHour: 8, closingHour: 22, hourlyPrice: 1500, slotDurationMinutes: 60, isActive: true, peakPrice: 2500,
+      availableDays: 'custom', customDays: ['fri', 'sat'],
+      peakRanges: [{ fromHour: 10, toHour: 12 }, { fromHour: 17, toHour: 22 }],
+    });
+    expect(slots.resync).not.toHaveBeenCalled();
+    expect(dto).not.toHaveProperty('slotSync');
+  });
+
+  it.each([
+    ['a peak range', { peakPrice: 2500, peakRanges: [{ fromHour: 17, toHour: 21 }] }],
+    ['the peak price', { peakPrice: 2600 }],
+    ['the days', { availableDays: 'weekends' as const }],
+  ])('resyncs when %s really changes', async (_label, change) => {
+    const { service, slots } = setup(ground({ peakPrice: 2500, peakRanges: [{ fromHour: 17, toHour: 22 }] as unknown as Ground['peakRanges'] }));
+    await service.update('g-1', change);
+    expect(slots.resync).toHaveBeenCalledWith(expect.anything(), 'g-1');
+  });
+
+  describe('when the resync fails', () => {
+    /** A database with real commit and rollback: a transaction's writes count only if its callback finishes. */
+    function committing() {
+      let stored = ground();
+      const prisma = {
+        ground: { findUnique: vi.fn(async () => stored) },
+        $transaction: vi.fn(async (work: (tx: unknown) => unknown, _options: { timeout: number }) => {
+          let draft = stored;
+          const result = await work({
+            ground: { update: async ({ data }: { data: Partial<Ground> }) => (draft = { ...draft, ...data }) },
+          });
+          stored = draft;
+          return result;
+        }),
+      };
+      const slots = { resync: vi.fn(async (_tx: unknown, _id: string) => ({ removed: 1, generated: 1, kept: 0 })) };
+      const service = new GroundsService(prisma as unknown as PrismaService, slots as unknown as SlotGeneratorService);
+      return { service, prisma, slots, stored: () => stored };
+    }
+
+    it('leaves the ground unchanged, and the retry resyncs', async () => {
+      const { service, prisma, slots, stored } = committing();
+      slots.resync.mockRejectedValueOnce(new Error('db down'));
+
+      await expect(service.update('g-1', { availableDays: 'weekends' })).rejects.toThrow('db down');
+      expect(stored().availableDays).toBe('everyday');
+
+      await expect(service.update('g-1', { availableDays: 'weekends' })).resolves.toMatchObject({ slotSync: { removed: 1 } });
+      expect(stored().availableDays).toBe('weekends');
+      expect(slots.resync).toHaveBeenCalledTimes(2);
+      expect(prisma.$transaction).toHaveBeenLastCalledWith(expect.any(Function), { timeout: 20_000 });
+    });
   });
 });
 
@@ -213,6 +273,18 @@ describe('ground schemas', () => {
   ])('rejects %s', (_label, change, field) => {
     const result = CreateGroundSchema.safeParse({ ...valid, ...change });
     expect(result.error?.issues.map((i) => i.path.join('.'))).toContain(field);
+  });
+
+  it.each(['', '   ', ' \n '])('stores blank rules (%j) as null', (rules) => {
+    expect(UpdateGroundSchema.parse({ rules })).toEqual({ rules: null });
+    expect(CreateGroundSchema.parse({ ...valid, rules }).rules).toBeNull();
+  });
+
+  it('keeps written rules and null, and leaves out rules that were not sent', () => {
+    expect(UpdateGroundSchema.parse({ rules: '  No studs.\nArrive early.  ' })).toEqual({ rules: 'No studs.\nArrive early.' });
+    expect(UpdateGroundSchema.parse({ rules: null })).toEqual({ rules: null });
+    expect(UpdateGroundSchema.parse({ name: 'Arena' })).not.toHaveProperty('rules');
+    expect(CreateGroundSchema.parse(valid)).not.toHaveProperty('rules');
   });
 
   it('rejects an empty update', () => {

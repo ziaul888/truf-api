@@ -30,6 +30,8 @@ const optionalText = (max: number) => z.string().trim().max(max).nullable().opti
 const GroundFields = z.object({
   name: z.string().trim().min(1, 'Enter a name').max(100),
   description: optionalText(2000),
+  /** Plain text shown to customers on the ground page and at checkout; blank is stored as null. */
+  rules: z.string().trim().max(2000).transform((v) => v || null).nullable().optional(),
   address: optionalText(300),
   /** https map link; "" or null clears it. */
   mapUrl: z.union([z.literal('').transform(() => null), httpsUrl.max(500, 'Keep it under 500 characters')]).nullable().optional(),

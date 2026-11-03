@@ -48,10 +48,10 @@ export interface GroundDays {
   customDays: Weekday[];
 }
 
-/** Whether the ground takes bookings on that weekday. Weekends are Sat–Sun, as the dashboard shows. */
+/** Whether the ground takes bookings on that weekday. Weekends are Fri–Sat, weekdays are Sun–Thu. */
 export function isOpenOn({ isActive, availableDays, customDays }: GroundDays, day: Weekday): boolean {
   if (!isActive) return false;
-  const weekend = day === 'sat' || day === 'sun';
+  const weekend = day === 'fri' || day === 'sat';
   switch (availableDays) {
     case 'everyday': return true;
     case 'weekdays': return !weekend;

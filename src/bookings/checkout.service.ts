@@ -8,7 +8,7 @@ import { VISIBLE_GROUND } from '../grounds/ground-rules.js';
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
-import { groundNotFound, slotInPast } from '../slots/slot-rules.js';
+import { assertDayOpen, groundNotFound, slotInPast } from '../slots/slot-rules.js';
 import type { SlotSettings } from '../slots/slots.schemas.js';
 import { addDays, hasStarted, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
@@ -83,6 +83,7 @@ export class CheckoutService {
     });
     if (!slot) throw slotNotAvailable();
     assertBookable(slot, input.date, settings);
+    assertDayOpen(ground, input.date);
 
     const bookingId = await this.reserve(input, ground, slot, settings, Boolean(verifiedPhone));
     if (input.paymentMethod === 'cash') {

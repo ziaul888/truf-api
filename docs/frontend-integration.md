@@ -121,7 +121,7 @@ List endpoints, once they exist, return `data: { data: [...], total, page, limit
 | 404 | `SLOT_NOT_FOUND` | No slot with that id, or (single block) no slot starts at that hour | Refresh the slot list |
 | 400 | `SLOT_IN_PAST` | Blocking or unblocking a slot that has started | Show `error`; refresh |
 | 400 | `INVALID_DATE_RANGE` | `from` after `to`, a range longer than allowed, or generating from a past date | Show `error` under the date fields |
-| 400 | `GROUND_CLOSED` | Generating or blocking only on days the ground doesn't open, or for an inactive ground | Show `error` |
+| 400 | `GROUND_CLOSED` | Generating or blocking only on days the ground doesn't open, or for an inactive ground; or a new booking (checkout or staff) on a day the ground doesn't open | Show `error`; for a booking, have them pick another slot |
 | 409 | `SLOT_HAS_BOOKING` | Blocking a booked slot | Show `error` |
 | 409 | `SLOT_ALREADY_BLOCKED`, `SLOT_NOT_BLOCKED` | Blocking twice, or unblocking a slot that isn't blocked | Refresh the slot |
 | 409 | `SLOT_NOT_AVAILABLE` | A slot changed while saving (someone else acted first) | Refresh and try again |
@@ -245,7 +245,7 @@ Notes for the UI:
 
 ```json
 {
-  "id": "uuid", "name": "Green Arena", "description": null, "address": "Road 1, Dhaka",
+  "id": "uuid", "name": "Green Arena", "description": null, "rules": null, "address": "Road 1, Dhaka",
   "mapUrl": "https://maps.app.goo.gl/abc123",
   "hourlyPrice": 1500, "openingHour": 6, "closingHour": 23,
   "sport": "football", "format": "5x5", "surface": "outdoor-turf", "dimensions": "28×18 m",
@@ -276,6 +276,7 @@ Notes for the UI:
 | `slotDurationMinutes` | `60` or `120` | Default `60`. Slots start at `openingHour` in steps of this length; a last slot that would run past closing is dropped (6–23 with 120 → 6, 8, …, 20) |
 | `photos` | string[] of URLs, read-only | Managed through the photo endpoints below. The first one is the cover. Use the URLs as they are, because they go through the `/api/v1` proxy |
 | `description`, `address` | string | Optional, max 2000 and 300; `null` when empty |
+| `rules` | string | Optional plain text, max 2000; `null` when empty. Show it on the ground page and at checkout, keeping line breaks |
 | `mapUrl` | string | Optional https map link (for example a Google Maps share link), max 500. `""` or `null` clears it. `400` with `field: "mapUrl"` for anything else. On the portal, open it from "Directions"; when it's `null`, fall back to the venue's `mapUrl`, then to a search link built from the address |
 
 The **admin** version also has:
@@ -342,7 +343,7 @@ Notes for the UI:
 
 Slots are stored rows, one per bookable period on one ground. They're created from the ground's schedule: they start at `openingHour`, step by `slotDurationMinutes`, skip closed days, and drop a last slot that would run past `closingHour`. A background job keeps slots created up to `advanceBookingDays` ahead. Creating a ground also fills its slots right away.
 
-**Times are venue-local (Asia/Dhaka).** `date` is `"YYYY-MM-DD"` and hours are whole integers. Don't convert them to UTC. "Today" and "already started" use the venue's clock. **Weekends are Sat–Sun**, as the ground form shows.
+**Times are venue-local (Asia/Dhaka).** `date` is `"YYYY-MM-DD"` and hours are whole integers. Don't convert them to UTC. "Today" and "already started" use the venue's clock. **Weekends are Fri–Sat and weekdays are Sun–Thu**, as the ground form shows.
 
 ### The slot object (admin)
 
@@ -387,7 +388,7 @@ Slots are stored rows, one per bookable period on one ground. They're created fr
 
 | Method & path | Who | Body / query | Success | Errors |
 |---|---|---|---|---|
-| `GET /admin/slots` | admin, manager | `groundId` (omit for all), `date` or `from`+`to`, `status`, `reason`, `page`, `limit` | `200 { data: Slot[], total, page, limit, stats }` | `400` |
+| `GET /admin/slots` | admin, manager | `groundId` (omit for all), `date` or `from`+`to`, `status`, `reason`, `openDaysOnly` (`true` leaves out days the ground doesn't open; needs `groundId` and dates), `page`, `limit` | `200 { data: Slot[], total, page, limit, stats }` | `400` |
 | `GET /admin/slots/:id` | admin, manager | — | `200 Slot` | `404 SLOT_NOT_FOUND` |
 | `POST /admin/slots/generate` | **admin** | `{ groundId: uuid \| "all", fromDate, toDate, dryRun? }` (at most 90 days, not in the past) | `200 { generated, skipped, days, slotsPerDay }` | `400 INVALID_DATE_RANGE`, `GROUND_CLOSED` · `403` · `404` |
 | `POST /admin/slots/:id/block` | admin, manager | `{ reason, note? }` | `200 { slot, cancelledBooking: false }` | `400 SLOT_IN_PAST` · `404` · `409 SLOT_HAS_BOOKING`, `SLOT_ALREADY_BLOCKED` |

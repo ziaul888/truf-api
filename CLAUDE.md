@@ -53,12 +53,13 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 
 ## Business rules (v1)
 - Slots are 60 or 120 minutes (per ground, `slotDurationMinutes`), generated from opening/closing hours; a trailing partial slot is dropped
-- Slots are stored rows, venue-local (`VENUE_TIMEZONE`, default Asia/Dhaka): a `date` plus whole hours, never UTC timestamps; weekends are Sat–Sun. Helpers live in `slots/venue-time.ts`
+- Slots are stored rows, venue-local (`VENUE_TIMEZONE`, default Asia/Dhaka): a `date` plus whole hours, never UTC timestamps; weekends are Fri–Sat, weekdays are Sun–Thu. Helpers live in `slots/venue-time.ts`
 - Slots are generated up to `advanceBookingDays` ahead (hourly job + on ground create); generation never overwrites a stored slot. Ground schedule edits replace only future free slots — booked and blocked slots are never touched
 - Venue closures (`Closure`) block the free slots in their range and are applied to slots generated later; lifting one frees only the blocks it made (`Slot.closureId`)
 - Every block/unblock is logged in `SlotEvent`; slot status is only `available` | `held` | `booked` | `blocked` (payment state lives on the booking)
 - No double-booking: take a slot with a conditional update (`where status = 'available'`) inside a transaction; `Booking.liveSlotId` (unique, cleared on cancel) is the database-level guard
 - Admin-blocked slots are never bookable by customers
+- New bookings on a day the ground is closed are refused for customers and staff (`400 GROUND_CLOSED`); existing bookings on such days stay and can be cancelled
 - Portal customers may instead choose cash at the venue (`payAtVenue`, setting `portalCashEnabled`): the slot is booked, the booking stays pending and unpaid until staff confirm it
 - Portal card bookings pay in full through Stripe Checkout: checkout holds the slot (`held`, `holdMinutes`), the webhook confirms it, a sweep job releases lapsed holds. Portal bookings add the `serviceFee` setting, stored per booking
 - Staff bookings (dashboard) may record `cash` or `bank_transfer`, in full, as an advance with a due date (partial), or not yet paid (pending). No UPI or wallets

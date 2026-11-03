@@ -21,7 +21,7 @@ export interface SlotEventDto {
   action: SlotEventAction;
   reason: BlockReason | null;
   note: string | null;
-  /** Null if that staff account no longer exists. */
+  /** Null for a system action (e.g. the closed-day cleanup), or if that staff account no longer exists. */
   user: { id: string; name: string } | null;
   createdAt: Date;
 }

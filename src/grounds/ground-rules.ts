@@ -1,6 +1,8 @@
 import { AppError } from '../common/app-error.js';
-import type { AvailableDays, Prisma, Weekday } from '../generated/prisma/client.js';
+import type { AvailableDays, Ground, Prisma, Weekday } from '../generated/prisma/client.js';
+import { peakRangesOf } from './ground.dto.js';
 import type { PeakRange } from './ground-schedule.js';
+import type { UpdateGroundInput } from './grounds.schemas.js';
 
 /** A ground customers may see: active and not hidden from the portal. */
 export const VISIBLE_GROUND: Prisma.GroundWhereInput = { isActive: true, showOnPortal: true };
@@ -47,4 +49,22 @@ export function assertPeakPricing({ openingHour, closingHour, peakPrice, peakRan
       fail(`Peak ranges ${previous.fromHour}–${previous.toHour} and ${range.fromHour}–${range.toHour} overlap`);
     }
   });
+}
+
+/** Single-value fields that change which slots a ground has, or what they cost. */
+const SCHEDULE_VALUES = [
+  'openingHour', 'closingHour', 'slotDurationMinutes', 'hourlyPrice', 'peakPrice', 'availableDays', 'isActive',
+] as const satisfies (keyof UpdateGroundInput)[];
+
+const rangeKey = ({ fromHour, toHour }: PeakRange) => `${fromHour}-${toHour}`;
+const sameItems = (a: string[], b: string[]) => a.length === b.length && [...a].sort().join() === [...b].sort().join();
+
+/**
+ * Whether an update really changes the schedule, so future free slots must be replaced. Lists compare by
+ * value, because Postgres jsonb reorders keys and a form save sends every field even when nothing changed.
+ */
+export function scheduleChanged(ground: Ground, input: UpdateGroundInput): boolean {
+  if (input.peakRanges && !sameItems(peakRangesOf(ground).map(rangeKey), input.peakRanges.map(rangeKey))) return true;
+  if (input.customDays && !sameItems(ground.customDays, input.customDays)) return true;
+  return SCHEDULE_VALUES.some((field) => input[field] !== undefined && input[field] !== ground[field]);
 }

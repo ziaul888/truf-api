@@ -26,7 +26,13 @@ export const ListSlotsQuerySchema = PaginationSchema.extend({
   ...dateFields,
   status: oneOf(SLOT_STATUSES, 'Status').optional(),
   reason: oneOf(BLOCK_REASONS, 'Reason').optional(),
-}).refine(oneDateForm, dateFormRule).transform(toRange);
+  /** `?openDaysOnly=true` leaves out days the ground doesn't open (the booking form). Needs `groundId` and dates. */
+  openDaysOnly: z.enum(['true', 'false']).transform((v) => v === 'true').optional(),
+}).refine(oneDateForm, dateFormRule)
+  .refine((v) => !v.openDaysOnly || Boolean(v.groundId && (v.date || v.from)), {
+    path: ['openDaysOnly'], message: 'openDaysOnly needs a groundId and a date or range',
+  })
+  .transform(toRange);
 export type ListSlotsQuery = z.infer<typeof ListSlotsQuerySchema>;
 
 export const CalendarQuerySchema = z.object({

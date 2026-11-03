@@ -7,6 +7,7 @@ import { StripeWebhookService } from './stripe-webhook.service.js';
 
 function setup({ existingPayment = null as object | null, booking = { id: 'b-1', status: 'pending', slotId: 's-1', total: 6000, payments: [] } as object | null } = {}) {
   const tx = {
+    slot: { updateMany: vi.fn(async (_args: { where: object }) => ({ count: 1 })) },
     payment: { create: vi.fn(async (_args: { data: object }) => ({})) },
     booking: { update: vi.fn(async (_args: { data: object }) => ({})) },
     bookingEvent: { createMany: vi.fn(async (_args: { data: { type: string }[] }) => ({})) },
@@ -63,6 +64,19 @@ describe('StripeWebhookService', () => {
     const { send, prisma } = setup();
     await send({ type: 'payment_intent.payment_failed', data: { object: { metadata: { bookingId: 'b-1' } } } });
     expect(prisma.booking.updateMany).toHaveBeenCalledWith({ where: { id: 'b-1', status: 'pending' }, data: { paymentStatus: 'failed' } });
+  });
+
+  it('confirms a late payment on a day the ground has since closed, with no automatic refund', async () => {
+    // Deliberately no ground in the mocks: confirming an existing booking must not depend on the ground's days.
+    const { send, tx, stripe, cancellation, notifier } = setup({ booking: { id: 'b-1', status: 'cancelled', slotId: 's-1', total: 6000, payments: [] } });
+    await send(paid);
+
+    expect(tx.slot.updateMany.mock.calls[0]![0].where).toEqual({ id: 's-1', OR: [{ status: 'held', heldByBookingId: 'b-1' }, { status: 'available' }] });
+    expect(tx.payment.create).toHaveBeenCalledWith({ data: expect.objectContaining({ status: 'succeeded', stripePaymentIntentId: 'pi_1' }) });
+    expect(tx.booking.update.mock.calls[0]![0].data).toMatchObject({ status: 'confirmed', paymentStatus: 'paid', liveSlotId: 's-1' });
+    expect(stripe.refund).not.toHaveBeenCalled();
+    expect(cancellation.cancel).not.toHaveBeenCalled();
+    expect(notifier.confirmed).toHaveBeenCalledWith('b-1');
   });
 
   const duePaid = (amount: number) => ({

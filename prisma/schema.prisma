@@ -145,6 +145,8 @@ model Ground {
   id          String   @id @default(uuid())
   name        String
   description String?
+  /// Plain text shown to customers on the ground page and at checkout.
+  rules       String?
   address     String?
   /// https link to the ground on a map (e.g. Google Maps). Null falls back to the venue's map link.
   mapUrl      String?

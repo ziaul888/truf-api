@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import type { Ground, Prisma } from '../generated/prisma/client.js';
 import { peakRangesOf } from '../grounds/ground.dto.js';
@@ -6,7 +6,7 @@ import { isOpenOn, slotStartHours } from '../grounds/ground-schedule.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from './slot-settings.service.js';
 import {
-  activeClosuresWhere, assertRange, closureBlock, closureOn, dateWhere, groundClosed, groundNotFound, planDay, upcomingWhere,
+  activeClosuresWhere, assertRange, closureBlock, closureOn, dateWhere, eventRows, groundClosed, groundNotFound, planDay, upcomingWhere,
   type DayPlan, type GroundForSlots, type SlotSpan,
 } from './slot-rules.js';
 import type { GenerateSlotsInput } from './slots.schemas.js';
@@ -33,12 +33,23 @@ export interface SlotSync {
   kept: number;
 }
 
+/** What the one-off closed-day cleanup did. */
+export interface RetireResult {
+  removed: number;
+  blocked: number;
+}
+
 type Db = PrismaService | Prisma.TransactionClient;
+
+/** Free rows with an old cancelled booking can't be deleted (Restrict FK), so they are blocked with this instead. */
+const CLOSED_DAY_BLOCK = { reason: 'other', note: 'Day no longer open' } as const;
 
 const forSlots = (g: Ground): GroundForSlots => ({ ...g, peakRanges: peakRangesOf(g) });
 
 @Injectable()
 export class SlotGeneratorService {
+  private readonly logger = new Logger(SlotGeneratorService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly settings: SlotSettingsService,
@@ -89,23 +100,51 @@ export class SlotGeneratorService {
   /**
    * After a ground's hours, length, prices or days change: replace its future free slots
    * (available, never booked) so they match. Booked and blocked slots are never touched.
+   * Runs on the caller's transaction, so the schedule edit and its slots commit together.
    */
-  async resync(groundId: string): Promise<SlotSync> {
+  async resync(tx: Prisma.TransactionClient, groundId: string): Promise<SlotSync> {
     const now = venueNow();
-    const { autoGenerate, advanceBookingDays } = await this.settings.get();
+    const { autoGenerate, advanceBookingDays } = await this.settings.get(tx);
     const free: Prisma.SlotWhereInput = { groundId, status: 'available', bookings: { none: {} }, ...upcomingWhere(now) };
 
-    return this.prisma.$transaction(async (tx) => {
-      const cleared = await tx.slot.findMany({ where: free, select: { date: true }, distinct: ['date'] });
-      const { count: removed } = await tx.slot.deleteMany({ where: free });
-      // Refill the days just cleared, plus the booking window when auto-generate is on.
-      const window = autoGenerate ? datesBetween(now.date, addDays(now.date, advanceBookingDays)) : [];
-      const dates = [...new Set([...cleared.map((s) => fromDbDate(s.date)), ...window])].sort();
-      const ground = await tx.ground.findUniqueOrThrow({ where: { id: groundId } });
-      const generated = await this.insertPlan(tx, forSlots(ground), dates, now);
-      const kept = await tx.slot.count({ where: { groundId, ...upcomingWhere(now) } }) - generated;
-      return { removed, generated, kept };
+    const cleared = await tx.slot.findMany({ where: free, select: { date: true }, distinct: ['date'] });
+    const { count: removed } = await tx.slot.deleteMany({ where: free });
+    // Refill the days just cleared, plus the booking window when auto-generate is on.
+    const window = autoGenerate ? datesBetween(now.date, addDays(now.date, advanceBookingDays)) : [];
+    const dates = [...new Set([...cleared.map((s) => fromDbDate(s.date)), ...window])].sort();
+    const ground = await tx.ground.findUniqueOrThrow({ where: { id: groundId } });
+    const generated = await this.insertPlan(tx, forSlots(ground), dates, now);
+    const kept = await tx.slot.count({ where: { groundId, ...upcomingWhere(now) } }) - generated;
+    return { removed, generated, kept };
+  }
+
+  /**
+   * One-off, when weekends became Fri–Sat: clears upcoming free slots on days that `weekends` and `weekdays`
+   * grounds no longer open. Booked, held and blocked slots stay. Safe to re-run: nothing is left to match.
+   * One ground failing doesn't stop the others; it throws at the end, so the caller knows to run it again.
+   */
+  async retireClosedDays(groundIds?: string[]): Promise<RetireResult> {
+    const now = venueNow();
+    const grounds = await this.prisma.ground.findMany({
+      where: { availableDays: { in: ['weekends', 'weekdays'] }, ...(groundIds && { id: { in: groundIds } }) },
     });
+    const total: RetireResult = { removed: 0, blocked: 0 };
+    const failures: unknown[] = [];
+    for (const ground of grounds) {
+      try {
+        const { removed, blocked } = await this.prisma.$transaction((tx) => retireGround(tx, ground, now), { timeout: 20_000 });
+        total.removed += removed;
+        total.blocked += blocked;
+      } catch (err) {
+        failures.push(err);
+        this.logger.error(`Closed-day cleanup failed for ground ${ground.id}`, err instanceof Error ? err.stack : String(err));
+      }
+    }
+    if (failures.length > 0) {
+      const done = `${total.removed} free slots removed, ${total.blocked} blocked`;
+      throw new Error(`Closed-day cleanup failed for ${failures.length} of ${grounds.length} grounds (${done})`, { cause: failures[0] });
+    }
+    return total;
   }
 
   private async insertPlan(db: Db, ground: GroundForSlots, dates: IsoDate[], now: VenueNow) {
@@ -146,6 +185,25 @@ export class SlotGeneratorService {
     if (!ground.isActive) throw groundClosed('This ground is inactive');
     return forSlots(ground);
   }
+}
+
+async function retireGround(tx: Prisma.TransactionClient, ground: Ground, now: VenueNow): Promise<RetireResult> {
+  // Inactive counts as closed every day in isOpenOn, which would retire all of an inactive ground's free slots.
+  const days = { ...ground, isActive: true };
+  const rows = await tx.slot.findMany({
+    where: { groundId: ground.id, status: 'available', ...upcomingWhere(now) },
+    select: { id: true, date: true, _count: { select: { bookings: true } } },
+  });
+  const closed = rows.filter((s) => !isOpenOn(days, weekdayOf(fromDbDate(s.date))));
+  const idsWhere = (hasBooking: boolean) => ({ in: closed.filter((s) => s._count.bookings > 0 === hasBooking).map((s) => s.id) });
+
+  const { count: removed } = await tx.slot.deleteMany({ where: { id: idsWhere(false), status: 'available', bookings: { none: {} } } });
+  const retired = await tx.slot.updateManyAndReturn({
+    where: { id: idsWhere(true), status: 'available' },
+    data: { status: 'blocked', blockReason: CLOSED_DAY_BLOCK.reason, blockNote: CLOSED_DAY_BLOCK.note, blockedAt: new Date() },
+  });
+  await tx.slotEvent.createMany({ data: eventRows(retired, 'block', null, CLOSED_DAY_BLOCK) });
+  return { removed, blocked: retired.length };
 }
 
 function assertOpenOnSome(ground: GroundForSlots, dates: IsoDate[]) {

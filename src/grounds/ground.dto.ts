@@ -7,6 +7,7 @@ export interface PublicGroundDto {
   id: string;
   name: string;
   description: string | null;
+  rules: string | null;
   address: string | null;
   mapUrl: string | null;
   hourlyPrice: number;
@@ -43,6 +44,7 @@ export const toPublicGroundDto = (g: Ground): PublicGroundDto => ({
   id: g.id,
   name: g.name,
   description: g.description,
+  rules: g.rules,
   address: g.address,
   mapUrl: g.mapUrl,
   hourlyPrice: g.hourlyPrice,
