@@ -7,7 +7,7 @@ import { StaffBookingsService } from './staff-bookings.service.js';
 const NOW = new Date('2026-10-28T04:00:00Z');
 
 const slot = {
-  id: 's-1', groundId: 'g-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18, price: 1000, status: 'available',
+  id: 's-1', groundId: 'g-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18, durationMinutes: 60, price: 1000, status: 'available',
   ground: { availableDays: 'everyday', customDays: [] },
 };
 const bookingRow = (overrides: object = {}) => ({
@@ -69,6 +69,21 @@ describe('StaffBookingsService', () => {
       .rejects.toMatchObject({ status: 400, code: 'GROUND_CLOSED' });
     expect(tx.slot.updateMany).not.toHaveBeenCalled();
     expect(notifier.confirmed).not.toHaveBeenCalled();
+  });
+
+  it('takes a walk-in on a slot that has started but not ended', async () => {
+    const running = { ...slot, date: new Date('2026-10-28T00:00:00Z'), startHour: 9, durationMinutes: 120 };
+    const { service, tx } = setup(bookingRow(), running);
+    await service.create('u-1', { slotId: 's-1', customer, payment: { type: 'full', method: 'cash' } }).catch(() => undefined);
+    expect(tx.booking.create).toHaveBeenCalled();
+  });
+
+  it('refuses a slot that has ended, and takes nothing', async () => {
+    const ended = { ...slot, date: new Date('2026-10-28T00:00:00Z'), startHour: 9, durationMinutes: 60 };
+    const { service, tx } = setup(bookingRow(), ended);
+    await expect(service.create('u-1', { slotId: 's-1', customer, payment: { type: 'none' } }))
+      .rejects.toMatchObject({ status: 400, code: 'SLOT_IN_PAST' });
+    expect(tx.slot.updateMany).not.toHaveBeenCalled();
   });
 
   it('refuses a payment above what is due', async () => {

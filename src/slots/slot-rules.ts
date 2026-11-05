@@ -6,6 +6,7 @@ import { daysBetween, fromDbDate, hasStarted, toDbDate, weekdayOf, type IsoDate,
 export const slotNotFound = () => new AppError('Slot not found', 404, 'SLOT_NOT_FOUND');
 export const groundNotFound = () => new AppError('Ground not found', 404, 'GROUND_NOT_FOUND');
 export const slotInPast = () => new AppError('This slot has already started', 400, 'SLOT_IN_PAST');
+export const slotEnded = () => new AppError('This slot has already ended', 400, 'SLOT_IN_PAST');
 export const groundClosed = (message = 'The ground is closed on that day') => new AppError(message, 400, 'GROUND_CLOSED');
 
 /** Whether the ground opens on that date. About the day alone: an inactive ground still has its days. */

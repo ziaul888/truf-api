@@ -42,6 +42,9 @@ export const minutesUntil = (now: VenueNow, date: IsoDate, startHour: number) =>
 
 export const hasStarted = (now: VenueNow, date: IsoDate, startHour: number) => minutesUntil(now, date, startHour) <= 0;
 
+export const hasEnded = (now: VenueNow, date: IsoDate, startHour: number, durationMinutes: number) =>
+  hasStarted(now, date, startHour + durationMinutes / 60);
+
 /** The instant venue-local midnight starts on `date` (for comparing with timestamps like createdAt). */
 export function venueDayStart(date: IsoDate, timeZone = env.VENUE_TIMEZONE): Date {
   const guess = toDbDate(date).getTime();
