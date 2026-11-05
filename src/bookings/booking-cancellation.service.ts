@@ -20,6 +20,11 @@ export interface CancelOptions {
   byCustomer?: boolean;
   /** Staff blocking the booked slot: the slot ends blocked instead of available. */
   blockSlot?: { reason: BlockReason; note?: string };
+  /**
+   * The system giving up on a checkout that was never paid: acts only while the booking is still
+   * pending, so a payment landing at the same moment wins, and also after the slot has ended.
+   */
+  unpaidOnly?: boolean;
 }
 
 /** Refund ids by payment id (null for cash and bank transfer, refunded by hand). */
@@ -39,30 +44,36 @@ export class BookingCancellationService {
     private readonly settings: SlotSettingsService,
   ) {}
 
-  async cancel(bookingId: string, opts: CancelOptions): Promise<void> {
+  /** Returns false only for `unpaidOnly`, when the booking is no longer pending and was left alone. */
+  async cancel(bookingId: string, opts: CancelOptions): Promise<boolean> {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: BOOKING_INCLUDE });
     if (!booking || booking.deletedAt) throw bookingNotFound();
-    await this.assertCancellable(booking, opts);
+    if (opts.unpaidOnly && booking.status !== 'pending') return false;
+    if (!opts.unpaidOnly) await this.assertCancellable(booking, opts);
 
     const refunds: Refunds = opts.refund ? await this.refund(booking.payments) : new Map();
-    await this.prisma.$transaction(async (tx) => {
+    const cancelled = await this.prisma.$transaction(async (tx) => {
       await this.markRefunded(tx, refunds);
       const payments = booking.payments.map((p) => (refunds.has(p.id) ? { ...p, status: 'refunded' as const } : p));
-      await tx.booking.update({
-        where: { id: bookingId },
+      const { count } = await tx.booking.updateMany({
+        where: { id: bookingId, ...(opts.unpaidOnly && { status: 'pending' as const }) },
         data: {
           status: 'cancelled', cancelledAt: new Date(), cancelReason: opts.reason ?? null, cancelledById: opts.actorId,
           liveSlotId: null, paymentStatus: paymentStatusOf(booking.total, payments),
         },
       });
+      if (count === 0) return false;
       if (booking.liveSlotId) await this.releaseSlot(tx, booking, opts);
       await this.logEvents(tx, booking, opts, refunds);
+      return true;
     });
+    if (!cancelled) return false;
 
     const refunded = booking.payments.filter((p) => refunds.has(p.id)).reduce((sum, p) => sum + p.amount, 0);
     if (opts.notify) {
       await this.notifier.cancelled(bookingId, { reason: opts.reason, refunded, becauseBlocked: !!opts.blockSlot });
     }
+    return true;
   }
 
   private async assertCancellable(b: BookingRow, opts: CancelOptions) {

@@ -23,7 +23,7 @@ const bookingRow = (overrides: object = {}) => ({
 function setup(booking: object | null = bookingRow()) {
   const tx = {
     payment: { update: vi.fn(async () => ({})) },
-    booking: { update: vi.fn(async (_args: { data: object }) => ({})) },
+    booking: { updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 1 })) },
     slot: { updateMany: vi.fn(async (_args: { data: object }) => ({ count: 1 })) },
     slotEvent: { create: vi.fn(async () => ({})) },
     bookingEvent: { createMany: vi.fn(async (_args: { data: { type: string }[] }) => ({ count: 1 })) },
@@ -54,10 +54,36 @@ describe('BookingCancellationService', () => {
 
     expect(stripe.refund).toHaveBeenCalledWith('pi_1');
     expect(tx.payment.update).toHaveBeenCalledWith({ where: { id: 'p-1' }, data: expect.objectContaining({ status: 'refunded', stripeRefundId: 're_pi_1' }) });
-    expect(tx.booking.update.mock.calls[0]![0].data).toMatchObject({ status: 'cancelled', liveSlotId: null, paymentStatus: 'refunded', cancelReason: 'Rain' });
+    expect(tx.booking.updateMany.mock.calls[0]![0].data).toMatchObject({ status: 'cancelled', liveSlotId: null, paymentStatus: 'refunded', cancelReason: 'Rain' });
     expect(tx.slot.updateMany.mock.calls[0]![0].data).toMatchObject({ status: 'available', heldByBookingId: null });
     expect(tx.bookingEvent.createMany.mock.calls[0]![0].data.map((e) => e.type)).toEqual(['cancelled', 'refunded']);
     expect(notifier.cancelled).toHaveBeenCalledWith('b-1', expect.objectContaining({ refunded: 6000 }));
+  });
+
+  describe('unpaidOnly', () => {
+    const unpaid = { actorId: null, refund: false, notify: false, unpaidOnly: true };
+
+    it('leaves a booking that is no longer pending alone', async () => {
+      const { service, prisma } = setup(bookingRow({ status: 'confirmed' }));
+      await expect(service.cancel('b-1', unpaid)).resolves.toBe(false);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('frees nothing when a payment confirms the booking during the cancel', async () => {
+      const { service, tx } = setup(bookingRow({ status: 'pending', payments: [] }));
+      tx.booking.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.cancel('b-1', unpaid)).resolves.toBe(false);
+      expect(tx.booking.updateMany.mock.calls[0]![0].where).toMatchObject({ status: 'pending' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+      expect(tx.bookingEvent.createMany).not.toHaveBeenCalled();
+    });
+
+    it('still cancels after the slot has ended', async () => {
+      const ended = { id: 's-1', date: day('2026-10-27'), startHour: 18, durationMinutes: 60 };
+      const { service, tx } = setup(bookingRow({ status: 'pending', payments: [], slot: ended }));
+      await expect(service.cancel('b-1', unpaid)).resolves.toBe(true);
+      expect(tx.slot.updateMany).toHaveBeenCalled();
+    });
   });
 
   it('marks cash payments refunded without calling Stripe', async () => {
