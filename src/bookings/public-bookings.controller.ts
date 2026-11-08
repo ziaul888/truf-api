@@ -6,6 +6,7 @@ import { IdParamSchema, type IdParam } from '../common/schemas.js';
 import { CustomerAuthService } from '../customer-auth/customer-auth.service.js';
 import { CUSTOMER_COOKIE } from '../customer-auth/customer-cookie.js';
 import { BookingQueriesService } from './booking-queries.service.js';
+import { CancelRequestService } from './cancel-request.service.js';
 import { BookingTokenQuerySchema, CheckoutSchema, type BookingTokenQuery, type CheckoutInput } from './bookings.schemas.js';
 import { CheckoutService } from './checkout.service.js';
 import { StripeWebhookService } from './stripe-webhook.service.js';
@@ -18,6 +19,7 @@ export class PublicBookingsController {
     private readonly queries: BookingQueriesService,
     private readonly webhook: StripeWebhookService,
     private readonly customerAuth: CustomerAuthService,
+    private readonly cancelRequests: CancelRequestService,
   ) {}
 
   /** Whether "pay at the venue" is offered, and the service fee to show. */
@@ -71,6 +73,20 @@ export class PublicBookingsController {
     @Query(new ZodValidationPipe(BookingTokenQuerySchema)) { token }: BookingTokenQuery,
   ) {
     return this.queries.cancelPublic(id, token);
+  }
+
+  /**
+   * While a bKash / Nagad payment is being verified: ask the venue to cancel (direct cancel is
+   * `409 PAYMENT_UNDER_REVIEW` then). Returns the updated public booking.
+   */
+  @Post('bookings/:id/cancel-request')
+  @HttpCode(200)
+  async requestCancel(
+    @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
+    @Query(new ZodValidationPipe(BookingTokenQuerySchema)) { token }: BookingTokenQuery,
+  ) {
+    await this.cancelRequests.request(id, token);
+    return this.queries.getPublic(id, token);
   }
 
   /** The raw body is kept for this route only (see app.setup.ts), for the signature check. */

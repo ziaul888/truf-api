@@ -5,14 +5,24 @@ import { CustomerNameSchema, PhoneSchema } from '../customers/customers.schemas.
 import { oneOf } from '../grounds/grounds.schemas.js';
 import { isoDate } from '../slots/slots.schemas.js';
 import { DUE_FILTERS } from './booking-due.js';
+import { isWalletMethod } from './booking-rules.js';
 
 export const BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed'] as const;
 export const BOOKING_PAYMENT_STATUSES = ['unpaid', 'partial', 'paid', 'refunded', 'failed'] as const;
 /** Staff-recorded methods; card payments only come through Stripe. */
-export const OFFLINE_METHODS = ['cash', 'bank_transfer'] as const;
+export const OFFLINE_METHODS = ['cash', 'bank_transfer', 'bkash', 'nagad'] as const;
 
 const startHour = z.coerce.number('Must be a number').int('Must be a whole hour').min(0).max(23);
 const note = (max: number) => z.string().trim().max(max).optional();
+
+/** A bKash / Nagad transaction id: trimmed, uppercase, letters and digits, 6–20 characters. */
+export const TrxIdSchema = z.string('Enter the transaction ID (TrxID)').trim().toUpperCase()
+  .regex(/^[A-Z0-9]{6,20}$/, 'Enter the TrxID: 6 to 20 letters and digits');
+
+/** The optional TrxID staff may record, only for bKash and Nagad. */
+const trxIdOnlyForWallets = (p: { method?: string; reference?: string }) =>
+  p.reference === undefined || (p.method !== undefined && isWalletMethod(p.method));
+const TRX_ID_ONLY_FOR_WALLETS = { path: ['reference'], message: 'A TrxID is only recorded for bKash and Nagad' };
 
 /** The portal form posts the hour as `hour`; `startHour` is accepted too. */
 export const CheckoutSchema = z.preprocess(
@@ -24,8 +34,25 @@ export const CheckoutSchema = z.preprocess(
     customerName: CustomerNameSchema,
     customerEmail: EmailSchema,
     customerPhone: PhoneSchema,
-    /** `cash` = pay at the venue: no Stripe, pending until staff confirm. */
-    paymentMethod: oneOf(['card', 'cash'] as const, 'Payment method').default('card'),
+    /**
+     * `cash` = pay at the venue: no Stripe, pending until staff confirm. `bkash` / `nagad`: the
+     * customer has sent the total to the venue's number; pending until staff verify it.
+     */
+    paymentMethod: oneOf(['card', 'cash', 'bkash', 'nagad'] as const, 'Payment method').default('card'),
+    /** bKash / Nagad only: the TrxID. */
+    reference: TrxIdSchema.optional(),
+    /** bKash / Nagad only: the number the money was sent from. */
+    payerNumber: PhoneSchema.optional(),
+  }).superRefine((v, ctx) => {
+    if (!isWalletMethod(v.paymentMethod)) {
+      // Refused rather than silently dropped.
+      for (const field of ['reference', 'payerNumber'] as const) {
+        if (v[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: 'Only for bKash and Nagad' });
+      }
+      return;
+    }
+    if (v.reference === undefined) ctx.addIssue({ code: 'custom', path: ['reference'], message: 'Enter the transaction ID (TrxID)' });
+    if (v.payerNumber === undefined) ctx.addIssue({ code: 'custom', path: ['payerNumber'], message: 'Enter the number you sent the money from' });
   }),
 );
 export type CheckoutInput = z.infer<typeof CheckoutSchema>;
@@ -54,7 +81,9 @@ export const ListBookingsQuerySchema = PaginationSchema.extend({
 }).refine((v) => (v.from === undefined) === (v.to === undefined), { path: ['from'], message: 'Send both from and to' });
 export type ListBookingsQuery = z.infer<typeof ListBookingsQuerySchema>;
 
-export const BOOKING_EVENT_TYPES = ['created', 'payment_received', 'confirmed', 'cancelled', 'refunded', 'email_sent', 'completed'] as const;
+export const BOOKING_EVENT_TYPES = [
+  'created', 'payment_received', 'confirmed', 'cancelled', 'refunded', 'email_sent', 'completed', 'cancel_requested',
+] as const;
 
 /** `type` may repeat (`?type=payment_received&type=refunded`). */
 export const ListBookingEventsQuerySchema = PaginationSchema.extend({
@@ -77,8 +106,12 @@ export const CreateStaffBookingSchema = z.object({
     amount: z.number().int('Must be a whole number of the smallest unit').min(1).optional(),
     dueDate: isoDate.optional(),
     note: note(500),
+    /** bKash / Nagad: the TrxID, optional. */
+    reference: TrxIdSchema.optional(),
   })
     .refine((p) => p.type === 'none' || p.method !== undefined, { path: ['method'], message: 'This field is required' })
+    .refine(trxIdOnlyForWallets, TRX_ID_ONLY_FOR_WALLETS)
+    .refine((p) => p.type !== 'none' || p.reference === undefined, { path: ['reference'], message: 'Nothing is paid now, so there is no TrxID' })
     .refine((p) => p.type !== 'partial' || p.amount !== undefined, { path: ['amount'], message: 'This field is required' }),
   notes: note(2000),
 });
@@ -88,22 +121,31 @@ export const ConfirmBookingSchema = z.object({
   /** Record the rest as received now. */
   markPaid: z.boolean().default(false),
   method: oneOf(OFFLINE_METHODS, 'Method').default('cash'),
+  /** bKash / Nagad: the TrxID, optional. */
+  reference: TrxIdSchema.optional(),
   notifyCustomer: z.boolean().default(true),
-});
+}).refine(trxIdOnlyForWallets, TRX_ID_ONLY_FOR_WALLETS);
 export type ConfirmBookingInput = z.infer<typeof ConfirmBookingSchema>;
 
 export const CancelBookingSchema = z.object({
   reason: note(500),
   refund: z.boolean('refund must be true or false'),
   notifyCustomer: z.boolean().default(true),
+  /**
+   * "Reject" on a bKash / Nagad payment: only cancel while that payment is still unverified, so a
+   * Verify that landed first is never undone (409 PAYMENT_ALREADY_HANDLED).
+   */
+  rejectWalletPayment: z.boolean('rejectWalletPayment must be true or false').default(false),
 });
 export type CancelBookingInput = z.infer<typeof CancelBookingSchema>;
 
 export const RecordPaymentSchema = z.object({
   amount: z.number().int('Must be a whole number of the smallest unit').min(1, 'Amount must be above 0'),
   method: oneOf(OFFLINE_METHODS, 'Method'),
+  /** bKash / Nagad: the TrxID, optional. */
+  reference: TrxIdSchema.optional(),
   note: note(500),
-});
+}).refine(trxIdOnlyForWallets, TRX_ID_ONLY_FOR_WALLETS);
 export type RecordPaymentInput = z.infer<typeof RecordPaymentSchema>;
 
 export const UpdateBookingSchema = z.object({

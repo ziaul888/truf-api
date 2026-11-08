@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { receivedIn } from '../reports/report-data.js';
 import { addDays, toDbDate, venueDayStart, venueNow, type IsoDate } from '../slots/venue-time.js';
 
 export interface DashboardStats {
@@ -47,11 +48,11 @@ export class DashboardService {
     };
   }
 
-  /** Money received that day minus refunds made that day. */
+  /** Money received that day (by `receivedAt`) minus refunds made that day. */
   private async revenueOn(date: IsoDate): Promise<number> {
     const range = { gte: venueDayStart(date), lt: venueDayStart(addDays(date, 1)) };
     const [received, refunded] = await Promise.all([
-      this.prisma.payment.aggregate({ where: { deletedAt: null, status: { in: ['succeeded', 'refunded'] }, createdAt: range }, _sum: { amount: true } }),
+      this.prisma.payment.aggregate({ where: { deletedAt: null, ...receivedIn(range) }, _sum: { amount: true } }),
       this.prisma.payment.aggregate({ where: { deletedAt: null, status: 'refunded', refundedAt: range }, _sum: { amount: true } }),
     ]);
     return (received._sum.amount ?? 0) - (refunded._sum.amount ?? 0);

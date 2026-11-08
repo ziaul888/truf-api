@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from '../bookings/booking.dto.js';
-import { dueOf } from '../bookings/booking-rules.js';
+import { owedOf } from '../bookings/booking-rules.js';
 import { AppError } from '../common/app-error.js';
 import { violatedUniqueIndex } from '../common/prisma-errors.js';
 import type { Paginated } from '../common/schemas.js';
@@ -67,12 +67,12 @@ export class CustomersService {
       where: { customerId: id, deletedAt: null }, include: BOOKING_INCLUDE,
       orderBy: [{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }], take: 20,
     });
-    const owing = row.bookings.filter((b) => dueOf(b, b.payments) > 0);
+    const owing = row.bookings.filter((b) => owedOf(b, b.payments) > 0);
     return {
       ...toCustomerDto(row),
       recentBookings: recent.map(toBookingDto),
       duePayments: owing.map((b) => ({
-        bookingId: b.id, bookingNumber: b.bookingNumber, amount: dueOf(b, b.payments), dueDate: b.dueDate ? fromDbDate(b.dueDate) : null,
+        bookingId: b.id, bookingNumber: b.bookingNumber, amount: owedOf(b, b.payments), dueDate: b.dueDate ? fromDbDate(b.dueDate) : null,
       })),
       favoriteGround: favoriteGround(row.bookings.filter((b) => b.status !== 'cancelled')),
     };

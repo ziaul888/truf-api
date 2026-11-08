@@ -68,7 +68,7 @@ The stat cards on Reports, the Revenue report and the Bookings report, and the s
   "previous": { "from": "2026-09-02", "to": "2026-10-01" },
   "revenue": 4520000, "revenueTrend": 12.5,
   "received": 4670000, "refunds": 150000,
-  "revenueByMethod": { "card": 3100000, "cash": 1270000, "bank_transfer": 150000 },
+  "revenueByMethod": { "card": 3100000, "cash": 1270000, "bank_transfer": 150000, "bkash": 0, "nagad": 0 },
   "bookings": 38, "bookingsTrend": -5.0,
   "avgBookingValue": 152000, "avgBookingValueTrend": 3.4,
   "completionRate": 91.7, "completionRateTrend": null,
@@ -77,7 +77,7 @@ The stat cards on Reports, the Revenue report and the Bookings report, and the s
 }
 ```
 - Rates are percentages from 0 to 100.
-- `revenueByMethod` is net of refunds.
+- `revenueByMethod` is net of refunds. A bKash / Nagad payment counts on the day staff verify it. Every received payment is dated by when it counted as received (`receivedAt`; older rows fall back to when they were recorded); refunds by when they were made.
 - `revenue` can be **negative** for a range with more refunds than income. Show it as is.
 
 ### `GET /revenue?from&to&groupBy`
@@ -131,7 +131,7 @@ Each status is the booking's status now.
 
 | `type` | Needs | Columns |
 |---|---|---|
-| `revenue` | `from`, `to`, `groupBy` = `day` or `week` | Period start, Period end, Received, Refunds, Net revenue, Card, Cash, Bank transfer, Bookings |
+| `revenue` | `from`, `to`, `groupBy` = `day` or `week` | Period start, Period end, Received, Refunds, Net revenue, Card, Cash, Bank transfer, Bookings, bKash, Nagad (the last two were added at the end, so earlier columns keep their positions) |
 | `bookings` | `from`, `to` (slot date) | Booking #, Customer, Phone, Ground, Date, Start, End, Amount, Service fee, Total, Paid, Due, Status, Payment status, Source, Created |
 | `customers` | `from`/`to` optional: customers who joined in the range | Name, Phone, Email, Customer since, Bookings, Total spent, Last booking, Due amount, Tag |
 

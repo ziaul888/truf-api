@@ -178,7 +178,8 @@ describe('Bookings (e2e)', () => {
 
     it('tells the portal that cash is offered, with the fee', async () => {
       const res = await http().get(`${API}/checkout/options`).expect(200);
-      expect(res.body.data).toEqual({ cashEnabled: true, serviceFee: 5000, currency: 'bdt', holdMinutes: 15 });
+      // `wallets` follows the bKash / Nagad numbers, which wallet-payments.e2e-spec sets meanwhile.
+      expect(res.body.data).toEqual({ cardEnabled: true, cashEnabled: true, wallets: expect.any(Array), serviceFee: 5000, currency: 'bdt', holdMinutes: 15 });
     });
 
     it('books the slot with no Stripe step, pending until staff confirm', async () => {

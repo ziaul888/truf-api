@@ -9,6 +9,7 @@ import { BookingCoreModule } from './booking-core.module.js';
 import { BookingEventsService } from './booking-events.service.js';
 import { BookingJobs } from './booking-jobs.js';
 import { BookingQueriesService } from './booking-queries.service.js';
+import { CancelRequestService } from './cancel-request.service.js';
 import { CheckoutService } from './checkout.service.js';
 import { CustomerBookingsController } from './customer-bookings.controller.js';
 import { PublicBookingsController } from './public-bookings.controller.js';
@@ -18,6 +19,6 @@ import { StripeWebhookService } from './stripe-webhook.service.js';
 @Module({
   imports: [AuthModule, CustomerAuthModule, SlotSettingsModule, BookingCoreModule, SettingsCoreModule],
   controllers: [AdminBookingsController, AdminBookingEventsController, PublicBookingsController, CustomerBookingsController],
-  providers: [BookingQueriesService, BookingEventsService, StaffBookingsService, CheckoutService, StripeWebhookService, BookingJobs],
+  providers: [BookingQueriesService, BookingEventsService, StaffBookingsService, CheckoutService, StripeWebhookService, BookingJobs, CancelRequestService],
 })
 export class BookingsModule {}

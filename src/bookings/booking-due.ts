@@ -1,6 +1,6 @@
 import type { PrismaService } from '../prisma/prisma.service.js';
 import { fromDbDate, hasStarted, type IsoDate, type VenueNow } from '../slots/venue-time.js';
-import { CARD_CHECKOUT_IN_PROGRESS, dueOf } from './booking-rules.js';
+import { CARD_CHECKOUT_IN_PROGRESS, dueOf, WALLET_UNDER_REVIEW } from './booking-rules.js';
 
 export const DUE_FILTERS = ['overdue', 'today', 'any'] as const;
 export type DueFilter = (typeof DUE_FILTERS)[number];
@@ -17,13 +17,14 @@ export interface OwingBooking {
 
 /**
  * Live bookings with money still due. Completed ones count too: a slot that's been played and not
- * paid for is exactly what "overdue" is for. Card checkouts still in Stripe are left out.
+ * paid for is exactly what "overdue" is for. Card checkouts still in Stripe and bKash / Nagad
+ * payments still being verified are left out.
  */
 export async function loadOwing(prisma: PrismaService): Promise<OwingBooking[]> {
   const rows = await prisma.booking.findMany({
     where: {
       deletedAt: null, status: { in: ['pending', 'confirmed', 'completed'] }, paymentStatus: { notIn: ['paid', 'refunded'] },
-      NOT: CARD_CHECKOUT_IN_PROGRESS,
+      NOT: [CARD_CHECKOUT_IN_PROGRESS, WALLET_UNDER_REVIEW],
     },
     select: {
       id: true, bookingNumber: true, contactName: true, status: true, total: true, dueDate: true, slot: { select: { date: true, startHour: true } },

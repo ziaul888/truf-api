@@ -44,11 +44,13 @@ export class ReportExportService {
   }
 
   private async *revenue(r: ReportRange, groupBy: GroupBy): AsyncGenerator<string> {
-    yield csvLine(['Period start', 'Period end', 'Received', 'Refunds', 'Net revenue', 'Card', 'Cash', 'Bank transfer', 'Bookings']);
+    // bKash and Nagad came later: appended, so existing column positions don't move.
+    yield csvLine(['Period start', 'Period end', 'Received', 'Refunds', 'Net revenue', 'Card', 'Cash', 'Bank transfer', 'Bookings', 'bKash', 'Nagad']);
     for (const row of await this.reports.revenueRows(r, groupBy)) {
       yield csvLine([
         row.period, row.end, csvMoney(row.received), csvMoney(row.refunds), csvMoney(row.revenue),
         csvMoney(row.byMethod.card), csvMoney(row.byMethod.cash), csvMoney(row.byMethod.bank_transfer), row.bookings,
+        csvMoney(row.byMethod.bkash), csvMoney(row.byMethod.nagad),
       ]);
     }
   }

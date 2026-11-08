@@ -16,13 +16,13 @@ Conventions are unchanged from `docs/frontend-integration.md`:
 
 | Topic | What shipped |
 |---|---|
-| Walk-in / phone bookings | Staff can book and record **cash** or **bank transfer** |
-| Portal payment | Customers choose **card** (Stripe, confirmed on payment) or **cash at the venue** (pending until staff confirm). Admins can switch cash off with `portalCashEnabled` |
+| Walk-in / phone bookings | Staff can book and record **cash**, **bank transfer**, **bKash** or **Nagad** (with an optional TrxID) |
+| Portal payment | Customers choose **card** (Stripe, confirmed on payment), **cash at the venue** (pending until staff confirm), or **bKash / Nagad** (they send the total to the venue's number and enter the TrxID; pending until staff verify it in their own app). Admins can switch cash off with `portalCashEnabled`; bKash / Nagad are offered only while their number is set (`bkashNumber`, `nagadNumber`) |
 | Partial payments | **Staff bookings only:** an advance plus an optional due date and note. Collect the rest later |
 | Who confirms | Portal bookings confirm **automatically** when Stripe payment succeeds. The review queue (`status=pending`) holds staff bookings that aren't paid yet |
 | How customers see bookings | Each booking has a signed link: `/confirmation/{id}?token=…`. Customers can also **sign in with their phone (SMS code)** to see **My bookings** (§2a). Login is optional: guest checkout stays |
 | Service fee | Comes from settings (`serviceFee`, default `5000` = ৳50), portal bookings only, and is stored on each booking. **Remove the hardcoded ৳50** and use `serviceFee` / `total` from the API |
-| Payment methods | `card`, `cash`, `bank_transfer`. **Remove UPI** |
+| Payment methods | `card`, `cash`, `bank_transfer`, `bkash`, `nagad`. **Remove UPI** |
 | Completed | A confirmed booking becomes `completed` automatically after its slot ends, and can no longer be cancelled |
 | Receipt | **No PDF receipt in v1.** Remove or hide the Receipt button |
 
@@ -35,7 +35,7 @@ Conventions are unchanged from `docs/frontend-integration.md`:
 | `status` (booking) | `pending` · `confirmed` · `cancelled` · `completed` |
 | `paymentStatus` | `unpaid` · `partial` · `paid` · `refunded` · `failed` |
 | Slot `status` | `available` · **`held`** (new: a customer is in Stripe checkout) · `booked` · `blocked` |
-| Payment `method` | `card` · `cash` · `bank_transfer` |
+| Payment `method` | `card` · `cash` · `bank_transfer` · `bkash` · `nagad` |
 | Booking `source` | `portal` · `staff` |
 
 How they move together:
@@ -44,6 +44,9 @@ How they move together:
 |---|---|---|---|
 | Portal checkout started (card) | `pending` | `unpaid` | `held` (15 min) |
 | Portal booking, pay at venue (cash) | `pending` | `unpaid` | `booked` |
+| Portal booking, bKash / Nagad (payment `pending`) | `pending` | `unpaid` | `booked` |
+| Staff verify the bKash / Nagad payment (payment `succeeded`) | `confirmed` | `paid` | `booked` |
+| Staff reject it, or anyone cancels before verify (payment `failed`) | `cancelled` | `failed` | `available` |
 | Stripe payment succeeded | `confirmed` | `paid` | `booked` |
 | Hold lapsed / session expired | `cancelled` | `unpaid` | `available` |
 | Staff booking, paid in full | `confirmed` | `paid` | `booked` |
@@ -60,10 +63,12 @@ How they move together:
 ### `GET /api/v1/checkout/options`
 
 ```json
-{ "cashEnabled": true, "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15 }
+{ "cardEnabled": true, "cashEnabled": true, "wallets": [{ "method": "bkash", "number": "+8801700000000" }], "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15 }
 ```
 - **Load this on the checkout page.**
+  - Show the card option only when `cardEnabled` is true: it needs both the Stripe key and the webhook secret. Otherwise `POST /checkout` with `card` returns `400 CARD_NOT_AVAILABLE`, and `canPay` is false on every booking.
   - Show the "Pay at venue (cash)" option only when `cashEnabled` is true.
+  - Show a bKash / Nagad option for each entry in `wallets` (only the ones the admin has set a number for). Choosing one shows "Send ৳{total} to {number}", where the total includes the service fee, plus two required fields: the TrxID and the number the money was sent from.
   - Show the fee from `serviceFee`, not a hardcoded ৳50.
 
 ### `POST /api/v1/checkout`
@@ -72,7 +77,8 @@ How they move together:
 { "groundId": "uuid", "date": "2026-11-02", "hour": 18, "customerName": "Rakib Hasan", "customerEmail": "rakib@example.com", "customerPhone": "01711000000", "paymentMethod": "card" }
 ```
 
-- **`paymentMethod`:** `"card"` (the default) or `"cash"`.
+- **`paymentMethod`:** `"card"` (the default), `"cash"`, `"bkash"` or `"nagad"`.
+- **`reference`** (the TrxID) and **`payerNumber`** (the number the money was sent from): required for `bkash` and `nagad`, and refused (`400 VALIDATION_FAILED`) with `card` or `cash`. The TrxID is trimmed and uppercased, and must be 6–20 letters and digits; the number is any common phone format.
 - **Response:** `{ bookingId, paymentMethod, checkoutUrl, confirmationUrl }`.
 - **Card:** redirect to `checkoutUrl`, which is Stripe.
 - **Cash:**
@@ -80,6 +86,13 @@ How they move together:
   - The slot is reserved, and the booking is `pending` with `payAtVenue: true` until staff confirm it. The customer gets a "booking received, pay at the venue" email with their link.
   - On the confirmation page, show "Reserved: waiting for confirmation. Pay ৳{total} in cash at the venue". Don't poll.
   - `400 CASH_NOT_AVAILABLE` when the setting is off.
+- **bKash / Nagad:**
+  - `checkoutUrl` is `null`. Go straight to `confirmationUrl`.
+  - The slot is booked, the booking is `pending` (`payAtVenue: false`) and has a `pending` payment of the full total with the TrxID. The customer gets a "booking received" email saying the venue will verify the payment and confirm.
+  - On the confirmation page, show "Payment received: the venue will verify it and confirm your booking". `walletPayment.status` is `pending` until then. Don't poll. Don't show an amount "due" or "to pay" meanwhile: the money isn't owed, it's being checked.
+  - While it's under review the customer **can't cancel directly** (`canCancel` is false, `POST /cancel` is `409 PAYMENT_UNDER_REVIEW`). Before the cancellation cutoff they can **ask** the venue to cancel instead: see `POST /bookings/:id/cancel-request`.
+  - `400 WALLET_NOT_AVAILABLE` when that wallet's number isn't set.
+  - `409 REFERENCE_ALREADY_USED` when the TrxID is already on a pending or verified payment of that method (nothing is booked). A TrxID from a rejected payment can be used again.
 
 - **`hour`:** the existing form posts `hour`, and `startHour` is accepted too.
 - **Phone:** any common format; the API normalises it.
@@ -105,13 +118,16 @@ Returns the public booking. `404 BOOKING_NOT_FOUND` without a valid token.
   "ground": { "id": "uuid", "name": "Green Arena", "sport": "football", "format": "5x5", "address": "…", "coverPhoto": "/api/v1/uploads/…" },
   "slot": { "date": "2026-11-02", "startHour": 18, "endHour": 19 },
   "payAtVenue": false,
+  "walletPayment": null,
   "amount": 150000, "serviceFee": 5000, "total": 155000, "paid": 155000, "due": 0,
-  "createdAt": "…", "cancelledAt": null, "canCancel": true, "canPay": false
+  "createdAt": "…", "cancelledAt": null, "canCancel": true, "canPay": false,
+  "cancelRequested": false, "canRequestCancel": false
 }
 ```
 
 - **Right after the Stripe redirect,** the webhook may not have arrived yet, so `status` can still be `pending`. Poll every 2 seconds for up to about 20 seconds, showing "Confirming your payment…", until it's `confirmed`.
 - **Replace the hardcoded confirmation page** with this data.
+- **`walletPayment`** is set when the customer paid by bKash / Nagad: `{ method, amount, reference, status }`. `status: "pending"` means the venue is still verifying it; `canPay` is false meanwhile.
 
 ### `POST /api/v1/bookings/:id/pay?token=…`: the "Pay now" button
 
@@ -126,6 +142,8 @@ Returns the public booking. `404 BOOKING_NOT_FOUND` without a valid token.
   - A part payment only updates `paid` and `due`.
 - **Errors:**
   - `409 NOTHING_DUE`: already paid, or cancelled.
+  - `409 PAYMENT_UNDER_REVIEW`: a bKash / Nagad payment is still being verified.
+  - `400 CARD_NOT_AVAILABLE`: card payment is off (no Stripe key or webhook secret). The same applies to `POST /bookings/:id/checkout`.
   - `404` without a valid token.
   - `502 PAYMENT_PROVIDER_ERROR`.
 - **A card checkout that's still in progress** gets its open Stripe page back, the same as `POST /bookings/:id/checkout`.
@@ -133,12 +151,18 @@ Returns the public booking. `404 BOOKING_NOT_FOUND` without a valid token.
 
 ### `POST /api/v1/bookings/:id/cancel?token=…`
 - **What it does:** full refund to the card, frees the slot and emails the customer. Returns the updated public booking.
-- **When to show the button:** only when `canCancel` is true. That means portal bookings outside the cancellation cutoff (default 2 hours before the start).
+- **When to show the button:** only when `canCancel` is true. That means portal bookings outside the cancellation cutoff (default 2 hours before the start), and not while a bKash / Nagad payment is under review.
 - **Errors:**
+  - `409 PAYMENT_UNDER_REVIEW`: a bKash / Nagad payment is being verified; offer "Request cancellation" instead
   - `400 CANCELLATION_WINDOW_PASSED`
   - `409 BOOKING_ALREADY_CANCELLED`
   - `409 BOOKING_COMPLETED`
   - `502 REFUND_FAILED`
+
+### `POST /api/v1/bookings/:id/cancel-request?token=…`
+- **When:** `canRequestCancel` is true: a portal bKash / Nagad payment is under review, no request was sent yet, and it's before the cancellation cutoff. Show "Request cancellation"; once sent, `cancelRequested` is true: show "Cancellation requested".
+- **What it does:** records the request (`cancel_requested` event), emails staff (the Notifications page's recipients, or every active admin) and returns the updated public booking. The booking stays as it is: staff then **Verify and cancel with a refund** (paid back by hand; the customer gets the cancellation email with the refund) or **Reject** the payment.
+- **Errors:** `404` without a valid token, `400 CANCELLATION_WINDOW_PASSED` (inside the cutoff, or not a portal booking), `409 CANCEL_ALREADY_REQUESTED`, `409 NOT_UNDER_REVIEW` (nothing is being verified: cancel directly).
 
 ### `POST /api/v1/bookings/:id/checkout?token=…`
 "Complete payment" for a `pending` booking while its hold lasts. Returns `{ bookingId, checkoutUrl }`. Once the hold is gone it returns `409 BOOKING_NOT_PENDING`.
@@ -216,6 +240,9 @@ Optional. Guests can still book, and signed links keep working. The session is a
 - `ground.name` holds the ground's name. The old mock put it in `groundId` by mistake.
 - `contact` holds the details given for *this* booking. A portal checkout never overwrites the customer record.
 - `payAtVenue: true` means a portal customer chose cash. These bookings appear in the review queue: confirm them, then record the cash with `POST /:id/payments` when the customer pays. The public booking includes `payAtVenue` too.
+- `walletPayment` (or `null`) is the bKash / Nagad payment a portal customer sent: `{ method, amount, reference, payerNumber, status }`. While `status` is `pending` the booking is in the review queue: staff check their own bKash / Nagad app for that TrxID and sender, then **Verify** (`POST /:id/confirm`) or **Reject** (`POST /:id/cancel` with `refund: false, rejectWalletPayment: true`). It is not money owed meanwhile: it's left out of dues, overdue, reminders, the due digest and customer due amounts, and "Collect payment" is refused (`409 PAYMENT_UNDER_REVIEW`); hide that button.
+- `cancelRequestedAt` is set when the customer asked to cancel while the payment was under review: show a "Cancel requested" badge.
+- A verified bKash / Nagad payment counts as received (revenue, Today's Money) on the day it was **verified**.
 
 ### Endpoints
 
@@ -225,15 +252,15 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | `GET /admin/bookings/upcoming?limit=5` | — | The next pending or confirmed bookings (dashboard home) |
 | `GET /admin/bookings/:id` | — | Booking plus `payments[]`, `events[]` (timeline, newest first) and `customer.totalBookings` |
 | `POST /admin/bookings` | See "New Booking" below | **201** booking |
-| `POST /admin/bookings/:id/confirm` | `{ markPaid?: false, method?: "cash", notifyCustomer?: true }` | Booking. Works for unpaid staff bookings and portal pay-at-venue bookings. `409 BOOKING_NOT_PENDING` (also for portal card bookings, which confirm by payment) |
-| `POST /admin/bookings/:id/cancel` | `{ reason?, refund: boolean, notifyCustomer?: true }` | Booking. **Also use it for "Decline".** Frees the slot. Card payments are refunded through Stripe; cash and bank transfers are marked refunded (pay those back by hand) |
-| `POST /admin/bookings/:id/payments` | `{ amount, method: "cash" \| "bank_transfer", note? }` | **201** booking. `400 PAYMENT_EXCEEDS_DUE` |
+| `POST /admin/bookings/:id/confirm` | `{ markPaid?: false, method?: "cash", reference?, notifyCustomer?: true }` | Booking. Works for unpaid staff bookings, portal pay-at-venue bookings and portal bKash / Nagad bookings (**Verify**: the pending payment becomes `succeeded`, recorded by you, and the booking `confirmed` and `paid`). `method` is `cash`, `bank_transfer`, `bkash` or `nagad`; `reference` is an optional TrxID for `bkash` / `nagad`. `409 BOOKING_NOT_PENDING` (also for portal card bookings, which confirm by payment, and when the payment was handled meanwhile). `409 BOOKING_CHANGED` (cancelled meanwhile). `409 WALLET_PAYMENT_EXCEEDS_DUE` (other payments already cover it: reject it instead). `409 REFERENCE_ALREADY_USED` |
+| `POST /admin/bookings/:id/cancel` | `{ reason?, refund: boolean, notifyCustomer?: true, rejectWalletPayment?: false }` | Booking. **Also use it for "Decline" and for rejecting a bKash / Nagad payment** (`refund: false`, `rejectWalletPayment: true`: the payment becomes `failed` and the event says e.g. "bKash payment (TrxID …) rejected"; allowed even after the slot has ended). Frees the slot. Card payments are refunded through Stripe; cash, bank transfers, bKash and Nagad are marked refunded (pay those back by hand). `409 VERIFY_OR_REJECT` for `refund: true` on an unverified payment. `409 PAYMENT_ALREADY_HANDLED` when `rejectWalletPayment` but it was verified meanwhile. `409 BOOKING_CHANGED` when another action changed it at the same moment |
+| `POST /admin/bookings/:id/payments` | `{ amount, method: "cash" \| "bank_transfer" \| "bkash" \| "nagad", reference?, note? }` | **201** booking. `reference`: optional TrxID, `bkash` / `nagad` only. `400 PAYMENT_EXCEEDS_DUE`, `409 REFERENCE_ALREADY_USED`, `409 PAYMENT_UNDER_REVIEW` (verify or reject the customer's bKash / Nagad payment first) |
 | `PATCH /admin/bookings/:id` | `{ notes?, dueDate?, dueNote? }` (`null` clears) | Booking |
 | `POST /admin/bookings/:id/resend-confirmation` | — | `{ sent: boolean }`. `sent: false` if email isn't configured. `409 BOOKING_NOT_CONFIRMED` |
 
-**Payments in the detail view:** `{ id, method, amount, status, cardLast4, stripePaymentIntentId, note, recordedBy, createdAt, refundedAt }`.
+**Payments in the detail view:** `{ id, method, amount, status, cardLast4, stripePaymentIntentId, reference, payerNumber, note, recordedBy, createdAt, refundedAt }`. `reference` is the bKash / Nagad TrxID; `payerNumber` the number a portal customer sent from.
 
-**Events in the detail view:** `{ id, type, detail, user, createdAt }`. `type` is one of `created`, `payment_received`, `confirmed`, `cancelled`, `refunded`, `email_sent`, `completed`. Use these for the Activity timeline instead of the invented one.
+**Events in the detail view:** `{ id, type, detail, user, createdAt }`. `type` is one of `created`, `payment_received`, `confirmed`, `cancelled`, `refunded`, `email_sent`, `completed`, `cancel_requested`. Use these for the Activity timeline instead of the invented one.
 
 **No generic status PATCH:**
 - The list page's inline Pending→Confirmed dropdown should call `confirm`.
@@ -252,10 +279,10 @@ Optional. Guests can still book, and signed links keep working. The session is a
   - `full`: confirmed and paid.
   - `partial`: confirmed and partial. `amount` is the advance and must be below the total.
   - `none`: pending and unpaid.
-- **`method`** is required unless `type` is `none`.
+- **`method`** is required unless `type` is `none`: `cash`, `bank_transfer`, `bkash` or `nagad`. `payment.reference` is an optional TrxID for `bkash` / `nagad`, refused with `type: "none"` (nothing is paid).
 - **Pick the slot** from `GET /admin/slots?groundId&date&status=available&openDaysOnly=true`. The price is the slot's `price`, with no service fee.
 - **The customer** is found or created by phone, and staff edits update the name and email. Send `customer.id` to book for a known customer.
-- **Errors:** `409 SLOT_NOT_AVAILABLE`, `400 SLOT_IN_PAST`, `400 GROUND_CLOSED` (a day the ground doesn't open, with no staff override), `400 PAYMENT_EXCEEDS_DUE`, `404 CUSTOMER_NOT_FOUND`.
+- **Errors:** `409 SLOT_NOT_AVAILABLE`, `400 SLOT_IN_PAST`, `400 GROUND_CLOSED` (a day the ground doesn't open, with no staff override), `400 PAYMENT_EXCEEDS_DUE`, `404 CUSTOMER_NOT_FOUND`, `409 REFERENCE_ALREADY_USED` (that TrxID is already recorded for that method).
 
 ---
 
@@ -321,6 +348,8 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | `holdMinutes` | int 5–30 | 15 |
 | `serviceFee` | int, smallest unit, 0–1000000 | 5000 |
 | `portalCashEnabled` | boolean | `true` |
+| `bkashNumber` | phone, or `null` / `""` for off. Admin only, like every setting | `null` |
+| `nagadNumber` | phone, or `null` / `""` for off | `null` |
 
 ---
 
@@ -342,6 +371,14 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | 502 | `REFUND_FAILED` | Stripe refused the refund; nothing changed |
 | 502 | `PAYMENT_PROVIDER_ERROR` | Stripe unavailable or not configured |
 | 400 | `CASH_NOT_AVAILABLE` | Portal cash chosen while `portalCashEnabled` is off |
+| 400 | `WALLET_NOT_AVAILABLE` | Portal bKash / Nagad chosen while its number isn't set |
+| 409 | `REFERENCE_ALREADY_USED` | A bKash / Nagad TrxID already recorded for that method (portal or staff) |
+| 409 | `PAYMENT_UNDER_REVIEW` | "Pay now", "Collect payment" or a customer cancel while a bKash / Nagad payment is being verified |
+| 409 | `VERIFY_OR_REJECT` | Staff cancel with a refund on an unverified bKash / Nagad payment |
+| 409 | `PAYMENT_ALREADY_HANDLED` | "Reject" after the payment was verified meanwhile |
+| 409 | `BOOKING_CHANGED` | Verify and Reject (or a cancel) on the same booking at the same moment: the other one won |
+| 409 | `WALLET_PAYMENT_EXCEEDS_DUE` | Verify when other payments already cover the booking |
+| 409 | `CANCEL_ALREADY_REQUESTED` / `NOT_UNDER_REVIEW` | Cancel request sent twice / with nothing under review |
 | 409 | `NOTHING_DUE` | "Pay now" on a booking that is paid up or cancelled |
 | 409 | `CUSTOMER_PHONE_TAKEN` | Duplicate phone |
 | 409 | `CUSTOMER_HAS_UPCOMING_BOOKINGS` | Deleting a customer with upcoming bookings |
@@ -357,7 +394,8 @@ Optional. Guests can still book, and signed links keep working. The session is a
 - [ ] My Bookings page from `GET /customer/bookings` (Upcoming / Past tabs), each row opening its `confirmationUrl`
 - [ ] Bookings list: server-side filters, `counts` for stat cards, inline confirm/cancel through the actions
 - [ ] Booking detail: payments, Activity timeline from `events`, cancel (with refund choice), collect payment, resend confirmation; receipt button hidden
-- [ ] Confirm Bookings page: `status=pending` list, Confirm (with "mark paid" and email toggle), Decline = cancel with `reason`
+- [ ] Confirm Bookings page: `status=pending` list, Confirm (with "mark paid" and email toggle), Decline = cancel with `reason`; bKash / Nagad bookings show method, TrxID and sender, with Verify / Reject
+- [ ] Portal checkout offers each of `wallets` with "Send ৳{total} to {number}", TrxID and sender fields
 - [ ] New Booking form: slot picker from `/admin/slots`, phone lookup from `/admin/customers/search`, full / partial / none payment
 - [ ] Customers list and detail from `/admin/customers`; "collect due" records a booking payment
 - [ ] Dashboard home: `/admin/dashboard/stats` and `/admin/bookings/upcoming`

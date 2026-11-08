@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PaginationSchema } from '../common/schemas.js';
+import { PhoneSchema } from '../customers/customers.schemas.js';
 import { hour, oneOf, WEEKDAYS } from '../grounds/grounds.schemas.js';
 
 export const SLOT_STATUSES = ['available', 'held', 'booked', 'blocked'] as const;
@@ -113,6 +114,8 @@ export const BulkUnblockSchema = z.object({
 });
 export type BulkUnblockInput = z.infer<typeof BulkUnblockSchema>;
 
+const walletNumber = z.union([z.literal('').transform(() => null), PhoneSchema]).nullable();
+
 export const SlotSettingsSchema = z.object({
   advanceBookingDays: z.number().int('Must be a whole number').min(1).max(365),
   autoGenerate: z.boolean('autoGenerate must be true or false'),
@@ -125,6 +128,9 @@ export const SlotSettingsSchema = z.object({
   serviceFee: z.number().int('Must be a whole number of the smallest unit').min(0).max(1_000_000),
   /** Portal customers may choose "pay cash at the venue". */
   portalCashEnabled: z.boolean('portalCashEnabled must be true or false'),
+  /** The venue's bKash / Nagad number for portal payments; null or "" = not offered. */
+  bkashNumber: walletNumber,
+  nagadNumber: walletNumber,
 });
 export type SlotSettings = z.infer<typeof SlotSettingsSchema>;
 

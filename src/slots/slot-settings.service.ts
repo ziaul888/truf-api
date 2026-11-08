@@ -13,6 +13,8 @@ export const DEFAULT_SLOT_SETTINGS: SlotSettings = {
   holdMinutes: 15,
   serviceFee: 5000,
   portalCashEnabled: true,
+  bkashNumber: null,
+  nagadNumber: null,
 };
 
 /** The single venue-wide row (id = 1). */
@@ -27,6 +29,8 @@ const toSettings = (row: SlotSettingsRow): SlotSettings => ({
   holdMinutes: row.holdMinutes,
   serviceFee: row.serviceFee,
   portalCashEnabled: row.portalCashEnabled,
+  bkashNumber: row.bkashNumber,
+  nagadNumber: row.nagadNumber,
 });
 
 @Injectable()

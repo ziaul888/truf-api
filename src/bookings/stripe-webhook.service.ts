@@ -75,7 +75,7 @@ export class StripeWebhookService {
         });
         if (count === 0) return false;
         await tx.payment.create({
-          data: { bookingId: booking.id, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY, status: 'succeeded' },
+          data: { bookingId: booking.id, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY, status: 'succeeded', receivedAt: new Date() },
         });
         await tx.booking.update({
           where: { id: booking.id },
@@ -105,7 +105,7 @@ export class StripeWebhookService {
       await tx.payment.create({
         data: {
           bookingId: booking.id, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY,
-          status: 'refunded', stripeRefundId, refundedAt: new Date(),
+          status: 'refunded', stripeRefundId, receivedAt: new Date(), refundedAt: new Date(),
         },
       });
       await tx.booking.update({ where: { id: booking.id }, data: { status: 'cancelled', paymentStatus: 'refunded', liveSlotId: null } });
@@ -138,7 +138,7 @@ export class StripeWebhookService {
     const confirmNow = booking.status === 'pending' && paymentStatus === 'paid';
     await this.prisma.$transaction(async (tx) => {
       await tx.payment.create({
-        data: { bookingId, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY, status: 'succeeded' },
+        data: { bookingId, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY, status: 'succeeded', receivedAt: new Date() },
       });
       await tx.booking.update({ where: { id: bookingId }, data: { paymentStatus, ...(confirmNow && { status: 'confirmed', confirmedAt: new Date() }) } });
       await tx.bookingEvent.createMany({
@@ -157,7 +157,7 @@ export class StripeWebhookService {
       this.prisma.payment.create({
         data: {
           bookingId, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY,
-          status: 'refunded', stripeRefundId, refundedAt: new Date(),
+          status: 'refunded', stripeRefundId, receivedAt: new Date(), refundedAt: new Date(),
         },
       }),
       this.prisma.bookingEvent.createMany({

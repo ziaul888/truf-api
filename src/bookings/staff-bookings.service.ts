@@ -9,14 +9,19 @@ import { fromDbDate, hasStarted, toDbDate, venueNow } from '../slots/venue-time.
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
-  bookingNotFound, bookingNotPending, dueOf, paymentStatusOf, slotNotAvailable, withBookingNumber,
+  bookingChanged, bookingNotFound, bookingNotPending, dueOf, isUnderReview, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
+  receivedDetail, slotNotAvailable, withBookingNumber, withUniqueReference,
 } from './booking-rules.js';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from './booking.dto.js';
+import { verifyWalletPayment } from './wallet-verification.js';
 import type {
   CancelBookingInput, ConfirmBookingInput, CreateStaffBookingInput, RecordPaymentInput, UpdateBookingInput,
 } from './bookings.schemas.js';
 
 const exceedsDue = (message: string) => new AppError(message, 400, 'PAYMENT_EXCEEDS_DUE');
+
+type StaffPayment = { amount: number; method: RecordPaymentInput['method']; reference?: string; note?: string };
+type PaymentLike = { amount: number; status: PaymentStatus };
 
 /** Walk-in and phone bookings made from the dashboard, plus the staff actions on any booking. */
 @Injectable()
@@ -55,19 +60,26 @@ export class StaffBookingsService {
     return this.dto(id);
   }
 
-  async confirm(actorId: string, id: string, { markPaid, method, notifyCustomer }: ConfirmBookingInput): Promise<BookingDto> {
+  /**
+   * Confirms a pending booking. For a bKash / Nagad booking this is "Verify": staff have found the
+   * money in their own app, so the pending wallet payment becomes succeeded first.
+   */
+  async confirm(actorId: string, id: string, { markPaid, method, reference, notifyCustomer }: ConfirmBookingInput): Promise<BookingDto> {
     const booking = await this.load(id);
     if (booking.status !== 'pending') throw bookingNotPending();
-    if (booking.source === 'portal' && !booking.payAtVenue) throw bookingNotPending('Card bookings are confirmed by their payment');
-    const due = dueOf(booking, booking.payments);
-    await this.prisma.$transaction(async (tx) => {
-      const payments: { amount: number; status: PaymentStatus }[] = [...booking.payments];
-      if (markPaid && due > 0) payments.push(await this.addPayment(tx, id, actorId, { amount: due, method }));
-      await tx.booking.update({
-        where: { id }, data: { status: 'confirmed', confirmedAt: new Date(), paymentStatus: paymentStatusOf(booking.total, payments) },
+    const wallet = pendingWalletPayment(booking.payments);
+    if (booking.source === 'portal' && !booking.payAtVenue && !wallet) throw bookingNotPending('Card bookings are confirmed by their payment');
+    await withUniqueReference(() => this.prisma.$transaction(async (tx) => {
+      const payments: PaymentLike[] = wallet ? await verifyWalletPayment(tx, booking, actorId) : [...booking.payments];
+      const due = dueOf(booking, payments);
+      if (markPaid && due > 0) payments.push(await this.addPayment(tx, id, actorId, { amount: due, method, reference }));
+      // Only while still pending: a Reject or customer cancel that got in first wins (409, rolled back).
+      const { count } = await tx.booking.updateMany({
+        where: { id, status: 'pending' }, data: { status: 'confirmed', confirmedAt: new Date(), paymentStatus: paymentStatusOf(booking.total, payments) },
       });
-      await tx.bookingEvent.create({ data: { bookingId: id, type: 'confirmed', userId: actorId, detail: 'Confirmed by staff' } });
-    });
+      if (count === 0) throw bookingChanged();
+      await tx.bookingEvent.create({ data: { bookingId: id, type: 'confirmed', userId: actorId, detail: wallet ? 'Payment verified by staff' : 'Confirmed by staff' } });
+    }));
     if (notifyCustomer) await this.notifier.confirmed(id);
     return this.dto(id);
   }
@@ -76,12 +88,15 @@ export class StaffBookingsService {
   async recordPayment(actorId: string, id: string, input: RecordPaymentInput): Promise<BookingDto> {
     const booking = await this.load(id);
     if (booking.status === 'cancelled') throw new AppError('This booking is cancelled', 409, 'BOOKING_ALREADY_CANCELLED');
+    if (pendingWalletPayment(booking.payments)) {
+      throw paymentUnderReview('A bKash / Nagad payment on this booking is waiting to be verified. Verify or reject it first');
+    }
     const due = dueOf(booking, booking.payments);
     if (input.amount > due) throw exceedsDue(`Only ${due} is due on this booking`);
-    await this.prisma.$transaction(async (tx) => {
+    await withUniqueReference(() => this.prisma.$transaction(async (tx) => {
       const payment = await this.addPayment(tx, id, actorId, input);
       await tx.booking.update({ where: { id }, data: { paymentStatus: paymentStatusOf(booking.total, [...booking.payments, payment]) } });
-    });
+    }));
     return this.dto(id);
   }
 
@@ -94,8 +109,13 @@ export class StaffBookingsService {
   }
 
   async cancel(actorId: string, id: string, input: CancelBookingInput): Promise<BookingDto> {
-    await this.load(id);
-    await this.cancellation.cancel(id, { actorId, reason: input.reason, refund: input.refund, notify: input.notifyCustomer });
+    const booking = await this.load(id);
+    if (input.refund && isUnderReview(booking, booking.payments)) {
+      throw new AppError('This bKash / Nagad payment is not verified yet: verify it first to refund it, or reject it', 409, 'VERIFY_OR_REJECT');
+    }
+    await this.cancellation.cancel(id, {
+      actorId, reason: input.reason, refund: input.refund, notify: input.notifyCustomer, rejectWallet: input.rejectWalletPayment,
+    });
     return this.dto(id);
   }
 
@@ -107,14 +127,15 @@ export class StaffBookingsService {
     return { sent: await this.notifier.confirmed(id) };
   }
 
-  private async addPayment(
-    tx: Prisma.TransactionClient, bookingId: string, actorId: string, p: { amount: number; method: 'cash' | 'bank_transfer'; note?: string },
-  ) {
+  private async addPayment(tx: Prisma.TransactionClient, bookingId: string, actorId: string, p: StaffPayment) {
     const payment = await tx.payment.create({
-      data: { bookingId, method: p.method, amount: p.amount, currency: env.CURRENCY, status: 'succeeded', note: p.note ?? null, recordedById: actorId },
+      data: {
+        bookingId, method: p.method, amount: p.amount, currency: env.CURRENCY, status: 'succeeded', receivedAt: new Date(),
+        reference: p.reference ?? null, note: p.note ?? null, recordedById: actorId,
+      },
     });
     await tx.bookingEvent.create({
-      data: { bookingId, type: 'payment_received', userId: actorId, detail: `Received ${p.amount} by ${p.method.replace('_', ' ')}` },
+      data: { bookingId, type: 'payment_received', userId: actorId, detail: receivedDetail(p.amount, p.method, p.reference) },
     });
     return payment;
   }
@@ -143,7 +164,7 @@ function newStaffBooking(actorId: string, input: CreateStaffBookingInput, slot: 
   const events: Prisma.BookingEventCreateWithoutBookingInput[] = [{ type: 'created', detail: 'Booked by staff', user: { connect: { id: actorId } } }];
   if (paid > 0) {
     events.push(
-      { type: 'payment_received', detail: `Received ${paid} by ${payment.method!.replace('_', ' ')}`, user: { connect: { id: actorId } } },
+      { type: 'payment_received', detail: receivedDetail(paid, payment.method!, payment.reference), user: { connect: { id: actorId } } },
       { type: 'confirmed', detail: 'Confirmed on booking', user: { connect: { id: actorId } } },
     );
   }
@@ -158,7 +179,12 @@ function newStaffBooking(actorId: string, input: CreateStaffBookingInput, slot: 
     dueNote: payment.type === 'partial' ? (payment.note ?? null) : null,
     notes: input.notes ?? null, createdById: actorId,
     payments: paid > 0
-      ? { create: [{ method: payment.method!, amount: paid, currency: env.CURRENCY, status: 'succeeded' as const, note: payment.note ?? null, recordedById: actorId }] }
+      ? {
+        create: [{
+          method: payment.method!, amount: paid, currency: env.CURRENCY, status: 'succeeded' as const, receivedAt: new Date(),
+          reference: payment.reference ?? null, note: payment.note ?? null, recordedById: actorId,
+        }],
+      }
       : undefined,
     events: { create: events },
   };

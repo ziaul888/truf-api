@@ -109,7 +109,7 @@ describe('Reports (e2e)', () => {
     expect(res.body.data).toEqual({
       period: MARCH, previous: { from: '2025-01-29', to: '2025-02-28' },
       revenue: -1000, revenueTrend: -150, received: 1000, refunds: 2000,
-      revenueByMethod: { card: -2000, cash: 1000, bank_transfer: 0 },
+      revenueByMethod: { card: -2000, cash: 1000, bank_transfer: 0, bkash: 0, nagad: 0 },
       bookings: 3, bookingsTrend: null,
       avgBookingValue: 2000, avgBookingValueTrend: null,
       completionRate: 33.3, completionRateTrend: null,
@@ -162,10 +162,10 @@ describe('Reports (e2e)', () => {
     it('revenue CSV by day', async () => {
       const res = await (await signIn('admin')).get(`${REPORTS}/export`).query({ type: 'revenue', ...MARCH, groupBy: 'day' }).buffer(true).expect(200);
       const lines = res.text.replace('﻿', '').trim().split('\r\n');
-      expect(lines[0]).toBe('Period start,Period end,Received,Refunds,Net revenue,Card,Cash,Bank transfer,Bookings');
+      expect(lines[0]).toBe('Period start,Period end,Received,Refunds,Net revenue,Card,Cash,Bank transfer,Bookings,bKash,Nagad');
       expect(lines).toHaveLength(32);
-      expect(lines[10]).toBe('2025-03-10,2025-03-10,10.00,0.00,10.00,0.00,10.00,0.00,3');
-      expect(lines[12]).toBe('2025-03-12,2025-03-12,0.00,20.00,-20.00,-20.00,0.00,0.00,0');
+      expect(lines[10]).toBe('2025-03-10,2025-03-10,10.00,0.00,10.00,0.00,10.00,0.00,3,0.00,0.00');
+      expect(lines[12]).toBe('2025-03-12,2025-03-12,0.00,20.00,-20.00,-20.00,0.00,0.00,0,0.00,0.00');
     });
 
     it('customers CSV, filtered by when they joined', async () => {

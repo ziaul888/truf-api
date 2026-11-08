@@ -152,9 +152,9 @@ describe('Settings (e2e)', () => {
 
   it('payments and system status show state, never secrets', async () => {
     const pay = await admin.get(`${S}/payments/status`).expect(200);
-    expect(pay.body.data).toMatchObject({ stripe: { configured: false, mode: null, currency: 'bdt' }, methods: { card: false, cash: true, bankTransfer: true } });
+    expect(pay.body.data).toMatchObject({ stripe: { configured: true, mode: 'test', currency: 'bdt' }, methods: { card: true, cash: true, bankTransfer: true } });
     const sys = await admin.get(`${API}/admin/system/status`).expect(200);
-    expect(sys.body.data).toMatchObject({ version: expect.any(String), database: { ok: true }, counts: { grounds: expect.any(Number) }, integrations: { stripe: false, sendgrid: false } });
+    expect(sys.body.data).toMatchObject({ version: expect.any(String), database: { ok: true }, counts: { grounds: expect.any(Number) }, integrations: { stripe: true, sendgrid: false } });
     const all = JSON.stringify([pay.body, sys.body]);
     for (const secret of [env.DATABASE_URL, env.JWT_SECRET]) expect(all).not.toContain(secret);
   });

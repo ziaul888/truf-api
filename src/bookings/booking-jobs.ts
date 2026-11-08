@@ -8,7 +8,7 @@ import { addDays, fromDbDate, minutesUntil, toDbDate, venueNow } from '../slots/
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { isDueToday, isOverdue, loadOwing } from './booking-due.js';
-import { dueOf } from './booking-rules.js';
+import { dueOf, WALLET_UNDER_REVIEW } from './booking-rules.js';
 
 const MINUTE_MS = 60_000;
 /** The due digest goes out on the first hourly run from 09:00 venue time. */
@@ -86,7 +86,7 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
     const bookings = await this.prisma.booking.findMany({
       where: {
         deletedAt: null, status: { in: ['pending', 'confirmed'] }, paymentStatus: { in: ['partial', 'unpaid'] },
-        dueDate: tomorrow, dueReminderSentAt: null,
+        dueDate: tomorrow, dueReminderSentAt: null, NOT: WALLET_UNDER_REVIEW,
       },
       include: { payments: { where: { deletedAt: null } } },
     });

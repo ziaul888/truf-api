@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Paginated } from '../common/schemas.js';
 import type { BookingStatus, Prisma } from '../generated/prisma/client.js';
-import { StripeService } from '../payments/stripe.service.js';
+import { cardPaymentsEnabled, StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { upcomingWhere } from '../slots/slot-rules.js';
@@ -11,7 +11,8 @@ import { BookingNotifier } from './booking-notifier.service.js';
 import { loadOwing, matchesDue, type DueFilter } from './booking-due.js';
 import { ABANDONED_CHECKOUT, bookingNotFound, confirmationUrl, isValidBookingToken } from './booking-rules.js';
 import {
-  BOOKING_DETAIL_INCLUDE, BOOKING_INCLUDE, customerCanCancel, customerCanPay, toBookingDetailDto, toBookingDto, toPublicBookingDto,
+  BOOKING_DETAIL_INCLUDE, BOOKING_INCLUDE, customerCanCancel, customerCanPay, customerCanRequestCancel, toBookingDetailDto, toBookingDto,
+  toPublicBookingDto,
   type BookingDetailDto, type BookingDto, type PublicBookingDto,
 } from './booking.dto.js';
 import type { ListBookingsQuery, MyBookingsQuery } from './bookings.schemas.js';
@@ -92,7 +93,10 @@ export class BookingQueriesService {
       this.settings.get(),
     ]);
     const data = rows.map((b) => ({
-      ...toPublicBookingDto(b, customerCanCancel(b, now, cancellationCutoffHours), customerCanPay(b)),
+      ...toPublicBookingDto(
+        b, customerCanCancel(b, now, cancellationCutoffHours), cardPaymentsEnabled() && customerCanPay(b),
+        customerCanRequestCancel(b, now, cancellationCutoffHours),
+      ),
       confirmationUrl: confirmationUrl(b.id),
     }));
     return { data, total, page: q.page, limit: q.limit };
@@ -104,7 +108,11 @@ export class BookingQueriesService {
     const booking = await this.prisma.booking.findFirst({ where: { id, deletedAt: null }, include: BOOKING_INCLUDE });
     if (!booking) throw bookingNotFound();
     const { cancellationCutoffHours } = await this.settings.get();
-    return toPublicBookingDto(booking, customerCanCancel(booking, venueNow(), cancellationCutoffHours), customerCanPay(booking));
+    const now = venueNow();
+    return toPublicBookingDto(
+      booking, customerCanCancel(booking, now, cancellationCutoffHours), cardPaymentsEnabled() && customerCanPay(booking),
+      customerCanRequestCancel(booking, now, cancellationCutoffHours),
+    );
   }
 
   /** Customer cancel through the signed link: full refund, slot freed, email sent. */

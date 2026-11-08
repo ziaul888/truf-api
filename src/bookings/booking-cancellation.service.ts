@@ -6,7 +6,9 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { fromDbDate, minutesUntil, venueNow } from '../slots/venue-time.js';
 import { BookingNotifier } from './booking-notifier.service.js';
-import { bookingNotFound, paymentStatusOf } from './booking-rules.js';
+import {
+  bookingChanged, bookingNotFound, isUnderReview, isWalletMethod, methodName, paymentStatusOf, paymentUnderReview,
+} from './booking-rules.js';
 import { BOOKING_INCLUDE, type BookingRow } from './booking.dto.js';
 
 export interface CancelOptions {
@@ -18,17 +20,20 @@ export interface CancelOptions {
   notify: boolean;
   /** Customer through the signed link: portal bookings only, outside the cancellation cutoff. */
   byCustomer?: boolean;
+  /** Staff "Reject": only while a bKash / Nagad payment is still unverified (else 409 PAYMENT_ALREADY_HANDLED). */
+  rejectWallet?: boolean;
   /** Staff blocking the booked slot: the slot ends blocked instead of available. */
   blockSlot?: { reason: BlockReason; note?: string };
 }
 
-/** Refund ids by payment id (null for cash and bank transfer, refunded by hand). */
+/** Refund ids by payment id (null for cash, bank transfer, bKash and Nagad, refunded by hand). */
 type Refunds = Map<string, string | null>;
 
 /**
  * The one way a booking gets cancelled: by staff, by the customer, by the hold sweep, or by a
  * block over the slot. Refunds go first (outside the transaction): if Stripe refuses, nothing
- * changes and 502 REFUND_FAILED is returned.
+ * changes and 502 REFUND_FAILED is returned. A bKash / Nagad payment staff never verified is
+ * marked failed (staff "Reject" is this cancel), whether or not a refund was asked for.
  */
 @Injectable()
 export class BookingCancellationService {
@@ -42,19 +47,28 @@ export class BookingCancellationService {
   async cancel(bookingId: string, opts: CancelOptions): Promise<void> {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: BOOKING_INCLUDE });
     if (!booking || booking.deletedAt) throw bookingNotFound();
+    if (opts.rejectWallet && !isUnderReview(booking, booking.payments)) {
+      throw new AppError('This payment was already verified or rejected. Reload the booking', 409, 'PAYMENT_ALREADY_HANDLED');
+    }
     await this.assertCancellable(booking, opts);
 
     const refunds: Refunds = opts.refund ? await this.refund(booking.payments) : new Map();
+    const unverified = unverifiedOf(booking).map((p) => p.id);
     await this.prisma.$transaction(async (tx) => {
       await this.markRefunded(tx, refunds);
-      const payments = booking.payments.map((p) => (refunds.has(p.id) ? { ...p, status: 'refunded' as const } : p));
-      await tx.booking.update({
-        where: { id: bookingId },
+      await failUnverified(tx, unverified);
+      const payments = booking.payments.map((p) => (
+        refunds.has(p.id) ? { ...p, status: 'refunded' as const } : unverified.includes(p.id) ? { ...p, status: 'failed' as const } : p
+      ));
+      // Only from the status it was read in: a Verify that got in first wins (409, rolled back).
+      const { count } = await tx.booking.updateMany({
+        where: { id: bookingId, status: booking.status },
         data: {
           status: 'cancelled', cancelledAt: new Date(), cancelReason: opts.reason ?? null, cancelledById: opts.actorId,
           liveSlotId: null, paymentStatus: paymentStatusOf(booking.total, payments),
         },
       });
+      if (count === 0) throw bookingChanged();
       if (booking.liveSlotId) await this.releaseSlot(tx, booking, opts);
       await this.logEvents(tx, booking, opts, refunds);
     });
@@ -67,8 +81,13 @@ export class BookingCancellationService {
 
   private async assertCancellable(b: BookingRow, opts: CancelOptions) {
     if (b.status === 'cancelled') throw new AppError('This booking is already cancelled', 409, 'BOOKING_ALREADY_CANCELLED');
+    const underReview = isUnderReview(b, b.payments);
+    // The customer asks instead while staff verify (POST /bookings/:id/cancel-request).
+    if (opts.byCustomer && underReview) throw paymentUnderReview('Your payment is being verified. Ask the venue to cancel instead');
     const slotEnd = b.slot.startHour + b.slot.durationMinutes / 60;
-    if (b.status === 'completed' || minutesUntil(venueNow(), fromDbDate(b.slot.date), slotEnd) <= 0) {
+    // Staff may still reject an unverified bKash / Nagad payment after the slot has ended.
+    const ended = minutesUntil(venueNow(), fromDbDate(b.slot.date), slotEnd) <= 0;
+    if (b.status === 'completed' || (ended && !(underReview && !opts.byCustomer && !opts.refund))) {
       throw new AppError('This booking has already taken place', 409, 'BOOKING_COMPLETED');
     }
     if (!opts.byCustomer) return;
@@ -82,7 +101,7 @@ export class BookingCancellationService {
     }
   }
 
-  /** Card payments go back through Stripe; cash and bank transfers are marked refunded (paid back by hand). */
+  /** Card payments go back through Stripe; cash, bank transfers, bKash and Nagad are marked refunded (paid back by hand). */
   private async refund(payments: Payment[]): Promise<Refunds> {
     const refunds: Refunds = new Map();
     for (const p of payments.filter((x) => x.status === 'succeeded')) {
@@ -119,11 +138,22 @@ export class BookingCancellationService {
 
   private async logEvents(tx: Prisma.TransactionClient, b: BookingRow, opts: CancelOptions, refunds: Refunds) {
     const by = opts.byCustomer ? 'Cancelled by the customer' : opts.actorId ? 'Cancelled by staff' : 'Cancelled automatically';
-    const events: Prisma.BookingEventCreateManyInput[] = [
-      { bookingId: b.id, type: 'cancelled', userId: opts.actorId, detail: opts.reason ? `${by}: ${opts.reason}` : by },
-    ];
+    // "bKash payment (TrxID 9BC4D7XK2M) rejected"
+    const rejected = unverifiedOf(b).map((p) => `${methodName(p.method)} payment (TrxID ${p.reference ?? 'none'}) rejected`);
+    const detail = [opts.reason ? `${by}: ${opts.reason}` : by, ...rejected].join('. ');
+    const events: Prisma.BookingEventCreateManyInput[] = [{ bookingId: b.id, type: 'cancelled', userId: opts.actorId, detail }];
     const refunded = b.payments.filter((p) => refunds.has(p.id)).reduce((sum, p) => sum + p.amount, 0);
     if (refunded > 0) events.push({ bookingId: b.id, type: 'refunded', userId: opts.actorId, detail: `Refunded ${refunded}` });
     await tx.bookingEvent.createMany({ data: events });
   }
+}
+
+/** bKash / Nagad payments staff never verified: they fail when the booking is cancelled. */
+const unverifiedOf = (b: BookingRow) => b.payments.filter((p) => p.status === 'pending' && isWalletMethod(p.method));
+
+/** Fails them; if one was verified meanwhile, aborts the cancel (409, rolled back). */
+async function failUnverified(tx: Prisma.TransactionClient, ids: string[]) {
+  if (ids.length === 0) return;
+  const { count } = await tx.payment.updateMany({ where: { id: { in: ids }, status: 'pending' }, data: { status: 'failed' } });
+  if (count < ids.length) throw bookingChanged();
 }

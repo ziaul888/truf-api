@@ -53,6 +53,9 @@ enum PaymentMethod {
   card
   cash
   bank_transfer
+  /// Sent by the customer to the venue's bKash / Nagad number; staff verify it by hand.
+  bkash
+  nagad
 }
 
 enum BookingEventType {
@@ -63,6 +66,8 @@ enum BookingEventType {
   refunded
   email_sent
   completed
+  /// The customer asked to cancel while their bKash / Nagad payment was being verified.
+  cancel_requested
 }
 
 /// Why staff blocked a slot (the dashboard's block form list).
@@ -299,6 +304,9 @@ model SlotSettings {
   serviceFee              Int      @default(5000)
   /// Lets portal customers choose "pay cash at the venue" instead of card.
   portalCashEnabled       Boolean  @default(true)
+  /// The venue's bKash / Nagad number customers send money to. Null = not offered on the portal.
+  bkashNumber             String?
+  nagadNumber             String?
   updatedAt               DateTime @updatedAt
 }
 
@@ -360,6 +368,8 @@ model Booking {
   cancelledAt             DateTime?
   cancelReason            String?
   cancelledById           String?
+  /// The customer asked to cancel while their bKash / Nagad payment was under review; staff decide.
+  cancelRequestedAt       DateTime?
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   deletedAt               DateTime?
@@ -390,8 +400,17 @@ model Payment {
   /// ISO 4217, lowercase as Stripe uses it (e.g. "bdt").
   currency              String
   status                PaymentStatus @default(pending)
+  /// When the money counted as received (succeeded): reports and the dashboard date revenue by this.
+  /// A bKash / Nagad payment is received when staff verify it. Null on older rows: use createdAt.
+  receivedAt            DateTime?
   stripeRefundId        String?       @unique
   refundedAt            DateTime?
+  /// bKash / Nagad transaction id (TrxID), uppercase. Unique per method among payments that are not
+  /// failed or deleted: a partial unique index "Payment_method_reference_key", hand-written in the
+  /// 20261106150000_wallet_payment_fixes migration (Prisma can't express it). A rejected TrxID can be reused.
+  reference             String?
+  /// bKash / Nagad: the number the customer sent the money from (portal payments).
+  payerNumber           String?
   note                  String?
   recordedById          String?
   createdAt             DateTime      @default(now())

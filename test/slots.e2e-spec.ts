@@ -29,6 +29,8 @@ const monday = (() => {
   return d;
 })();
 
+const nullOrString = (v: unknown) => v === null || typeof v === 'string';
+
 describe('Slots (e2e)', () => {
   let app: INestApplication<App>;
   let prisma: PrismaService;
@@ -226,6 +228,8 @@ describe('Slots (e2e)', () => {
       expect(res.body.data).toEqual({
         advanceBookingDays: 30, autoGenerate: false, cancellationCutoffHours: 2, notifyCustomerOnBlock: true, notifyAdminOnBooking: false,
         holdMinutes: 15, serviceFee: 5000, portalCashEnabled: true,
+        // wallet-payments.e2e-spec sets these meanwhile.
+        bkashNumber: expect.toSatisfy(nullOrString), nagadNumber: expect.toSatisfy(nullOrString),
         updatedAt: expect.any(String), updatedBy: { id: expect.any(String), name: 'Admin' },
       });
     });

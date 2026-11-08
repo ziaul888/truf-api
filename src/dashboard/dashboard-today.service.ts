@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { dueOf } from '../bookings/booking-rules.js';
+import { owedOf } from '../bookings/booking-rules.js';
 import type { Closure, Prisma, SlotStatus, Sport } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { loadMoney, moneyTotals, type MoneyEvent } from '../reports/report-data.js';
@@ -11,7 +11,7 @@ const TODAY_SLOT_SELECT = {
     where: { liveSlotId: { not: null } }, take: 1,
     select: {
       id: true, bookingNumber: true, contactName: true, status: true, total: true,
-      payments: { where: { deletedAt: null }, select: { amount: true, status: true } },
+      payments: { where: { deletedAt: null }, select: { amount: true, status: true, method: true } },
     },
   },
 } satisfies Prisma.SlotSelect;
@@ -102,7 +102,8 @@ export function groundToday(g: Ground, all: TodaySlot[], closures: Closure[], mo
     remainingFreeHours: hours(slots.filter((s) => s.status === 'available' && !started(s.startHour))),
     revenueToday: moneyTotals(money.filter((e) => e.groundId === g.id)).revenue,
     current: current ? playing(current) : null,
-    next: next ? { ...playing(next), due: dueOf(next.bookings[0]!, next.bookings[0]!.payments) } : null,
+    // A bKash / Nagad payment being verified is not "due": no Collect button for it.
+    next: next ? { ...playing(next), due: owedOf(next.bookings[0]!, next.bookings[0]!.payments) } : null,
     timeline: slots.map((s) => ({ startHour: s.startHour, endHour: endOf(s), status: s.status })),
   };
 }
