@@ -6,14 +6,15 @@ export const DEFAULT_WEBSITE: WebsiteStored = {
     badge: 'BOOK IN 60 SECONDS',
     headline: 'Welcome to',
     description:
-      'Six fields under one roof — football 5×5 / 6×6 / 7×7, full-size cricket nets and indoor badminton courts. Real-time slot availability, instant confirmation.',
+      'See which slots are free right now and book your ground in a minute.',
     imageUrl: 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=1920',
   },
   sections: {
     sportChips: { enabled: true, title: 'Browse by sport' },
     featuredGrounds: { enabled: true, title: 'Our grounds', subtitle: 'Pick the field that fits your match' },
     amenities: {
-      enabled: true,
+      // Example items only: off until the admin edits them to what the venue really has.
+      enabled: false,
       title: 'More than just a pitch',
       subtitle: 'Everything you need at the venue, included with every booking.',
       items: [
@@ -30,16 +31,16 @@ export const DEFAULT_WEBSITE: WebsiteStored = {
       badge: 'HOW IT WORKS',
       title: 'Three steps to your match',
       steps: [
-        { title: 'Pick a ground', body: 'Choose from our 6 grounds — football 5×5 / 6×6 / 7×7 / 11×11, cricket nets or badminton.' },
-        { title: 'Pick a slot & pay', body: 'Real-time hourly availability. Pay securely via Stripe — card, Apple Pay, Google Pay.' },
-        { title: 'Show up & play', body: 'Confirmation lands in your inbox. Free cancellation up to 24h before kickoff.' },
+        { title: 'Pick a ground', body: 'Choose the ground and sport that fit your match.' },
+        { title: 'Pick a slot & pay', body: 'See open slots in real time and pay the way that suits you.' },
+        { title: 'Show up & play', body: 'Your booking link arrives by email. Use it to check your booking, or to cancel it before the cancellation cutoff.' },
       ],
       buttonLabel: 'Browse our grounds',
     },
     visitUs: {
       enabled: true,
       badge: 'VISIT US',
-      title: 'One venue. Six grounds. Open 18 hours a day.',
+      title: 'Come and play',
       imageUrl: 'https://images.unsplash.com/photo-1486286701208-1d58e9338013?w=1200',
     },
   },

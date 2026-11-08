@@ -59,10 +59,10 @@ export class EmailService {
     return result;
   }
 
-  /** The from name and reply-to: as set on the Notifications page, else from the venue profile. */
+  /** The from name and reply-to: as set on the Notifications page, else from the venue profile, else the sending address. */
   async sender(): Promise<Sender> {
     const [prefs, venue] = await Promise.all([this.settings.get('notifications'), this.settings.get('venue')]);
-    return { fromEmail: env.EMAIL_FROM, fromName: prefs.fromName ?? venue.name, replyTo: prefs.replyTo ?? venue.supportEmail ?? venue.email };
+    return { fromEmail: env.EMAIL_FROM, fromName: prefs.fromName ?? venue.name, replyTo: prefs.replyTo ?? venue.supportEmail ?? (venue.email || env.EMAIL_FROM) };
   }
 
   private async attempt(message: EmailMessage): Promise<Delivery> {

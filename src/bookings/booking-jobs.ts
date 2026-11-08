@@ -8,7 +8,7 @@ import { addDays, fromDbDate, minutesUntil, toDbDate, venueNow } from '../slots/
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { isDueToday, isOverdue, loadOwing } from './booking-due.js';
-import { dueOf } from './booking-rules.js';
+import { dueOf, WALLET_UNDER_REVIEW } from './booking-rules.js';
 
 const MINUTE_MS = 60_000;
 /** The due digest goes out on the first hourly run from 09:00 venue time. */
@@ -45,22 +45,36 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
     this.timers.forEach(clearInterval);
   }
 
-  /** Cancels the pending booking behind each lapsed hold and expires its Stripe session. */
+  /** Releases every lapsed hold; one that fails is logged and retried next run without holding up the rest. */
   async releaseExpiredHolds(): Promise<number> {
     const slots = await this.prisma.slot.findMany({ where: { status: 'held', heldUntil: { lt: new Date() } } });
+    const failures: unknown[] = [];
     for (const slot of slots) {
-      const booking = slot.heldByBookingId ? await this.prisma.booking.findUnique({ where: { id: slot.heldByBookingId } }) : null;
-      if (booking?.status === 'pending') {
-        await this.cancellation.cancel(booking.id, { actorId: null, reason: 'Payment not completed in time', refund: false, notify: false });
-        if (booking.stripeCheckoutSessionId) await this.stripe.expireSession(booking.stripeCheckoutSessionId);
-      } else {
-        // No pending booking behind it any more: just free the slot.
-        await this.prisma.slot.updateMany({
-          where: { id: slot.id, status: 'held' }, data: { status: 'available', heldUntil: null, heldByBookingId: null },
-        });
+      try {
+        await this.releaseHold(slot);
+      } catch (err) {
+        failures.push(err);
+        this.logger.error(`Could not release the hold on slot ${slot.id}`, err instanceof Error ? err.stack : String(err));
       }
     }
+    if (failures.length > 0) {
+      throw new Error(`Hold release failed for ${failures.length} of ${slots.length} slots`, { cause: failures[0] });
+    }
     return slots.length;
+  }
+
+  /** Cancels the pending booking behind a lapsed hold and expires its Stripe session. */
+  private async releaseHold(slot: { id: string; heldByBookingId: string | null }) {
+    const booking = slot.heldByBookingId ? await this.prisma.booking.findUnique({ where: { id: slot.heldByBookingId } }) : null;
+    if (booking?.status === 'pending') {
+      await this.cancellation.cancel(booking.id, { actorId: null, reason: 'Payment not completed in time', refund: false, notify: false });
+      if (booking.stripeCheckoutSessionId) await this.stripe.expireSession(booking.stripeCheckoutSessionId);
+      return;
+    }
+    // No pending booking behind it any more: just free the slot.
+    await this.prisma.slot.updateMany({
+      where: { id: slot.id, status: 'held' }, data: { status: 'available', heldUntil: null, heldByBookingId: null },
+    });
   }
 
   /** Confirmed bookings whose slot has ended become completed (and can no longer be cancelled). */
@@ -86,7 +100,7 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
     const bookings = await this.prisma.booking.findMany({
       where: {
         deletedAt: null, status: { in: ['pending', 'confirmed'] }, paymentStatus: { in: ['partial', 'unpaid'] },
-        dueDate: tomorrow, dueReminderSentAt: null,
+        dueDate: tomorrow, dueReminderSentAt: null, NOT: WALLET_UNDER_REVIEW,
       },
       include: { payments: { where: { deletedAt: null } } },
     });

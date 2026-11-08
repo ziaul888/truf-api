@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { isDueToday, isOverdue, loadOwing, type OwingBooking } from '../bookings/booking-due.js';
-import { CARD_CHECKOUT_IN_PROGRESS } from '../bookings/booking-rules.js';
+import { CARD_CHECKOUT_IN_PROGRESS, WALLET_UNDER_REVIEW } from '../bookings/booking-rules.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { addDays, fromDbDate, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
 
@@ -8,6 +8,8 @@ const SOON_MINUTES = 60;
 
 export interface DashboardAttention {
   toConfirm: { count: number; payAtVenue: number };
+  /** bKash / Nagad payments staff must check in their app (also counted in toConfirm). Not money owed. */
+  toVerify: { count: number };
   overdue: { count: number; amount: number };
   dueToday: { count: number; amount: number };
   payingNow: { count: number };
@@ -23,7 +25,7 @@ export class DashboardAttentionService {
 
   async attention(): Promise<DashboardAttention> {
     const now = venueNow();
-    const [pending, owing, held, nearby] = await Promise.all([
+    const [pending, owing, held, nearby, toVerify] = await Promise.all([
       // Unpaid staff bookings and pay-at-venue requests; card checkouts confirm themselves.
       this.prisma.booking.findMany({ where: { deletedAt: null, status: 'pending', NOT: CARD_CHECKOUT_IN_PROGRESS }, select: { payAtVenue: true } }),
       loadOwing(this.prisma),
@@ -36,6 +38,7 @@ export class DashboardAttentionService {
         },
         select: { slot: { select: { date: true, startHour: true } } },
       }),
+      this.prisma.booking.count({ where: { deletedAt: null, ...WALLET_UNDER_REVIEW } }),
     ]);
     const soon = nearby.filter(({ slot }) => {
       const minutes = minutesUntil(now, fromDbDate(slot.date), slot.startHour);
@@ -43,6 +46,7 @@ export class DashboardAttentionService {
     });
     return {
       toConfirm: { count: pending.length, payAtVenue: pending.filter((b) => b.payAtVenue).length },
+      toVerify: { count: toVerify },
       overdue: sumDue(owing.filter((b) => isOverdue(b, now))),
       dueToday: sumDue(owing.filter((b) => isDueToday(b, now))),
       payingNow: { count: held },

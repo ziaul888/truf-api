@@ -82,6 +82,13 @@ describe('SlotBlocksService — one slot', () => {
     }));
   });
 
+  it('passes on VERIFY_OR_REJECT for a booking whose bKash payment is unverified, and blocks nothing', async () => {
+    const { service, cancellation, tx } = setup([slot({ status: 'booked' })]);
+    cancellation.cancel.mockRejectedValueOnce(new AppError('Not verified', 409, 'VERIFY_OR_REJECT'));
+    await expectAppError(service.block('u-1', 's-1', { reason: 'maintenance', cancelBooking: true }), 409, 'VERIFY_OR_REJECT');
+    expect(tx.slotEvent.createMany).not.toHaveBeenCalled();
+  });
+
   it('refuses to block a slot held by a checkout', async () => {
     await expectAppError(setup([slot({ status: 'held' })]).service.block('u-1', 's-1', { reason: 'other' }), 409, 'SLOT_NOT_AVAILABLE');
   });

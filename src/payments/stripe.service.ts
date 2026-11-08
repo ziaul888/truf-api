@@ -25,6 +25,12 @@ const MIN_SESSION_SECONDS = 30 * 60 + 60;
 const providerError = (message: string) => new AppError(message, 502, 'PAYMENT_PROVIDER_ERROR');
 
 /**
+ * Whether customers can pay by card. Needs the webhook secret too: without it a customer would be
+ * charged, but the payment would never reach the booking.
+ */
+export const cardPaymentsEnabled = () => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
+
+/**
  * The only place that talks to Stripe. Tests replace it with a mock.
  * Never log card data, secrets or full Stripe payloads.
  */

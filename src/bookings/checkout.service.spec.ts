@@ -1,9 +1,11 @@
+import { env } from '../config/env.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
 import type { StripeService } from '../payments/stripe.service.js';
 import { DEFAULT_SLOT_SETTINGS, type SlotSettingsService } from '../slots/slot-settings.service.js';
 import type { BookingCancellationService } from './booking-cancellation.service.js';
 import type { BookingNotifier } from './booking-notifier.service.js';
 import { bookingToken } from './booking-rules.js';
+import { CheckoutSchema } from './bookings.schemas.js';
 import { CheckoutService } from './checkout.service.js';
 
 // 04:00 UTC = 10:00 in Dhaka, Wed 28 Oct 2026.
@@ -12,10 +14,15 @@ const NOW = new Date('2026-10-28T04:00:00Z');
 const slotRow = (overrides: object = {}) => ({ id: 's-1', groundId: 'g-1', startHour: 18, price: 1500, status: 'available', ...overrides });
 const input = {
   groundId: 'g-1', date: '2026-10-29', startHour: 18, customerName: 'Rakib', customerEmail: 'r@x.test', customerPhone: '+8801711000000',
-  paymentMethod: 'card' as 'card' | 'cash',
+  paymentMethod: 'card' as 'card' | 'cash' | 'bkash' | 'nagad',
 };
+/** Cash, bKash and Nagad need a signed-in customer: their verified phone. */
+const SIGNED_IN = input.customerPhone;
 
-function setup({ slot = slotRow() as object | null, ground = { id: 'g-1', name: 'Arena', availableDays: 'everyday', customDays: [] } as object | null, held = 1, cash = true, existing = null as object | null } = {}) {
+function setup({
+  slot = slotRow() as object | null, ground = { id: 'g-1', name: 'Arena', availableDays: 'everyday', customDays: [] } as object | null,
+  held = 1, cash = true, existing = null as object | null, bkashNumber = null as string | null, openUnpaid = 0,
+} = {}) {
   const tx = {
     slot: { updateMany: vi.fn(async (_args: { data: object }) => ({ count: held })) },
     customer: { findUnique: vi.fn(async () => null), create: vi.fn(async () => ({ id: 'c-1' })) },
@@ -24,7 +31,10 @@ function setup({ slot = slotRow() as object | null, ground = { id: 'g-1', name: 
   const prisma = {
     ground: { findFirst: vi.fn(async () => ground) },
     slot: { findUnique: vi.fn(async () => slot) },
-    booking: { update: vi.fn(async () => ({})), findFirst: vi.fn(async () => existing), findUnique: vi.fn(async () => existing) },
+    booking: {
+      update: vi.fn(async () => ({})), findFirst: vi.fn(async () => existing), findUnique: vi.fn(async () => existing),
+      count: vi.fn(async () => openUnpaid),
+    },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   const stripe = {
@@ -32,7 +42,7 @@ function setup({ slot = slotRow() as object | null, ground = { id: 'g-1', name: 
     openSessionUrl: vi.fn(async () => 'https://stripe.test/open'),
   };
   const cancellation = { cancel: vi.fn(async () => undefined) };
-  const settings = { get: vi.fn(async () => ({ ...DEFAULT_SLOT_SETTINGS, portalCashEnabled: cash })) };
+  const settings = { get: vi.fn(async () => ({ ...DEFAULT_SLOT_SETTINGS, portalCashEnabled: cash, bkashNumber })) };
   const notifier = { received: vi.fn(async () => true), newBookingToAdmins: vi.fn(async () => undefined) };
   const service = new CheckoutService(
     prisma as unknown as PrismaService, stripe as unknown as StripeService,
@@ -46,6 +56,36 @@ beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
 afterEach(() => vi.useRealTimers());
 
 describe('CheckoutService', () => {
+  describe.each([
+    ['the Stripe key', 'STRIPE_SECRET_KEY'],
+    ['the webhook secret', 'STRIPE_WEBHOOK_SECRET'],
+  ] as const)('without %s', (_name, key) => {
+    const value = env[key];
+    beforeEach(() => { env[key] = undefined; });
+    afterEach(() => { env[key] = value; });
+
+    it('offers no card and refuses a card checkout before touching the slot', async () => {
+      const { service, tx, stripe } = setup();
+      await expect(service.options()).resolves.toMatchObject({ cardEnabled: false, cashEnabled: true });
+      await expect(service.start(input)).rejects.toMatchObject({ status: 400, code: 'CARD_NOT_AVAILABLE' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+      expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses "Pay now" and "Complete payment" before reading the booking', async () => {
+      const { service, stripe } = setup({ existing: { id: 'b-1' } });
+      await expect(service.payDue('b-1', bookingToken('b-1'))).rejects.toMatchObject({ status: 400, code: 'CARD_NOT_AVAILABLE' });
+      await expect(service.resume('b-1', bookingToken('b-1'))).rejects.toMatchObject({ status: 400, code: 'CARD_NOT_AVAILABLE' });
+      expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('still takes pay-at-venue bookings', async () => {
+      const { service, tx } = setup();
+      await service.start({ ...input, paymentMethod: 'cash' }, SIGNED_IN);
+      expect(tx.booking.create).toHaveBeenCalled();
+    });
+  });
+
   it('holds the slot for holdMinutes, adds the service fee and opens a Stripe session', async () => {
     const { service, tx, stripe } = setup();
     const result = await service.start(input);
@@ -73,7 +113,7 @@ describe('CheckoutService', () => {
 
   it.each(['card', 'cash'] as const)('takes nothing for a %s checkout on a closed day', async (paymentMethod) => {
     const { service, tx, stripe } = setup({ ground: { id: 'g-1', name: 'Arena', availableDays: 'custom', customDays: ['fri'] } });
-    await expect(service.start({ ...input, paymentMethod })).rejects.toMatchObject({ status: 400, code: 'GROUND_CLOSED' });
+    await expect(service.start({ ...input, paymentMethod }, SIGNED_IN)).rejects.toMatchObject({ status: 400, code: 'GROUND_CLOSED' });
     expect(tx.slot.updateMany).not.toHaveBeenCalled();
     expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
   });
@@ -92,7 +132,7 @@ describe('CheckoutService', () => {
 
   it('books the slot for pay-at-venue without Stripe, pending until staff confirm', async () => {
     const { service, tx, stripe, notifier } = setup();
-    const result = await service.start({ ...input, paymentMethod: 'cash' });
+    const result = await service.start({ ...input, paymentMethod: 'cash' }, SIGNED_IN);
 
     expect(result).toMatchObject({ paymentMethod: 'cash', checkoutUrl: null, confirmationUrl: expect.stringContaining(`/confirmation/${result.bookingId}?token=`) });
     expect(tx.slot.updateMany.mock.calls[0]![0].data).toEqual({ status: 'booked' });
@@ -103,12 +143,79 @@ describe('CheckoutService', () => {
 
   it('refuses pay-at-venue when the setting is off', async () => {
     const { service, tx } = setup({ cash: false });
-    await expect(service.start({ ...input, paymentMethod: 'cash' })).rejects.toMatchObject({ status: 400, code: 'CASH_NOT_AVAILABLE' });
+    await expect(service.start({ ...input, paymentMethod: 'cash' }, SIGNED_IN)).rejects.toMatchObject({ status: 400, code: 'CASH_NOT_AVAILABLE' });
     expect(tx.slot.updateMany).not.toHaveBeenCalled();
   });
 
-  it('tells the portal whether cash is offered and the fee', async () => {
-    await expect(setup({ cash: false }).service.options()).resolves.toEqual({ cashEnabled: false, serviceFee: 5000, currency: 'bdt', holdMinutes: 15 });
+  it.each(['cash', 'bkash'] as const)('refuses a guest %s checkout before touching the slot', async (paymentMethod) => {
+    const { service, tx } = setup({ bkashNumber: '+8801700000000' });
+    const body = paymentMethod === 'cash' ? { ...input, paymentMethod } : { ...input, paymentMethod, reference: 'ABC123XYZ', payerNumber: '+8801811000000' };
+    await expect(service.start(body)).rejects.toMatchObject({ status: 401, code: 'SIGN_IN_REQUIRED' });
+    expect(tx.slot.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('refuses a 4th open unpaid booking on the phone, before touching the slot; card is not capped', async () => {
+    const { service, tx } = setup({ openUnpaid: 3 });
+    await expect(service.start({ ...input, paymentMethod: 'cash' }, SIGNED_IN)).rejects.toMatchObject({ status: 409, code: 'TOO_MANY_OPEN_BOOKINGS' });
+    expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    await expect(service.start(input, SIGNED_IN)).resolves.toMatchObject({ paymentMethod: 'card' });
+  });
+
+  it('tells the portal which payment methods are offered and the fee', async () => {
+    await expect(setup({ cash: false }).service.options()).resolves.toEqual({ cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15 });
+  });
+
+  describe('bKash / Nagad', () => {
+    const bkash = { ...input, paymentMethod: 'bkash' as const, reference: 'ABC123XYZ', payerNumber: '+8801811000000' };
+
+    it('lists only the wallets with a number set', async () => {
+      await expect(setup({ bkashNumber: '+8801700000000' }).service.options())
+        .resolves.toMatchObject({ wallets: [{ method: 'bkash', number: '+8801700000000' }] });
+    });
+
+    it('books the slot with a pending payment for the total, holding the TrxID and sender', async () => {
+      const { service, tx, stripe, notifier } = setup({ bkashNumber: '+8801700000000' });
+      const result = await service.start(bkash, SIGNED_IN);
+      expect(result).toMatchObject({ paymentMethod: 'bkash', checkoutUrl: null, confirmationUrl: expect.stringContaining('/confirmation/') });
+      expect(tx.slot.updateMany.mock.calls[0]![0].data).toEqual({ status: 'booked' });
+      const data = tx.booking.create.mock.calls[0]![0].data;
+      expect(data).toMatchObject({ source: 'portal', payAtVenue: false, total: 6500, serviceFee: 5000 });
+      expect(data.payments).toEqual({
+        create: { method: 'bkash', amount: 6500, currency: 'bdt', status: 'pending', reference: 'ABC123XYZ', payerNumber: '+8801811000000' },
+      });
+      expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
+      expect(notifier.received).toHaveBeenCalledWith(result.bookingId);
+    });
+
+    it('validates the TrxID and sender: required, trimmed, uppercased, 6–20 letters and digits', () => {
+      const body = { ...bkash, groundId: '6f1c2a8e-0b7d-4c3e-9a51-2d4f8e6b7c10', hour: 18, customerPhone: '01711000000' };
+      expect(CheckoutSchema.parse({ ...body, reference: '  abc123xyz ', payerNumber: '01811000000' }))
+        .toMatchObject({ reference: 'ABC123XYZ', payerNumber: '+8801811000000' });
+      for (const reference of ['ABC12', 'ABC-123-XYZ', 'A'.repeat(21)]) {
+        expect(CheckoutSchema.safeParse({ ...body, reference }).success).toBe(false);
+      }
+      for (const paymentMethod of ['card', 'cash']) {
+        const dropped = CheckoutSchema.safeParse({ ...body, paymentMethod, reference: 'ABC123XYZ', payerNumber: '01811000000' });
+        expect(dropped.error?.issues.map((i) => i.path.join('.')).sort()).toEqual(['payerNumber', 'reference']);
+      }
+      const missing = CheckoutSchema.safeParse({ ...body, reference: undefined, payerNumber: undefined });
+      expect(missing.error?.issues.map((i) => i.path.join('.')).sort()).toEqual(['payerNumber', 'reference']);
+    });
+
+    it('refuses a wallet whose number is not set, before touching the slot', async () => {
+      const { service, tx } = setup();
+      await expect(service.start({ ...bkash, paymentMethod: 'nagad' }, SIGNED_IN)).rejects.toMatchObject({ status: 400, code: 'WALLET_NOT_AVAILABLE' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('a duplicate TrxID is 409 REFERENCE_ALREADY_USED', async () => {
+      const { service, tx } = setup({ bkashNumber: '+8801700000000' });
+      const clash = Object.assign(new Error('unique'), {
+        code: 'P2002', meta: { driverAdapterError: { cause: { constraint: { index: 'Payment_method_reference_key' } } } },
+      });
+      tx.booking.create.mockRejectedValueOnce(clash);
+      await expect(service.start(bkash, SIGNED_IN)).rejects.toMatchObject({ status: 409, code: 'REFERENCE_ALREADY_USED' });
+    });
   });
 
   describe('Pay now', () => {
@@ -135,6 +242,13 @@ describe('CheckoutService', () => {
       ['cancelled', owed({ status: 'cancelled' })],
     ])('refuses when the booking is %s', async (_label, existing) => {
       await expect(setup({ existing }).service.payDue('b-1', bookingToken('b-1'))).rejects.toMatchObject({ status: 409, code: 'NOTHING_DUE' });
+    });
+
+    it('refuses while a bKash / Nagad payment is being verified', async () => {
+      const existing = owed({ payAtVenue: false, payments: [{ amount: 6500, status: 'pending', method: 'bkash' }] });
+      const { service, stripe } = setup({ existing });
+      await expect(service.payDue('b-1', bookingToken('b-1'))).rejects.toMatchObject({ status: 409, code: 'PAYMENT_UNDER_REVIEW' });
+      expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
     });
 
     it('404s without a valid token', async () => {

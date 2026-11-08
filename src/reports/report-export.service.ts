@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { BOOKING_INCLUDE } from '../bookings/booking.dto.js';
-import { dueOf, paidOf } from '../bookings/booking-rules.js';
+import { owedOf, paidOf } from '../bookings/booking-rules.js';
 import { CUSTOMER_SUMMARY_INCLUDE, toCustomerDto } from '../customers/customer.dto.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { endHourOf } from '../slots/slot.dto.js';
@@ -44,11 +44,13 @@ export class ReportExportService {
   }
 
   private async *revenue(r: ReportRange, groupBy: GroupBy): AsyncGenerator<string> {
-    yield csvLine(['Period start', 'Period end', 'Received', 'Refunds', 'Net revenue', 'Card', 'Cash', 'Bank transfer', 'Bookings']);
+    // bKash and Nagad came later: appended, so existing column positions don't move.
+    yield csvLine(['Period start', 'Period end', 'Received', 'Refunds', 'Net revenue', 'Card', 'Cash', 'Bank transfer', 'Bookings', 'bKash', 'Nagad']);
     for (const row of await this.reports.revenueRows(r, groupBy)) {
       yield csvLine([
         row.period, row.end, csvMoney(row.received), csvMoney(row.refunds), csvMoney(row.revenue),
         csvMoney(row.byMethod.card), csvMoney(row.byMethod.cash), csvMoney(row.byMethod.bank_transfer), row.bookings,
+        csvMoney(row.byMethod.bkash), csvMoney(row.byMethod.nagad),
       ]);
     }
   }
@@ -67,7 +69,7 @@ export class ReportExportService {
       for (const b of rows) {
         yield csvLine([
           b.bookingNumber, b.contactName, b.contactPhone, b.ground.name, fromDbDate(b.slot.date), hh(b.slot.startHour), hh(endHourOf(b.slot)),
-          csvMoney(b.amount), csvMoney(b.serviceFee), csvMoney(b.total), csvMoney(paidOf(b.payments)), csvMoney(dueOf(b, b.payments)),
+          csvMoney(b.amount), csvMoney(b.serviceFee), csvMoney(b.total), csvMoney(paidOf(b.payments)), csvMoney(owedOf(b, b.payments)),
           b.status, b.paymentStatus, b.source, localTime(b.createdAt),
         ]);
       }

@@ -47,6 +47,8 @@ This implements the "Settings API" spec. All seven Settings pages can now save f
 }
 ```
 
+Until an admin saves General, `tagline`, `phone`, `email`, `address` and `openHours` are `""`: hide whatever is empty. Emails then reply to the sending address.
+
 | Field | Rules |
 |---|---|
 | `name` | Required, 2–60 |
@@ -105,7 +107,7 @@ There's nothing new. The page edits `GET/PUT /admin/settings/slots`: `advanceBoo
     "webhook": { "configured": true, "lastEventAt": "2026-10-31T09:58:00.000Z", "lastEventOk": true },
     "currency": "bdt"
   },
-  "methods": { "card": true, "cash": true, "bankTransfer": true },
+  "methods": { "card": true, "cash": true, "bankTransfer": true, "bkash": true, "nagad": false },
   "portalCashEnabled": true
 }
 ```
@@ -114,6 +116,8 @@ There's nothing new. The page edits `GET/PUT /admin/settings/slots`: `advanceBoo
   - `lastEventOk` is `false` if handling it failed.
   - Show a warning when Stripe is configured but no webhook has arrived in 7 days.
 - **Keep the "Pay at venue" switch.** It saves through `/admin/settings/slots` (`portalCashEnabled`).
+- **`methods.bkash` / `methods.nagad`:** whether customers can pay by bKash / Nagad on the portal, i.e. whether the admin has set that number. Staff can record bKash and Nagad payments either way.
+- **bKash and Nagad numbers:** fields on this page, saved through `PUT /admin/settings/slots` (`bkashNumber`, `nagadNumber`; admin only). Empty (`""` or `null`) switches that wallet off on the portal. Customers send the total to this number and enter the TrxID; staff verify it on Confirm Bookings.
 - **Remove from the page:** the key and webhook-secret fields, the test-mode switch (it follows the key), and everything about receipts.
 
 ---
@@ -162,7 +166,7 @@ There's nothing new. The page edits `GET/PUT /admin/settings/slots`: `advanceBoo
 **The log:**
 - It lists **every attempt**, including failed ones and "not configured".
 - `to` is masked (`ra***@example.com`).
-- `kind` is one of `booking_confirmed`, `booking_received`, `booking_cancelled`, `refund_issued`, `payment_due`, `staff_new_booking`, `staff_customer_cancelled`, `staff_due_digest` or `test`.
+- `kind` is one of `booking_confirmed`, `booking_received`, `booking_cancelled`, `refund_issued`, `payment_due`, `staff_new_booking`, `staff_customer_cancelled`, `staff_cancel_requested` (a customer asked to cancel while their bKash / Nagad payment is under review; always sent), `staff_due_digest` or `test`.
 
 **Remove from the page:** the SendGrid API key field.
 

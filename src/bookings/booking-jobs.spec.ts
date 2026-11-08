@@ -43,6 +43,13 @@ describe('BookingJobs', () => {
     expect(stripe.expireSession).toHaveBeenCalledWith('cs_1');
   });
 
+  it('releases the other holds when one fails, then reports the failure', async () => {
+    const { jobs, cancellation } = setup({ held: [{ id: 's-1', heldByBookingId: 'b-1' }, { id: 's-2', heldByBookingId: 'b-2' }] });
+    cancellation.cancel.mockRejectedValueOnce(new Error('db down'));
+    await expect(jobs.releaseExpiredHolds()).rejects.toThrow('Hold release failed for 1 of 2 slots');
+    expect(cancellation.cancel).toHaveBeenCalledTimes(2);
+  });
+
   it('frees a held slot with no pending booking behind it', async () => {
     const { jobs, prisma, cancellation } = setup({ held: [{ id: 's-1', heldByBookingId: 'b-1' }], pending: null });
     await jobs.releaseExpiredHolds();

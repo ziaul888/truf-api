@@ -80,10 +80,11 @@ describe('Customer sign-in (e2e)', () => {
   });
 
   const http = () => request(app.getHttpServer());
+  /** Guests can only pay by card; cash needs a signed-in customer (`agent`). */
   const checkout = (agent: ReturnType<typeof request.agent> | null, startHour: number, phone: string) =>
     (agent ?? http()).post(`${API}/checkout`).send({
       groundId, date, hour: startHour, customerName: 'Rakib Hasan', customerEmail: 'rakib@example.com',
-      customerPhone: phone, paymentMethod: 'cash',
+      customerPhone: phone, paymentMethod: agent ? 'cash' : 'card',
     });
 
   async function signIn(phone: string) {
@@ -133,7 +134,7 @@ describe('Customer sign-in (e2e)', () => {
     const upcoming = await agent.get(`${API}/customer/bookings`).expect(200);
     expect(upcoming.body.data).toMatchObject({ total: 1, page: 1 });
     expect(upcoming.body.data.data[0]).toMatchObject({
-      id: guest.body.data.bookingId, status: 'pending', payAtVenue: true, canCancel: true, canPay: true,
+      id: guest.body.data.bookingId, status: 'pending', payAtVenue: false, canCancel: true, canPay: false,
       confirmationUrl: guest.body.data.confirmationUrl,
     });
     const past = await agent.get(`${API}/customer/bookings`).query({ scope: 'past' }).expect(200);

@@ -38,6 +38,7 @@ The row of action cards at the top. Refresh it every 60 seconds.
 ```json
 {
   "toConfirm":    { "count": 3, "payAtVenue": 2 },
+  "toVerify":     { "count": 1 },
   "overdue":      { "count": 2, "amount": 300000 },
   "dueToday":     { "count": 1, "amount": 100000 },
   "payingNow":    { "count": 1 },
@@ -47,7 +48,8 @@ The row of action cards at the top. Refresh it every 60 seconds.
 
 | Card | Counts | Link it to |
 |---|---|---|
-| `toConfirm` | Pending bookings staff can confirm: unpaid staff bookings and pay-at-venue requests. **Not** portal card checkouts still in Stripe. `payAtVenue` is how many of them are pay-at-venue | Confirm Bookings (`GET /admin/bookings?status=pending`) |
+| `toVerify` | `{ count }`: bKash / Nagad payments staff must check in their own app (also counted in `toConfirm`). Not money owed, so never in `overdue` or `dueToday` | Confirm Bookings |
+| `toConfirm` | Pending bookings staff can confirm: unpaid staff bookings, pay-at-venue requests and bKash / Nagad payments to verify. **Not** portal card checkouts still in Stripe. `payAtVenue` is how many of them are pay-at-venue | Confirm Bookings (`GET /admin/bookings?status=pending`) |
 | `overdue` | Bookings with money overdue (§0). `amount` is the total still due | `GET /admin/bookings?due=overdue` |
 | `dueToday` | Bookings with money due and `dueDate` today | `GET /admin/bookings?due=today` |
 | `payingNow` | Slots on hold right now (a customer is in Stripe), any date | `GET /admin/slots?status=held` |

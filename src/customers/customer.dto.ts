@@ -1,4 +1,4 @@
-import { dueOf, paidOf } from '../bookings/booking-rules.js';
+import { owedOf, paidOf } from '../bookings/booking-rules.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { fromDbDate, type IsoDate } from '../slots/venue-time.js';
 
@@ -15,7 +15,7 @@ export const CUSTOMER_SUMMARY_INCLUDE = {
       id: true, bookingNumber: true, status: true, total: true, dueDate: true,
       ground: { select: { id: true, name: true } },
       slot: { select: { date: true } },
-      payments: { where: { deletedAt: null }, select: { amount: true, status: true } },
+      payments: { where: { deletedAt: null }, select: { amount: true, status: true, method: true } },
     },
   },
 } satisfies Prisma.CustomerInclude;
@@ -46,7 +46,8 @@ export function toCustomerDto(c: CustomerSummaryRow): CustomerDto {
     bookings: kept.length,
     totalSpent: c.bookings.reduce((sum, b) => sum + paidOf(b.payments), 0),
     lastBooking: dates.at(-1) ?? null,
-    dueAmount: c.bookings.reduce((sum, b) => sum + dueOf(b, b.payments), 0),
+    // A bKash / Nagad payment still being verified is not money owed.
+    dueAmount: c.bookings.reduce((sum, b) => sum + owedOf(b, b.payments), 0),
     tag: tagOf(kept.length),
   };
 }

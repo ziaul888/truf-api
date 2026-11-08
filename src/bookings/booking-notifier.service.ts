@@ -5,7 +5,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { SettingsStore } from '../settings/settings-store.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { fromDbDate } from '../slots/venue-time.js';
-import { confirmationUrl } from './booking-rules.js';
+import { confirmationUrl, methodName, pendingWalletPayment } from './booking-rules.js';
 import { BOOKING_INCLUDE, type BookingRow } from './booking.dto.js';
 
 const money = (amount: number) => `${(amount / 100).toFixed(2)} ${env.CURRENCY.toUpperCase()}`;
@@ -49,15 +49,18 @@ export class BookingNotifier {
     ]);
   }
 
-  /** A "pay at the venue" request: reserved, waiting for staff to confirm. */
+  /** A "pay at the venue" or bKash / Nagad request: reserved, waiting for staff to confirm. */
   async received(bookingId: string): Promise<boolean> {
     const b = await this.load(bookingId);
+    const wallet = pendingWalletPayment(b.payments);
     return this.sendTo(b, 'booking_received', b.contactEmail, `Booking ${b.bookingNumber} received`, [
       `Hi ${b.contactName},`,
       `We've reserved ${b.ground.name} for you and will confirm your booking shortly.`,
       `Booking number: ${b.bookingNumber}`,
       `When: ${when(b)}`,
-      `Please pay ${money(b.total)} in cash at the venue.`,
+      wallet
+        ? `We've received your ${methodName(wallet.method)} payment details for ${money(wallet.amount)} (TrxID ${wallet.reference}). The venue will verify the payment and confirm your booking.`
+        : `Please pay ${money(b.total)} in cash at the venue.`,
       ...(b.ground.address ? [`Address: ${b.ground.address}`] : []),
       `View or cancel your booking: ${confirmationUrl(b.id)}`,
     ]);
@@ -108,6 +111,18 @@ export class BookingNotifier {
     for (const email of await this.staffRecipients()) {
       await this.sendTo(b, 'staff_customer_cancelled', email, `Booking ${b.bookingNumber} cancelled by the customer`, [
         `${b.contactName} (${b.contactPhone}) cancelled ${b.ground.name}, ${when(b)}. The slot is free again.`,
+        `Dashboard: ${env.PUBLIC_APP_URL}/dashboard/bookings/${b.id}`,
+      ]);
+    }
+  }
+
+  /** A customer asked to cancel while their bKash / Nagad payment is under review: staff decide. Always sent. */
+  async cancelRequestToStaff(bookingId: string): Promise<void> {
+    const b = await this.load(bookingId);
+    for (const email of await this.staffRecipients()) {
+      await this.sendTo(b, 'staff_cancel_requested', email, `Cancellation requested for booking ${b.bookingNumber}`, [
+        `${b.contactName} (${b.contactPhone}) asked to cancel ${b.ground.name}, ${when(b)}, while their payment is being verified.`,
+        'Check the payment in your bKash / Nagad app: verify it and cancel with a refund, or reject it.',
         `Dashboard: ${env.PUBLIC_APP_URL}/dashboard/bookings/${b.id}`,
       ]);
     }
