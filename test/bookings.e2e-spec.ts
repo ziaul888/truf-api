@@ -202,6 +202,18 @@ describe('Bookings (e2e)', () => {
       expect(paid.body.data).toMatchObject({ paymentStatus: 'paid', due: 0 });
     });
 
+    it('confirms a pending booking when staff record its cash; refuses a card checkout', async () => {
+      const agent = await signIn(manager);
+      const { bookingId } = (await checkout(d2, 9, '8', 'cash').expect(201)).body.data;
+      const paid = await agent.post(`${API}/admin/bookings/${bookingId}/payments`).send({ amount: 6000, method: 'cash' }).expect(201);
+      expect(paid.body.data).toMatchObject({ status: 'confirmed', paymentStatus: 'paid', due: 0, confirmedAt: expect.any(String) });
+
+      const card = (await checkout(d3, 10, '9').expect(201)).body.data.bookingId;
+      expect((await agent.post(`${API}/admin/bookings/${card}/payments`).send({ amount: 6000, method: 'cash' }).expect(409)).body.code)
+        .toBe('BOOKING_NOT_PENDING');
+      expect(await booking(card)).toMatchObject({ status: 'pending', paymentStatus: 'unpaid' });
+    });
+
     it('lets the customer pay a pending cash booking online instead, which confirms it', async () => {
       const { bookingId } = (await checkout(d2, 8, '8', 'cash').expect(201)).body.data;
       const token = bookingToken(bookingId);

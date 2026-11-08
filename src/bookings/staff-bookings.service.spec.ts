@@ -95,6 +95,43 @@ describe('StaffBookingsService', () => {
     expect(tx.booking.updateMany.mock.calls[0]![0].data).toMatchObject({ status: 'confirmed', paymentStatus: 'paid' });
   });
 
+  describe('recording a payment on a pending booking', () => {
+    it.each([
+      ['a staff booking made without payment', bookingRow({ payments: [] }), 'partial'],
+      ['a portal pay-at-venue booking, paid in full', bookingRow({ source: 'portal', payAtVenue: true, total: 400, payments: [] }), 'paid'],
+    ])('confirms %s and emails the confirmation', async (_label, booking, paymentStatus) => {
+      const { service, tx, notifier } = setup(booking);
+      await service.recordPayment('u-1', 'b-1', { amount: 400, method: 'cash' }).catch(() => undefined);
+      expect(tx.booking.updateMany).toHaveBeenCalledWith({
+        where: { id: 'b-1', status: 'pending' }, data: { paymentStatus, status: 'confirmed', confirmedAt: expect.any(Date) },
+      });
+      expect(tx.bookingEvent.create.mock.calls.map((c) => c[0].data.type)).toEqual(['payment_received', 'confirmed']);
+      expect(notifier.confirmed).toHaveBeenCalledWith('b-1');
+    });
+
+    it('leaves a confirmed booking confirmed and sends nothing', async () => {
+      const { service, tx, notifier } = setup(bookingRow({ status: 'confirmed' }));
+      await service.recordPayment('u-1', 'b-1', { amount: 600, method: 'cash' }).catch(() => undefined);
+      expect(tx.booking.updateMany).toHaveBeenCalledWith({ where: { id: 'b-1', status: 'confirmed' }, data: { paymentStatus: 'paid' } });
+      expect(tx.bookingEvent.create.mock.calls.map((c) => c[0].data.type)).toEqual(['payment_received']);
+      expect(notifier.confirmed).not.toHaveBeenCalled();
+    });
+
+    it('refuses a card booking still waiting for its card payment', async () => {
+      const { service, tx } = setup(bookingRow({ source: 'portal', payAtVenue: false, payments: [] }));
+      await expect(service.recordPayment('u-1', 'b-1', { amount: 400, method: 'cash' }))
+        .rejects.toMatchObject({ status: 409, code: 'BOOKING_NOT_PENDING' });
+      expect(tx.payment.create).not.toHaveBeenCalled();
+    });
+
+    it('loses cleanly when the booking was cancelled meanwhile', async () => {
+      const { service, tx, notifier } = setup(bookingRow({ payments: [] }));
+      tx.booking.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.recordPayment('u-1', 'b-1', { amount: 400, method: 'cash' })).rejects.toMatchObject({ status: 409, code: 'BOOKING_CHANGED' });
+      expect(notifier.confirmed).not.toHaveBeenCalled();
+    });
+  });
+
   describe('bKash / Nagad bookings', () => {
     const walletBooking = (status = 'pending') => bookingRow({
       source: 'portal', payAtVenue: false, total: 6000,

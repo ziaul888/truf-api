@@ -84,19 +84,34 @@ export class StaffBookingsService {
     return this.dto(id);
   }
 
-  /** Collects some or all of what's due; `partial` becomes `paid` when nothing is left. */
+  /**
+   * Collects some or all of what's due; `partial` becomes `paid` when nothing is left. Money taken on a
+   * pending booking confirms it, the same as a staff booking made with a payment.
+   */
   async recordPayment(actorId: string, id: string, input: RecordPaymentInput): Promise<BookingDto> {
     const booking = await this.load(id);
     if (booking.status === 'cancelled') throw new AppError('This booking is cancelled', 409, 'BOOKING_ALREADY_CANCELLED');
     if (pendingWalletPayment(booking.payments)) {
       throw paymentUnderReview('A bKash / Nagad payment on this booking is waiting to be verified. Verify or reject it first');
     }
+    if (booking.status === 'pending' && booking.source === 'portal' && !booking.payAtVenue) {
+      throw bookingNotPending('The customer is paying this booking by card. Wait for the card payment, or cancel it');
+    }
     const due = dueOf(booking, booking.payments);
     if (input.amount > due) throw exceedsDue(`Only ${due} is due on this booking`);
+    const confirms = booking.status === 'pending';
     await withUniqueReference(() => this.prisma.$transaction(async (tx) => {
       const payment = await this.addPayment(tx, id, actorId, input);
-      await tx.booking.update({ where: { id }, data: { paymentStatus: paymentStatusOf(booking.total, [...booking.payments, payment]) } });
+      const paymentStatus = paymentStatusOf(booking.total, [...booking.payments, payment]);
+      // From the status it was read in: a cancel that got in first wins (409, rolled back).
+      const { count } = await tx.booking.updateMany({
+        where: { id, status: booking.status },
+        data: { paymentStatus, ...(confirms && { status: 'confirmed', confirmedAt: new Date() }) },
+      });
+      if (count === 0) throw bookingChanged();
+      if (confirms) await tx.bookingEvent.create({ data: { bookingId: id, type: 'confirmed', userId: actorId, detail: 'Confirmed on payment' } });
     }));
+    if (confirms) await this.notifier.confirmed(id);
     return this.dto(id);
   }
 
