@@ -47,6 +47,8 @@ This implements the "Settings API" spec. All seven Settings pages can now save f
 }
 ```
 
+Until an admin saves General, `tagline`, `phone`, `email`, `address` and `openHours` are `""`: hide whatever is empty. Emails then reply to the sending address.
+
 | Field | Rules |
 |---|---|
 | `name` | Required, 2–60 |

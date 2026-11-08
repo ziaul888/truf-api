@@ -15,23 +15,30 @@ const fields = {
   websiteUrl: optionalUrl,
 };
 
+/** Blank until an admin enters them on Settings → General (the defaults carry no contact details). */
+const unset = <T extends z.ZodType>(field: T) => z.union([z.literal(''), field]);
+
 /** What's stored. `logo` is the uploaded file's name (set by the upload endpoint only). */
-export const VenueStoredSchema = z.object({ ...fields, logo: z.string().nullable() });
+export const VenueStoredSchema = z.object({
+  ...fields,
+  phone: unset(fields.phone), email: unset(fields.email), address: unset(fields.address), openHours: unset(fields.openHours),
+  logo: z.string().nullable(),
+});
 export type VenueStored = z.infer<typeof VenueStoredSchema>;
 
 export const UpdateVenueSchema = z.object(fields).partial()
   .refine((v) => Object.keys(v).length > 0, 'Send at least one field to update');
 export type UpdateVenueInput = z.infer<typeof UpdateVenueSchema>;
 
-/** Until an admin saves General: the portal's current contact details. */
+/** Until an admin saves General: a name only, so the portal shows no made-up contact details. */
 export const DEFAULT_VENUE: VenueStored = {
   name: 'Champions Turf',
-  tagline: 'Banani, Dhaka',
-  phone: '+880 1700 000 000',
-  email: 'hello@championsturf.com',
+  tagline: '',
+  phone: '',
+  email: '',
   supportEmail: null,
-  address: 'Plot 7, Road 11, Banani, Dhaka 1213',
-  openHours: '06:00 — 23:00',
+  address: '',
+  openHours: '',
   mapUrl: '',
   websiteUrl: '',
   logo: null,
