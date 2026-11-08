@@ -15,7 +15,10 @@ const bookingRow = (overrides: object = {}) => ({
 
 function setup(booking: object | null = bookingRow()) {
   const tx = {
-    booking: { updateMany: vi.fn(async (_args: object) => ({ count: 1 })) },
+    booking: {
+      updateMany: vi.fn(async (_args: object) => ({ count: 1 })),
+      findUnique: vi.fn(async (): Promise<{ cancelRequestedAt: Date | null }> => ({ cancelRequestedAt: new Date() })),
+    },
     bookingEvent: { create: vi.fn(async (_args: { data: { type: string; detail: string } }) => ({})) },
   };
   const prisma = {
@@ -50,6 +53,14 @@ describe('CancelRequestService', () => {
     const { service, tx, notifier } = setup();
     tx.booking.updateMany.mockResolvedValueOnce({ count: 0 });
     await expect(service.request('b-1', token)).rejects.toMatchObject({ status: 409, code: 'CANCEL_ALREADY_REQUESTED' });
+    expect(notifier.cancelRequestToStaff).not.toHaveBeenCalled();
+  });
+
+  it('when staff verified or rejected it at the same moment, says it is no longer under review', async () => {
+    const { service, tx, notifier } = setup();
+    tx.booking.updateMany.mockResolvedValueOnce({ count: 0 });
+    tx.booking.findUnique.mockResolvedValueOnce({ cancelRequestedAt: null });
+    await expect(service.request('b-1', token)).rejects.toMatchObject({ status: 409, code: 'NOT_UNDER_REVIEW' });
     expect(notifier.cancelRequestToStaff).not.toHaveBeenCalled();
   });
 

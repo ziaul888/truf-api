@@ -42,6 +42,7 @@ describe('bKash / Nagad under review (e2e)', () => {
     await prisma.payment.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.booking.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });
+    await prisma.slotEvent.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.slot.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.ground.deleteMany({ where: { id: { in: ids } } });
     await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
@@ -189,7 +190,7 @@ describe('bKash / Nagad under review (e2e)', () => {
       const reference = trx();
       const first = await walletBooking(13, reference);
       expect((await checkout(14, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }).expect(409)).body.code).toBe('REFERENCE_ALREADY_USED');
-      await (await staff()).post(`${API}/admin/bookings/${first}/cancel`).send({ refund: false }).expect(200);
+      await (await staff()).post(`${API}/admin/bookings/${first}/cancel`).send({ refund: false, rejectWalletPayment: true }).expect(200);
       const second = await walletBooking(14, reference);
       await (await staff()).post(`${API}/admin/bookings/${second}/confirm`).send({ notifyCustomer: false }).expect(200);
       expect((await checkout(15, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }).expect(409)).body.code).toBe('REFERENCE_ALREADY_USED');
@@ -202,8 +203,10 @@ describe('bKash / Nagad under review (e2e)', () => {
       const yesterday = addDays(now.date, -1);
       await prisma.slot.update({ where: { id: (await slotOf(id)).id }, data: { date: toDbDate(yesterday) } });
       const agent = await staff();
-      expect((await agent.post(`${API}/admin/bookings/${id}/cancel`).send({ refund: true }).expect(409)).body.code).toBe('VERIFY_OR_REJECT');
-      const res = await agent.post(`${API}/admin/bookings/${id}/cancel`).send({ refund: false, reason: 'Not received' }).expect(200);
+      for (const refund of [true, false]) {
+        expect((await agent.post(`${API}/admin/bookings/${id}/cancel`).send({ refund }).expect(409)).body.code).toBe('VERIFY_OR_REJECT');
+      }
+      const res = await agent.post(`${API}/admin/bookings/${id}/cancel`).send({ refund: false, rejectWalletPayment: true, reason: 'Not received' }).expect(200);
       expect(res.body.data).toMatchObject({ status: 'cancelled', paymentStatus: 'failed' });
       const detail = (await agent.get(`${API}/admin/bookings/${id}`).expect(200)).body.data;
       expect(detail.events.find((e: { type: string }) => e.type === 'cancelled').detail).toMatch(/bKash payment \(TrxID R[0-9A-F]+\) rejected/);
@@ -211,6 +214,18 @@ describe('bKash / Nagad under review (e2e)', () => {
       const cash = (await checkout(16, { paymentMethod: 'cash' }).expect(201)).body.data.bookingId;
       await prisma.slot.update({ where: { id: (await slotOf(cash)).id }, data: { date: toDbDate(yesterday) } });
       expect((await agent.post(`${API}/admin/bookings/${cash}/cancel`).send({ refund: false }).expect(409)).body.code).toBe('BOOKING_COMPLETED');
+    });
+
+    it('blocking the slot over a payment under review is refused (verify or reject first), and changes nothing', async () => {
+      const id = await walletBooking(18);
+      const slot = await slotOf(id);
+      const agent = await staff();
+      const res = await agent.post(`${API}/admin/slots/${slot.id}/block`).send({ reason: 'maintenance', cancelBooking: true }).expect(409);
+      expect(res.body.code).toBe('VERIFY_OR_REJECT');
+      expect(await booking(id)).toMatchObject({ status: 'pending', payments: [expect.objectContaining({ status: 'pending' })] });
+      expect(await slotOf(id)).toMatchObject({ status: 'booked' });
+      await agent.post(`${API}/admin/bookings/${id}/cancel`).send({ refund: false, rejectWalletPayment: true }).expect(200);
+      await agent.post(`${API}/admin/slots/${slot.id}/block`).send({ reason: 'maintenance' }).expect(200);
     });
 
     it('refuses a TrxID that would be dropped', async () => {

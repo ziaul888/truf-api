@@ -9,7 +9,7 @@ import { fromDbDate, hasStarted, toDbDate, venueNow } from '../slots/venue-time.
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
-  bookingChanged, bookingNotFound, bookingNotPending, dueOf, isUnderReview, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
+  bookingChanged, bookingNotFound, bookingNotPending, dueOf, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
   receivedDetail, slotNotAvailable, withBookingNumber, withUniqueReference,
 } from './booking-rules.js';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from './booking.dto.js';
@@ -109,10 +109,7 @@ export class StaffBookingsService {
   }
 
   async cancel(actorId: string, id: string, input: CancelBookingInput): Promise<BookingDto> {
-    const booking = await this.load(id);
-    if (input.refund && isUnderReview(booking, booking.payments)) {
-      throw new AppError('This bKash / Nagad payment is not verified yet: verify it first to refund it, or reject it', 409, 'VERIFY_OR_REJECT');
-    }
+    await this.load(id);
     await this.cancellation.cancel(id, {
       actorId, reason: input.reason, refund: input.refund, notify: input.notifyCustomer, rejectWallet: input.rejectWalletPayment,
     });

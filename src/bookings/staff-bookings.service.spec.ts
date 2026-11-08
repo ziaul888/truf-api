@@ -144,13 +144,10 @@ describe('StaffBookingsService', () => {
       expect(tx.payment.create).not.toHaveBeenCalled();
     });
 
-    it('cancel with a refund is refused until verified; reject (no refund) goes through', async () => {
+    it('"Reject" goes through the cancellation service with its flag (which enforces VERIFY_OR_REJECT)', async () => {
       const { service, cancellation } = setup(walletBooking());
-      await expect(service.cancel('u-1', 'b-1', { refund: true, notifyCustomer: false }))
-        .rejects.toMatchObject({ status: 409, code: 'VERIFY_OR_REJECT' });
-      expect(cancellation.cancel).not.toHaveBeenCalled();
-      await service.cancel('u-1', 'b-1', { refund: false, notifyCustomer: false }).catch(() => undefined);
-      expect(cancellation.cancel).toHaveBeenCalledWith('b-1', expect.objectContaining({ refund: false }));
+      await service.cancel('u-1', 'b-1', { refund: false, notifyCustomer: false, rejectWalletPayment: true }).catch(() => undefined);
+      expect(cancellation.cancel).toHaveBeenCalledWith('b-1', expect.objectContaining({ refund: false, rejectWallet: true }));
     });
 
     it('a staff payment by Nagad keeps its TrxID; a reused one is 409 REFERENCE_ALREADY_USED', async () => {

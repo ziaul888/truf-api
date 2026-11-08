@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { BOOKING_INCLUDE } from '../bookings/booking.dto.js';
-import { dueOf, paidOf } from '../bookings/booking-rules.js';
+import { owedOf, paidOf } from '../bookings/booking-rules.js';
 import { CUSTOMER_SUMMARY_INCLUDE, toCustomerDto } from '../customers/customer.dto.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { endHourOf } from '../slots/slot.dto.js';
@@ -69,7 +69,7 @@ export class ReportExportService {
       for (const b of rows) {
         yield csvLine([
           b.bookingNumber, b.contactName, b.contactPhone, b.ground.name, fromDbDate(b.slot.date), hh(b.slot.startHour), hh(endHourOf(b.slot)),
-          csvMoney(b.amount), csvMoney(b.serviceFee), csvMoney(b.total), csvMoney(paidOf(b.payments)), csvMoney(dueOf(b, b.payments)),
+          csvMoney(b.amount), csvMoney(b.serviceFee), csvMoney(b.total), csvMoney(paidOf(b.payments)), csvMoney(owedOf(b, b.payments)),
           b.status, b.paymentStatus, b.source, localTime(b.createdAt),
         ]);
       }

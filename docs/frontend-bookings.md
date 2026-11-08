@@ -253,7 +253,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | `GET /admin/bookings/:id` | — | Booking plus `payments[]`, `events[]` (timeline, newest first) and `customer.totalBookings` |
 | `POST /admin/bookings` | See "New Booking" below | **201** booking |
 | `POST /admin/bookings/:id/confirm` | `{ markPaid?: false, method?: "cash", reference?, notifyCustomer?: true }` | Booking. Works for unpaid staff bookings, portal pay-at-venue bookings and portal bKash / Nagad bookings (**Verify**: the pending payment becomes `succeeded`, recorded by you, and the booking `confirmed` and `paid`). `method` is `cash`, `bank_transfer`, `bkash` or `nagad`; `reference` is an optional TrxID for `bkash` / `nagad`. `409 BOOKING_NOT_PENDING` (also for portal card bookings, which confirm by payment, and when the payment was handled meanwhile). `409 BOOKING_CHANGED` (cancelled meanwhile). `409 WALLET_PAYMENT_EXCEEDS_DUE` (other payments already cover it: reject it instead). `409 REFERENCE_ALREADY_USED` |
-| `POST /admin/bookings/:id/cancel` | `{ reason?, refund: boolean, notifyCustomer?: true, rejectWalletPayment?: false }` | Booking. **Also use it for "Decline" and for rejecting a bKash / Nagad payment** (`refund: false`, `rejectWalletPayment: true`: the payment becomes `failed` and the event says e.g. "bKash payment (TrxID …) rejected"; allowed even after the slot has ended). Frees the slot. Card payments are refunded through Stripe; cash, bank transfers, bKash and Nagad are marked refunded (pay those back by hand). `409 VERIFY_OR_REJECT` for `refund: true` on an unverified payment. `409 PAYMENT_ALREADY_HANDLED` when `rejectWalletPayment` but it was verified meanwhile. `409 BOOKING_CHANGED` when another action changed it at the same moment |
+| `POST /admin/bookings/:id/cancel` | `{ reason?, refund: boolean, notifyCustomer?: true, rejectWalletPayment?: false }` | Booking. **Also use it for "Decline" and for rejecting a bKash / Nagad payment** (`refund: false`, `rejectWalletPayment: true`: the payment becomes `failed` and the event says e.g. "bKash payment (TrxID …) rejected"; allowed even after the slot has ended). Frees the slot. Card payments are refunded through Stripe; cash, bank transfers, bKash and Nagad are marked refunded (pay those back by hand). `409 VERIFY_OR_REJECT` for any cancel of an unverified payment without `rejectWalletPayment: true`. `409 PAYMENT_ALREADY_HANDLED` when `rejectWalletPayment` but it was verified meanwhile. `409 BOOKING_CHANGED` when another action changed it at the same moment (any Stripe refund already made is still recorded on the payment, with a `refunded` event) |
 | `POST /admin/bookings/:id/payments` | `{ amount, method: "cash" \| "bank_transfer" \| "bkash" \| "nagad", reference?, note? }` | **201** booking. `reference`: optional TrxID, `bkash` / `nagad` only. `400 PAYMENT_EXCEEDS_DUE`, `409 REFERENCE_ALREADY_USED`, `409 PAYMENT_UNDER_REVIEW` (verify or reject the customer's bKash / Nagad payment first) |
 | `PATCH /admin/bookings/:id` | `{ notes?, dueDate?, dueNote? }` (`null` clears) | Booking |
 | `POST /admin/bookings/:id/resend-confirmation` | — | `{ sent: boolean }`. `sent: false` if email isn't configured. `409 BOOKING_NOT_CONFIRMED` |
@@ -338,7 +338,8 @@ Optional. Guests can still book, and signed links keep working. The session is a
 - **Blocking a booked slot:** `POST /admin/slots/:id/block` now accepts `{ reason, note?, cancelBooking: true }`.
   - It cancels the booking with a full refund, emails the customer if `notifyCustomerOnBlock` is on, and blocks the slot.
   - It returns `cancelledBooking: true`.
-  - Without the flag: `409 SLOT_HAS_BOOKING`. The block form's warning should become a checkbox ("Cancel and refund the booking").
+  - Without the flag: `409 SLOT_HAS_BOOKING`.
+  - On a booking whose bKash / Nagad payment isn't verified yet: `409 VERIFY_OR_REJECT`, and nothing changes. Tell staff to verify or reject that booking first, then block. The block form's warning should become a checkbox ("Cancel and refund the booking").
 - **Blocking a held slot** returns `409 SLOT_NOT_AVAILABLE`, because a customer is paying for it.
 
 ### Settings: `/admin/settings/slots` has two new fields
@@ -374,7 +375,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | 400 | `WALLET_NOT_AVAILABLE` | Portal bKash / Nagad chosen while its number isn't set |
 | 409 | `REFERENCE_ALREADY_USED` | A bKash / Nagad TrxID already recorded for that method (portal or staff) |
 | 409 | `PAYMENT_UNDER_REVIEW` | "Pay now", "Collect payment" or a customer cancel while a bKash / Nagad payment is being verified |
-| 409 | `VERIFY_OR_REJECT` | Staff cancel with a refund on an unverified bKash / Nagad payment |
+| 409 | `VERIFY_OR_REJECT` | Any cancel of an unverified bKash / Nagad payment other than Reject (staff cancel without `rejectWalletPayment`, or blocking the slot over it) |
 | 409 | `PAYMENT_ALREADY_HANDLED` | "Reject" after the payment was verified meanwhile |
 | 409 | `BOOKING_CHANGED` | Verify and Reject (or a cancel) on the same booking at the same moment: the other one won |
 | 409 | `WALLET_PAYMENT_EXCEEDS_DUE` | Verify when other payments already cover the booking |

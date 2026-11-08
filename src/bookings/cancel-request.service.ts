@@ -8,6 +8,8 @@ import { bookingNotFound, isUnderReview, isValidBookingToken, methodName, pendin
 import { BOOKING_INCLUDE } from './booking.dto.js';
 
 const alreadyRequested = () => new AppError('You have already asked to cancel this booking', 409, 'CANCEL_ALREADY_REQUESTED');
+const notUnderReview = () =>
+  new AppError('This booking has no payment being verified. Cancel it from this page instead', 409, 'NOT_UNDER_REVIEW');
 
 /**
  * While the venue verifies a bKash / Nagad payment the customer can't cancel directly (the money
@@ -35,12 +37,14 @@ export class CancelRequestService {
     }
     if (b.cancelRequestedAt) throw alreadyRequested();
     const wallet = pendingWalletPayment(b.payments);
-    if (!wallet || !isUnderReview(b, b.payments)) {
-      throw new AppError('This booking has no payment being verified. Cancel it from this page instead', 409, 'NOT_UNDER_REVIEW');
-    }
+    if (!wallet || !isUnderReview(b, b.payments)) throw notUnderReview();
     await this.prisma.$transaction(async (tx) => {
       const { count } = await tx.booking.updateMany({ where: { id, status: 'pending', cancelRequestedAt: null }, data: { cancelRequestedAt: new Date() } });
-      if (count === 0) throw alreadyRequested();
+      if (count === 0) {
+        // Lost a race: another request got in, or staff verified / rejected it meanwhile.
+        const now = await tx.booking.findUnique({ where: { id }, select: { cancelRequestedAt: true } });
+        throw now?.cancelRequestedAt ? alreadyRequested() : notUnderReview();
+      }
       await tx.bookingEvent.create({
         data: {
           bookingId: id, type: 'cancel_requested',

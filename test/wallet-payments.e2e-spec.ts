@@ -248,7 +248,7 @@ describe('bKash / Nagad payments (e2e)', () => {
     it('staff reject: the booking is cancelled, the payment fails and the slot is free', async () => {
       const { bookingId } = (await walletCheckout(d2, 9, 'nagad', trx(), 201)).body.data;
       const res = await (await signIn(manager)).post(`${API}/admin/bookings/${bookingId}/cancel`)
-        .send({ reason: 'No such TrxID in our Nagad app', refund: false }).expect(200);
+        .send({ reason: 'No such TrxID in our Nagad app', refund: false, rejectWalletPayment: true }).expect(200);
       expect(res.body.data).toMatchObject({ status: 'cancelled', paymentStatus: 'failed', walletPayment: { method: 'nagad', status: 'failed' } });
       expect((await booking(bookingId)).payments[0]).toMatchObject({ status: 'failed', refundedAt: null });
       expect(await slotAt(d2, 9)).toMatchObject({ status: 'available' });
@@ -259,7 +259,7 @@ describe('bKash / Nagad payments (e2e)', () => {
       const token = bookingToken(bookingId);
       expect((await http().get(`${API}/bookings/${bookingId}`).query({ token }).expect(200)).body.data).toMatchObject({ canCancel: false, canRequestCancel: true });
       expect((await http().post(`${API}/bookings/${bookingId}/cancel`).query({ token }).expect(409)).body.code).toBe('PAYMENT_UNDER_REVIEW');
-      await (await signIn(manager)).post(`${API}/admin/bookings/${bookingId}/cancel`).send({ refund: false, notifyCustomer: false }).expect(200);
+      await (await signIn(manager)).post(`${API}/admin/bookings/${bookingId}/cancel`).send({ refund: false, rejectWalletPayment: true, notifyCustomer: false }).expect(200);
       expect((await booking(bookingId)).payments[0]).toMatchObject({ status: 'failed' });
       expect(await slotAt(d2, 10)).toMatchObject({ status: 'available' });
       const report = await (await signIn(manager)).get(`${API}/admin/reports/grounds`).query({ from: d2, to: d2 }).expect(200);
