@@ -10,6 +10,7 @@ export default defineConfig({
     // e2e files run in parallel against one database, with several password hashes per test.
     testTimeout: 15_000,
     // Stripe is mocked, but card checkout is only offered with keys set. Never real keys.
-    env: { STRIPE_SECRET_KEY: 'sk_test_e2e', STRIPE_WEBHOOK_SECRET: 'whsec_e2e' },
+    // TEST_OTP_CODE: customers sign in with this code and no SMS is sent (test/sign-in-customer.ts).
+    env: { STRIPE_SECRET_KEY: 'sk_test_e2e', STRIPE_WEBHOOK_SECRET: 'whsec_e2e', TEST_OTP_CODE: '123456' },
   },
 });

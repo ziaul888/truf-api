@@ -11,6 +11,7 @@ import { EmailService } from './../src/email/email.service.js';
 import { StripeService } from './../src/payments/stripe.service.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import { addDays, toDbDate, venueNow } from './../src/slots/venue-time.js';
+import { signInCustomer } from './sign-in-customer.js';
 
 const API = '/api/v1';
 const DOMAIN = '@wallet-review.test';
@@ -87,13 +88,21 @@ describe('bKash / Nagad under review (e2e)', () => {
   };
   const slotOf = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id } }).then((b) => prisma.slot.findUniqueOrThrow({ where: { id: b.slotId } }));
   const booking = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id }, include: { payments: true } });
-  const checkout = (hour: number, extra: object) => http().post(`${API}/checkout`).send({
-    groundId, date: d1, hour, customerName: 'Tania Akter', customerEmail: 'tania@wallet-review.test', customerPhone: '01799004101', ...extra,
-  });
+  /**
+   * Signed in (cash, bKash and Nagad need it), on a phone per hour so no test meets the cap of 3
+   * open unpaid bookings per phone.
+   */
+  const checkout = async (hour: number, extra: object, status: number) => {
+    const customerPhone = `017990041${String(hour).padStart(2, '0')}`;
+    const customer = await signInCustomer(app, customerPhone);
+    return customer.post(`${API}/checkout`).send({
+      groundId, date: d1, hour, customerName: 'Tania Akter', customerEmail: 'tania@wallet-review.test', customerPhone, ...extra,
+    }).expect(status);
+  };
   /** A portal bKash booking at `hour`, under review. */
   const walletBooking = async (hour: number, reference = trx()) => {
     await prisma.slotSettings.upsert({ where: { id: 1 }, create: { id: 1, bkashNumber: '+8801700000041' }, update: { bkashNumber: '+8801700000041' } });
-    const res = await checkout(hour, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }).expect(201);
+    const res = await checkout(hour, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }, 201);
     return res.body.data.bookingId as string;
   };
   /** This file's ground only: other files verify bKash payments in parallel. */
@@ -141,7 +150,7 @@ describe('bKash / Nagad under review (e2e)', () => {
       const inside = await http().post(`${API}/bookings/${late}/cancel-request`).query({ token: bookingToken(late) }).expect(400);
       expect(inside.body.code).toBe('CANCELLATION_WINDOW_PASSED');
 
-      const cash = (await checkout(8, { paymentMethod: 'cash' }).expect(201)).body.data.bookingId;
+      const cash = (await checkout(8, { paymentMethod: 'cash' }, 201)).body.data.bookingId;
       const res = await http().post(`${API}/bookings/${cash}/cancel-request`).query({ token: bookingToken(cash) }).expect(409);
       expect(res.body.code).toBe('NOT_UNDER_REVIEW');
       // After verification the normal cancel works again.
@@ -189,11 +198,11 @@ describe('bKash / Nagad under review (e2e)', () => {
     it('blocked while pending or verified; free again once rejected', async () => {
       const reference = trx();
       const first = await walletBooking(13, reference);
-      expect((await checkout(14, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }).expect(409)).body.code).toBe('REFERENCE_ALREADY_USED');
+      expect((await checkout(14, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }, 409)).body.code).toBe('REFERENCE_ALREADY_USED');
       await (await staff()).post(`${API}/admin/bookings/${first}/cancel`).send({ refund: false, rejectWalletPayment: true }).expect(200);
       const second = await walletBooking(14, reference);
       await (await staff()).post(`${API}/admin/bookings/${second}/confirm`).send({ notifyCustomer: false }).expect(200);
-      expect((await checkout(15, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }).expect(409)).body.code).toBe('REFERENCE_ALREADY_USED');
+      expect((await checkout(15, { paymentMethod: 'bkash', reference, payerNumber: '01811000041' }, 409)).body.code).toBe('REFERENCE_ALREADY_USED');
     });
   });
 
@@ -211,7 +220,7 @@ describe('bKash / Nagad under review (e2e)', () => {
       const detail = (await agent.get(`${API}/admin/bookings/${id}`).expect(200)).body.data;
       expect(detail.events.find((e: { type: string }) => e.type === 'cancelled').detail).toMatch(/bKash payment \(TrxID R[0-9A-F]+\) rejected/);
 
-      const cash = (await checkout(16, { paymentMethod: 'cash' }).expect(201)).body.data.bookingId;
+      const cash = (await checkout(16, { paymentMethod: 'cash' }, 201)).body.data.bookingId;
       await prisma.slot.update({ where: { id: (await slotOf(cash)).id }, data: { date: toDbDate(yesterday) } });
       expect((await agent.post(`${API}/admin/bookings/${cash}/cancel`).send({ refund: false }).expect(409)).body.code).toBe('BOOKING_COMPLETED');
     });
@@ -229,7 +238,7 @@ describe('bKash / Nagad under review (e2e)', () => {
     });
 
     it('refuses a TrxID that would be dropped', async () => {
-      expect((await checkout(17, { paymentMethod: 'cash', reference: trx() }).expect(400)).body.code).toBe('VALIDATION_FAILED');
+      expect((await checkout(17, { paymentMethod: 'cash', reference: trx() }, 400)).body.code).toBe('VALIDATION_FAILED');
       const slot = await prisma.slot.findFirstOrThrow({ where: { groundId, status: 'available' } });
       const res = await (await staff()).post(`${API}/admin/bookings`).send({
         slotId: slot.id, customer: { name: 'Walk In', phone: '01799004102', email: 'w@wallet-review.test' },

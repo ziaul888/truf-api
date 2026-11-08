@@ -12,6 +12,7 @@ import { EmailService } from './../src/email/email.service.js';
 import { StripeService } from './../src/payments/stripe.service.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import { addDays, toDbDate, venueNow } from './../src/slots/venue-time.js';
+import { signInCustomer } from './sign-in-customer.js';
 
 const API = '/api/v1';
 const LOGIN = `${API}/admin/auth/login`;
@@ -107,12 +108,17 @@ describe('bKash / Nagad payments (e2e)', () => {
   const slotAt = (date: string, startHour: number) =>
     prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour } } });
   const booking = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id }, include: { payments: true } });
-  const checkout = (date: string, hour: number, phoneSuffix: string, extra: object) => http().post(`${API}/checkout`).send({
+  /** bKash / Nagad need a signed-in customer: pass their agent as `client`. */
+  const checkout = (
+    date: string, hour: number, phoneSuffix: string, extra: object,
+    client: ReturnType<typeof request.agent> | ReturnType<typeof http> = http(),
+  ) => client.post(`${API}/checkout`).send({
     groundId, date, hour, customerName: 'Nusrat Jahan', customerEmail: 'nusrat@wallets.test', customerPhone: `0179900400${phoneSuffix}`, ...extra,
   });
   const walletCheckout = async (date: string, hour: number, method: 'bkash' | 'nagad', reference: string, status: number) => {
     await walletsOn();
-    return checkout(date, hour, '1', { paymentMethod: method, reference, payerNumber: '01811000041' }).expect(status);
+    const customer = await signInCustomer(app, '01799004001');
+    return checkout(date, hour, '1', { paymentMethod: method, reference, payerNumber: '01811000041' }, customer).expect(status);
   };
   /** Today's revenue on this file's ground (other files verify bKash payments in parallel) and venue-wide bKash. */
   const bkashToday = async () => {

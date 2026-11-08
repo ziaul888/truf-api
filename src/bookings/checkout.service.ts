@@ -19,6 +19,7 @@ import {
   paymentUnderReview, slotNotAvailable, withBookingNumber, type WalletMethod,
 } from './booking-rules.js';
 import type { CheckoutInput } from './bookings.schemas.js';
+import { assertCanBookUnpaid } from './checkout-limits.js';
 
 export interface CheckoutResult {
   bookingId: string;
@@ -57,6 +58,7 @@ const outsideWindow = (message: string) => new AppError(message, 400, 'OUTSIDE_B
  * - bKash / Nagad: the customer has sent the total to the venue's number and gives the TrxID.
  *   Books the slot like cash, with a pending payment that staff verify in their own app. Off
  *   while the admin hasn't set that number.
+ * - Cash, bKash and Nagad need a signed-in customer and are capped per phone (`checkout-limits.ts`).
  */
 @Injectable()
 export class CheckoutService {
@@ -86,6 +88,7 @@ export class CheckoutService {
     const input = verifiedPhone ? { ...body, customerPhone: verifiedPhone } : body;
     const settings = await this.settings.get();
     assertMethodAvailable(input.paymentMethod, settings);
+    await assertCanBookUnpaid(this.prisma, input.paymentMethod, verifiedPhone);
     const ground = await this.prisma.ground.findFirst({ where: { id: input.groundId, ...VISIBLE_GROUND } });
     if (!ground) throw groundNotFound();
     const slot = await this.prisma.slot.findUnique({

@@ -10,6 +10,7 @@ import { EmailService } from './../src/email/email.service.js';
 import { StripeService } from './../src/payments/stripe.service.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import { addDays, toDbDate, venueNow } from './../src/slots/venue-time.js';
+import { signInCustomer } from './sign-in-customer.js';
 
 const API = '/api/v1';
 const DOMAIN = '@wallet-race.test';
@@ -81,8 +82,10 @@ describe('bKash verify vs reject race (e2e)', () => {
     const outcomes = { verified: 0, rejected: 0 };
     for (let round = 0; round < ROUNDS; round++) {
       await prisma.slotSettings.upsert({ where: { id: 1 }, create: { id: 1, bkashNumber: '+8801700000042' }, update: { bkashNumber: '+8801700000042' } });
-      const created = await request(app.getHttpServer()).post(`${API}/checkout`).send({
-        groundId, date, hour: 6 + round, customerName: 'Race Runner', customerEmail: 'race@wallet-race.test', customerPhone: '01799004201',
+      // A signed-in customer per round: bKash needs sign-in, and checkout allows 5 per 10 minutes per phone.
+      const customerPhone = `017990042${String(round + 1).padStart(2, '0')}`;
+      const created = await (await signInCustomer(app, customerPhone)).post(`${API}/checkout`).send({
+        groundId, date, hour: 6 + round, customerName: 'Race Runner', customerEmail: 'race@wallet-race.test', customerPhone,
         paymentMethod: 'bkash', reference: `X${randomBytes(5).toString('hex').toUpperCase()}`, payerNumber: '01811000042',
       }).expect(201);
       const id = created.body.data.bookingId as string;

@@ -20,7 +20,7 @@ Conventions are unchanged from `docs/frontend-integration.md`:
 | Portal payment | Customers choose **card** (Stripe, confirmed on payment), **cash at the venue** (pending until staff confirm), or **bKash / Nagad** (they send the total to the venue's number and enter the TrxID; pending until staff verify it in their own app). Admins can switch cash off with `portalCashEnabled`; bKash / Nagad are offered only while their number is set (`bkashNumber`, `nagadNumber`) |
 | Partial payments | **Staff bookings only:** an advance plus an optional due date and note. Collect the rest later |
 | Who confirms | Portal bookings confirm **automatically** when Stripe payment succeeds. The review queue (`status=pending`) holds staff bookings that aren't paid yet |
-| How customers see bookings | Each booking has a signed link: `/confirmation/{id}?token=…`. Customers can also **sign in with their phone (SMS code)** to see **My bookings** (§2a). Login is optional: guest checkout stays |
+| How customers see bookings | Each booking has a signed link: `/confirmation/{id}?token=…`. Customers can also **sign in with their phone (SMS code)** to see **My bookings** (§2a). Login is optional for card: guest card checkout stays. Cash, bKash and Nagad need sign-in (§2) |
 | Service fee | Comes from settings (`serviceFee`, default `5000` = ৳50), portal bookings only, and is stored on each booking. **Remove the hardcoded ৳50** and use `serviceFee` / `total` from the API |
 | Payment methods | `card`, `cash`, `bank_transfer`, `bkash`, `nagad`. **Remove UPI** |
 | Completed | A confirmed booking becomes `completed` automatically after its slot ends, and can no longer be cancelled |
@@ -58,7 +58,7 @@ How they move together:
 
 ---
 
-## 2. Portal (customers, no login)
+## 2. Portal (customers; sign-in only for cash, bKash and Nagad)
 
 ### `GET /api/v1/checkout/options`
 
@@ -80,6 +80,9 @@ How they move together:
 - **`paymentMethod`:** `"card"` (the default), `"cash"`, `"bkash"` or `"nagad"`.
 - **`reference`** (the TrxID) and **`payerNumber`** (the number the money was sent from): required for `bkash` and `nagad`, and refused (`400 VALIDATION_FAILED`) with `card` or `cash`. The TrxID is trimmed and uppercased, and must be 6–20 letters and digits; the number is any common phone format.
 - **Response:** `{ bookingId, paymentMethod, checkoutUrl, confirmationUrl }`.
+- **Cash, bKash and Nagad need a signed-in customer** (phone + SMS code, §2a): they book the slot with no money taken. A guest gets `401 SIGN_IN_REQUIRED` before anything is reserved; show a sign-in link that returns to the checkout. Card checkout stays open to guests.
+- **At most 3 open unpaid portal bookings per phone:** pending cash bookings and bKash / Nagad bookings still being verified, whose slot hasn't started yet. Card checkouts don't count. A 4th is `409 TOO_MANY_OPEN_BOOKINGS` (nothing is reserved): the customer pays or cancels one first, or pays by card. Two requests at the very same moment may both get through; that's accepted.
+- **Rate limit:** 5 checkouts per 10 minutes per IP + phone (the signed-in phone, else `customerPhone`), refused ones included. Then `429 TOO_MANY_ATTEMPTS`.
 - **Card:** redirect to `checkoutUrl`, which is Stripe.
 - **Cash:**
   - `checkoutUrl` is `null`. Go straight to `confirmationUrl`.
@@ -103,6 +106,9 @@ How they move together:
   - `400 SLOT_IN_PAST`.
   - `400 GROUND_CLOSED`: the ground doesn't open that day.
   - `404 GROUND_NOT_FOUND`.
+  - `401 SIGN_IN_REQUIRED`: cash, bKash or Nagad without a signed-in customer.
+  - `409 TOO_MANY_OPEN_BOOKINGS`: already 3 open unpaid bookings on the phone.
+  - `429 TOO_MANY_ATTEMPTS`: more than 5 checkouts in 10 minutes. Ask them to wait a few minutes.
   - `502 PAYMENT_PROVIDER_ERROR`: Stripe is unavailable or not configured. Show `error`.
 - **Return URLs:**
   - On payment success, Stripe sends the customer to `{PUBLIC_APP_URL}/confirmation/{bookingId}?token=…`.
@@ -374,6 +380,9 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | 400 | `CASH_NOT_AVAILABLE` | Portal cash chosen while `portalCashEnabled` is off |
 | 400 | `WALLET_NOT_AVAILABLE` | Portal bKash / Nagad chosen while its number isn't set |
 | 409 | `REFERENCE_ALREADY_USED` | A bKash / Nagad TrxID already recorded for that method (portal or staff) |
+| 401 | `SIGN_IN_REQUIRED` | Portal cash, bKash or Nagad checkout without a signed-in customer |
+| 409 | `TOO_MANY_OPEN_BOOKINGS` | Portal cash, bKash or Nagad checkout with 3 open unpaid bookings on the phone already |
+| 429 | `TOO_MANY_ATTEMPTS` | More than 5 portal checkouts in 10 minutes per IP + phone |
 | 409 | `PAYMENT_UNDER_REVIEW` | "Pay now", "Collect payment" or a customer cancel while a bKash / Nagad payment is being verified |
 | 409 | `VERIFY_OR_REJECT` | Any cancel of an unverified bKash / Nagad payment other than Reject (staff cancel without `rejectWalletPayment`, or blocking the slot over it) |
 | 409 | `PAYMENT_ALREADY_HANDLED` | "Reject" after the payment was verified meanwhile |

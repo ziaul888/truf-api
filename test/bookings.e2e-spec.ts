@@ -12,6 +12,7 @@ import { EmailService } from './../src/email/email.service.js';
 import { StripeService } from './../src/payments/stripe.service.js';
 import { PrismaService } from './../src/prisma/prisma.service.js';
 import { addDays, toDbDate, venueNow } from './../src/slots/venue-time.js';
+import { signInCustomer } from './sign-in-customer.js';
 
 const API = '/api/v1';
 const LOGIN = `${API}/admin/auth/login`;
@@ -104,7 +105,11 @@ describe('Bookings (e2e)', () => {
   const slotAt = (date: string, startHour: number) =>
     prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour } } });
   const booking = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id }, include: { payments: true } });
-  const checkout = (date: string, hour: number, phoneSuffix: string, paymentMethod: 'card' | 'cash' = 'card') => http().post(`${API}/checkout`).send({
+  /** Cash needs a signed-in customer: pass their agent as `client`. */
+  const checkout = (
+    date: string, hour: number, phoneSuffix: string, paymentMethod: 'card' | 'cash' = 'card',
+    client: ReturnType<typeof request.agent> | ReturnType<typeof http> = http(),
+  ) => client.post(`${API}/checkout`).send({
     groundId, date, hour, customerName: 'Rakib Hasan', customerEmail: 'Rakib@Example.com', customerPhone: `0179900000${phoneSuffix}`, paymentMethod,
   });
   const webhook = (event: object, signature = 'good') =>
@@ -175,6 +180,11 @@ describe('Bookings (e2e)', () => {
 
   describe('pay at the venue (cash)', () => {
     let cashId: string;
+    let customer: ReturnType<typeof request.agent>;
+
+    beforeEach(async () => {
+      customer = await signInCustomer(app, '01799000008');
+    });
 
     it('tells the portal that cash is offered, with the fee', async () => {
       const res = await http().get(`${API}/checkout/options`).expect(200);
@@ -183,7 +193,7 @@ describe('Bookings (e2e)', () => {
     });
 
     it('books the slot with no Stripe step, pending until staff confirm', async () => {
-      const res = await checkout(d1, 10, '8', 'cash').expect(201);
+      const res = await checkout(d1, 10, '8', 'cash', customer).expect(201);
       cashId = res.body.data.bookingId;
       expect(res.body.data).toMatchObject({ paymentMethod: 'cash', checkoutUrl: null, confirmationUrl: expect.stringContaining(`/confirmation/${cashId}?token=`) });
       expect(await slotAt(d1, 10)).toMatchObject({ status: 'booked', heldUntil: null });
@@ -204,7 +214,7 @@ describe('Bookings (e2e)', () => {
 
     it('confirms a pending booking when staff record its cash; refuses a card checkout', async () => {
       const agent = await signIn(manager);
-      const { bookingId } = (await checkout(d2, 9, '8', 'cash').expect(201)).body.data;
+      const { bookingId } = (await checkout(d2, 9, '8', 'cash', customer).expect(201)).body.data;
       const paid = await agent.post(`${API}/admin/bookings/${bookingId}/payments`).send({ amount: 6000, method: 'cash' }).expect(201);
       expect(paid.body.data).toMatchObject({ status: 'confirmed', paymentStatus: 'paid', due: 0, confirmedAt: expect.any(String) });
 
@@ -215,7 +225,7 @@ describe('Bookings (e2e)', () => {
     });
 
     it('lets the customer pay a pending cash booking online instead, which confirms it', async () => {
-      const { bookingId } = (await checkout(d2, 8, '8', 'cash').expect(201)).body.data;
+      const { bookingId } = (await checkout(d2, 8, '8', 'cash', customer).expect(201)).body.data;
       const token = bookingToken(bookingId);
       const before = await http().get(`${API}/bookings/${bookingId}`).query({ token }).expect(200);
       expect(before.body.data).toMatchObject({ status: 'pending', payAtVenue: true, paid: 0, due: 6000, canPay: true });
@@ -234,7 +244,7 @@ describe('Bookings (e2e)', () => {
     });
 
     it('lets the customer cancel a pending cash booking through the link', async () => {
-      const { bookingId } = (await checkout(d1, 11, '8', 'cash').expect(201)).body.data;
+      const { bookingId } = (await checkout(d1, 11, '8', 'cash', customer).expect(201)).body.data;
       const res = await http().post(`${API}/bookings/${bookingId}/cancel`).query({ token: bookingToken(bookingId) }).expect(200);
       expect(res.body.data).toMatchObject({ status: 'cancelled', payAtVenue: true });
       expect(await slotAt(d1, 11)).toMatchObject({ status: 'available' });
