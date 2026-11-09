@@ -18,17 +18,24 @@ describe('report totals', () => {
     expect(totals.byMethod).toEqual({ card: 0, cash: 0, bank_transfer: 0, bkash: 6000, nagad: 3000 });
   });
 
-  it('booking rates: average of kept bookings, completion of ended ones', () => {
+  it('booking rates: average of kept bookings, completion of those with an outcome', () => {
     const totals = bookingTotals([
-      booking('completed', 1000), booking('completed', 2000), booking('cancelled', 9999), booking('confirmed', 3000, false),
+      booking('completed', 1000), booking('completed', 2000), booking('cancelled', 9999), booking('confirmed', 3000, false), booking('no_show', 2000),
     ]);
+    // completed / (completed + no_show) = 2 / 3: cancelled and not-yet-played bookings have no outcome.
     expect(totals).toEqual({
-      bookings: 4, statusCounts: { pending: 0, confirmed: 1, completed: 2, cancelled: 1 },
-      avgBookingValue: 2000, completionRate: 66.7, cancellationRate: 25,
+      bookings: 5, statusCounts: { pending: 0, confirmed: 1, completed: 2, cancelled: 1, no_show: 1 },
+      avgBookingValue: 2000, completionRate: 66.7, cancellationRate: 20, noShows: 1,
     });
   });
 
+  it('completion rate ignores cancelled and ended-but-pending bookings', () => {
+    expect(bookingTotals([booking('completed', 1000), booking('cancelled', 1000), booking('pending', 1000)]).completionRate).toBe(100);
+    expect(bookingTotals([booking('no_show', 1000)])).toMatchObject({ completionRate: 0, noShows: 1 });
+    expect(bookingTotals([booking('confirmed', 1000, false)]).completionRate).toBeNull();
+  });
+
   it('no bookings: zeros and a null completion rate', () => {
-    expect(bookingTotals([])).toMatchObject({ bookings: 0, avgBookingValue: 0, completionRate: null, cancellationRate: 0 });
+    expect(bookingTotals([])).toMatchObject({ bookings: 0, avgBookingValue: 0, completionRate: null, cancellationRate: 0, noShows: 0 });
   });
 });

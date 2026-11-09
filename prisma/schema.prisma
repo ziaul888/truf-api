@@ -33,6 +33,8 @@ enum BookingStatus {
   cancelled
   /// Confirmed and the slot has ended (set by an hourly job).
   completed
+  /// The team didn't turn up (staff, once the slot started): the advance stays, the rest of the due is written off.
+  no_show
 }
 
 enum BookingSource {
@@ -68,6 +70,8 @@ enum BookingEventType {
   completed
   /// The customer asked to cancel while their bKash / Nagad payment was being verified.
   cancel_requested
+  /// Staff marked the booking no-show.
+  no_show
 }
 
 /// Why staff blocked a slot (the dashboard's block form list).

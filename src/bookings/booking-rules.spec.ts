@@ -1,6 +1,7 @@
 import { AppError } from '../common/app-error.js';
 import {
-  bookingToken, dueOf, isValidBookingToken, newBookingNumber, owedOf, paidOf, paymentStatusOf, pendingWalletPayment, withBookingNumber,
+  bookingToken, dueOf, isValidBookingToken, newBookingNumber, noShowDetail, owedOf, paidOf, paymentStatusOf, pendingWalletPayment,
+  withBookingNumber,
 } from './booking-rules.js';
 import { customerCanCancel, customerCanPay, customerCanRequestCancel, type BookingRow } from './booking.dto.js';
 
@@ -40,6 +41,20 @@ describe('booking rules', () => {
     expect(paidOf(payments)).toBe(400);
     expect(dueOf({ status: 'confirmed', total: 1000 }, payments)).toBe(600);
     expect(dueOf({ status: 'cancelled', total: 1000 }, payments)).toBe(0);
+  });
+
+  it('writes off the due on a no-show: nothing owed, the advance still counts as paid', () => {
+    const payments = [{ amount: 400, status: 'succeeded' as const, method: 'cash' as const }];
+    expect(dueOf({ status: 'no_show', total: 1000 }, payments)).toBe(0);
+    expect(owedOf({ status: 'no_show', total: 1000 }, payments)).toBe(0);
+    expect(paidOf(payments)).toBe(400);
+    expect(customerCanPay({ status: 'no_show', source: 'staff', payAtVenue: false, total: 1000, payments } as unknown as BookingRow)).toBe(false);
+  });
+
+  it('no-show event details keep amounts in the smallest unit', () => {
+    expect(noShowDetail(60000)).toBe('No-show: 60000 due written off');
+    expect(noShowDetail(60000, 'Phone off')).toBe('No-show: 60000 due written off: Phone off');
+    expect(noShowDetail(0)).toBe('No-show: no due written off');
   });
 
   it.each([

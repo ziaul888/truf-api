@@ -71,12 +71,14 @@ The stat cards on Reports, the Revenue report and the Bookings report, and the s
   "revenueByMethod": { "card": 3100000, "cash": 1270000, "bank_transfer": 150000, "bkash": 0, "nagad": 0 },
   "bookings": 38, "bookingsTrend": -5.0,
   "avgBookingValue": 152000, "avgBookingValueTrend": 3.4,
-  "completionRate": 91.7, "completionRateTrend": null,
+  "completionRate": 92.3, "completionRateTrend": null,
   "cancellationRate": 7.9,
-  "statusCounts": { "pending": 2, "confirmed": 9, "completed": 24, "cancelled": 3 }
+  "statusCounts": { "pending": 2, "confirmed": 7, "completed": 24, "cancelled": 3, "no_show": 2 },
+  "noShows": 2
 }
 ```
 - Rates are percentages from 0 to 100.
+- `completionRate` is `completed / (completed + no_show)`: of the bookings with an outcome, how many teams turned up. Cancelled bookings and ones not yet completed are left out; it's `null` when the range has none with an outcome. `noShows` is the same as `statusCounts.no_show`, for the stat card.
 - `revenueByMethod` is net of refunds. A bKash / Nagad payment counts on the day staff verify it. Every received payment is dated by when it counted as received (`receivedAt`; older rows fall back to when they were recorded); refunds by when they were made.
 - `revenue` can be **negative** for a range with more refunds than income. Show it as is.
 
@@ -115,7 +117,7 @@ The "Revenue by ground" chart, "Ground performance" and "Ground utilization", pl
 {
   "groupBy": "week",
   "points": [
-    { "period": "2026-10-24", "label": "24 – 30 Oct", "pending": 1, "confirmed": 4, "completed": 6, "cancelled": 1, "total": 12 }
+    { "period": "2026-10-24", "label": "24 – 30 Oct", "pending": 1, "confirmed": 4, "completed": 6, "cancelled": 1, "no_show": 0, "total": 12 }
   ]
 }
 ```

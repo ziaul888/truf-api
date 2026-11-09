@@ -128,6 +128,8 @@ export class BookingCancellationService {
 
   private async assertCancellable(b: BookingRow, opts: CancelOptions) {
     if (b.status === 'cancelled') throw new AppError('This booking is already cancelled', 409, 'BOOKING_ALREADY_CANCELLED');
+    // Like a completed booking: it has taken place (or would have). Staff undo the no-show first.
+    if (b.status === 'no_show') throw new AppError('This booking is marked no-show. Undo the no-show first', 409, 'BOOKING_COMPLETED');
     const underReview = isUnderReview(b, b.payments);
     // The customer asks instead while staff verify (POST /bookings/:id/cancel-request).
     if (opts.byCustomer && underReview) throw paymentUnderReview('Your payment is being verified. Ask the venue to cancel instead');

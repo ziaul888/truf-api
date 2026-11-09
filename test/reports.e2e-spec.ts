@@ -112,9 +112,11 @@ describe('Reports (e2e)', () => {
       revenueByMethod: { card: -2000, cash: 1000, bank_transfer: 0, bkash: 0, nagad: 0 },
       bookings: 3, bookingsTrend: null,
       avgBookingValue: 2000, avgBookingValueTrend: null,
-      completionRate: 33.3, completionRateTrend: null,
+      // completed / (completed + no_show): the cancelled and the not-yet-completed bookings have no outcome.
+      completionRate: 100, completionRateTrend: null,
       cancellationRate: 33.3,
-      statusCounts: { pending: 0, confirmed: 1, completed: 1, cancelled: 1 },
+      statusCounts: { pending: 0, confirmed: 1, completed: 1, cancelled: 1, no_show: 0 },
+      noShows: 0,
     });
   });
 
@@ -131,7 +133,7 @@ describe('Reports (e2e)', () => {
   it('bookings over time: Saturday weeks', async () => {
     const res = await (await signIn('admin')).get(`${REPORTS}/bookings`).query({ ...MARCH, groupBy: 'week' }).expect(200);
     const week = res.body.data.points.find((p: { period: string }) => p.period === '2025-03-08');
-    expect(week).toEqual({ period: '2025-03-08', label: '8 – 14 Mar', pending: 0, confirmed: 1, completed: 1, cancelled: 1, total: 3 });
+    expect(week).toEqual({ period: '2025-03-08', label: '8 – 14 Mar', pending: 0, confirmed: 1, completed: 1, cancelled: 1, no_show: 0, total: 3 });
     expect(res.body.data.points[0]).toMatchObject({ period: '2025-03-01', label: '1 – 7 Mar', total: 0 });
   });
 
