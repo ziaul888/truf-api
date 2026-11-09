@@ -24,6 +24,11 @@ export interface CancelOptions {
   rejectWallet?: boolean;
   /** Staff blocking the booked slot: the slot ends blocked instead of available. */
   blockSlot?: { reason: BlockReason; note?: string };
+  /**
+   * The system giving up on a checkout that was never paid: acts only while the booking is still
+   * pending, so a payment landing at the same moment wins, and also after the slot has ended.
+   */
+  unpaidOnly?: boolean;
 }
 
 /** Refund ids by payment id (null for cash, bank transfer, bKash and Nagad, refunded by hand). */
@@ -46,13 +51,15 @@ export class BookingCancellationService {
     private readonly settings: SlotSettingsService,
   ) {}
 
-  async cancel(bookingId: string, opts: CancelOptions): Promise<void> {
+  /** Returns false only for `unpaidOnly`, when the booking is no longer pending and was left alone. */
+  async cancel(bookingId: string, opts: CancelOptions): Promise<boolean> {
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: BOOKING_INCLUDE });
     if (!booking || booking.deletedAt) throw bookingNotFound();
+    if (opts.unpaidOnly && booking.status !== 'pending') return false;
     if (opts.rejectWallet && !isUnderReview(booking, booking.payments)) {
       throw new AppError('This payment was already verified or rejected. Reload the booking', 409, 'PAYMENT_ALREADY_HANDLED');
     }
-    await this.assertCancellable(booking, opts);
+    if (!opts.unpaidOnly) await this.assertCancellable(booking, opts);
 
     const refunds: Refunds = opts.refund ? await this.refund(booking.payments) : new Map();
     try {
@@ -60,6 +67,8 @@ export class BookingCancellationService {
     } catch (err) {
       // Stripe has already sent the money back: keep that on record even though the cancel failed.
       await this.keepStripeRefunds(booking, refunds, opts.actorId);
+      // The system giving up on an unpaid checkout loses quietly to a payment that got in first.
+      if (opts.unpaidOnly && err instanceof AppError && err.code === 'BOOKING_CHANGED') return false;
       throw err;
     }
 
@@ -67,6 +76,7 @@ export class BookingCancellationService {
     if (opts.notify) {
       await this.notifier.cancelled(bookingId, { reason: opts.reason, refunded, becauseBlocked: !!opts.blockSlot });
     }
+    return true;
   }
 
   private async cancelInTx(tx: Prisma.TransactionClient, booking: BookingRow, opts: CancelOptions, refunds: Refunds) {

@@ -63,12 +63,14 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
     return slots.length;
   }
 
-  /** Cancels the pending booking behind a lapsed hold and expires its Stripe session. */
+  /** Cancels the unpaid booking behind a lapsed hold and expires its Stripe session. */
   private async releaseHold(slot: { id: string; heldByBookingId: string | null }) {
     const booking = slot.heldByBookingId ? await this.prisma.booking.findUnique({ where: { id: slot.heldByBookingId } }) : null;
     if (booking?.status === 'pending') {
-      await this.cancellation.cancel(booking.id, { actorId: null, reason: 'Payment not completed in time', refund: false, notify: false });
-      if (booking.stripeCheckoutSessionId) await this.stripe.expireSession(booking.stripeCheckoutSessionId);
+      const cancelled = await this.cancellation.cancel(booking.id, {
+        actorId: null, reason: 'Payment not completed in time', refund: false, notify: false, unpaidOnly: true,
+      });
+      if (cancelled && booking.stripeCheckoutSessionId) await this.stripe.expireSession(booking.stripeCheckoutSessionId);
       return;
     }
     // No pending booking behind it any more: just free the slot.

@@ -174,7 +174,7 @@ export class StripeWebhookService {
     const bookingId = session.metadata?.bookingId;
     const booking = bookingId ? await this.prisma.booking.findUnique({ where: { id: bookingId } }) : null;
     if (booking?.status !== 'pending' || session.metadata?.purpose === 'due') return;
-    await this.cancellation.cancel(booking.id, { actorId: null, reason: 'Payment not completed in time', refund: false, notify: false });
+    await this.cancellation.cancel(booking.id, { actorId: null, reason: 'Payment not completed in time', refund: false, notify: false, unpaidOnly: true });
   }
 
   /** The customer can retry inside the same Checkout page, so the hold stays until it lapses. */

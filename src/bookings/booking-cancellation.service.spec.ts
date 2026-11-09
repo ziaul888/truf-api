@@ -71,6 +71,32 @@ describe('BookingCancellationService', () => {
     expect(notifier.cancelled).toHaveBeenCalledWith('b-1', expect.objectContaining({ refunded: 6000 }));
   });
 
+  describe('unpaidOnly', () => {
+    const unpaid = { actorId: null, refund: false, notify: false, unpaidOnly: true };
+
+    it('leaves a booking that is no longer pending alone', async () => {
+      const { service, prisma } = setup(bookingRow({ status: 'confirmed' }));
+      await expect(service.cancel('b-1', unpaid)).resolves.toBe(false);
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    });
+
+    it('frees nothing when a payment confirms the booking during the cancel', async () => {
+      const { service, tx } = setup(bookingRow({ status: 'pending', payments: [] }));
+      tx.booking.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.cancel('b-1', unpaid)).resolves.toBe(false);
+      expect(tx.booking.updateMany.mock.calls[0]![0].where).toMatchObject({ status: 'pending' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+      expect(tx.bookingEvent.createMany).not.toHaveBeenCalled();
+    });
+
+    it('still cancels after the slot has ended', async () => {
+      const ended = { id: 's-1', date: day('2026-10-27'), startHour: 18, durationMinutes: 60 };
+      const { service, tx } = setup(bookingRow({ status: 'pending', payments: [], slot: ended }));
+      await expect(service.cancel('b-1', unpaid)).resolves.toBe(true);
+      expect(tx.slot.updateMany).toHaveBeenCalled();
+    });
+  });
+
   it('marks cash payments refunded without calling Stripe', async () => {
     const { service, stripe, tx } = setup(bookingRow({ payments: [payment({ method: 'cash', stripePaymentIntentId: null })] }));
     await service.cancel('b-1', opts);

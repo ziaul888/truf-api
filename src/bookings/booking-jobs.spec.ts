@@ -21,7 +21,7 @@ function setup({ held = [] as object[], bookings = [] as object[], pending = { i
     bookingEvent: { createMany: vi.fn((args: object) => args) },
     $transaction: vi.fn(async (ops: unknown[]) => ops),
   };
-  const cancellation = { cancel: vi.fn(async () => undefined) };
+  const cancellation = { cancel: vi.fn(async (): Promise<boolean> => true) };
   const stripe = { expireSession: vi.fn(async () => undefined) };
   const notifier = { paymentDue: vi.fn(async () => true), dueDigest: vi.fn(async (items: object[]) => items.length) };
   const state = { get: vi.fn(async () => ({ date: lastDigest })), set: vi.fn(async () => undefined) };
@@ -39,8 +39,15 @@ describe('BookingJobs', () => {
   it('cancels the pending booking behind a lapsed hold and expires its Stripe session', async () => {
     const { jobs, cancellation, stripe } = setup({ held: [{ id: 's-1', heldByBookingId: 'b-1' }] });
     await expect(jobs.releaseExpiredHolds()).resolves.toBe(1);
-    expect(cancellation.cancel).toHaveBeenCalledWith('b-1', expect.objectContaining({ refund: false }));
+    expect(cancellation.cancel).toHaveBeenCalledWith('b-1', expect.objectContaining({ refund: false, unpaidOnly: true }));
     expect(stripe.expireSession).toHaveBeenCalledWith('cs_1');
+  });
+
+  it('keeps the Stripe session when a payment beat the sweep to the booking', async () => {
+    const { jobs, cancellation, stripe } = setup({ held: [{ id: 's-1', heldByBookingId: 'b-1' }] });
+    cancellation.cancel.mockResolvedValueOnce(false);
+    await jobs.releaseExpiredHolds();
+    expect(stripe.expireSession).not.toHaveBeenCalled();
   });
 
   it('releases the other holds when one fails, then reports the failure', async () => {
