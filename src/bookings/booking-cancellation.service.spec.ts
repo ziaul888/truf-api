@@ -235,6 +235,7 @@ describe('BookingCancellationService', () => {
   it.each([
     ['an unknown booking', null, {}, 404, 'BOOKING_NOT_FOUND'],
     ['a cancelled booking', bookingRow({ status: 'cancelled' }), {}, 409, 'BOOKING_ALREADY_CANCELLED'],
+    ['a no-show, even before its slot ends', bookingRow({ status: 'no_show' }), {}, 409, 'BOOKING_COMPLETED'],
     ['a booking whose slot has ended', bookingRow({ slot: { id: 's-1', date: day('2026-10-28'), startHour: 8, durationMinutes: 60 } }), {}, 409, 'BOOKING_COMPLETED'],
     ['a customer inside the cutoff', bookingRow({ slot: { id: 's-1', date: day('2026-10-28'), startHour: 11, durationMinutes: 60 } }), { byCustomer: true }, 400, 'CANCELLATION_WINDOW_PASSED'],
     ['a customer cancelling a staff booking', bookingRow({ source: 'staff' }), { byCustomer: true }, 400, 'CANCELLATION_WINDOW_PASSED'],

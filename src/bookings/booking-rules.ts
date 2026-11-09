@@ -117,9 +117,13 @@ export const pendingWalletPayment = <P extends PaymentLike & { method: PaymentMe
 export const paidOf = (payments: PaymentLike[]) =>
   payments.filter((p) => p.status === 'succeeded').reduce((sum, p) => sum + p.amount, 0);
 
-/** Still owed; nothing is owed on a cancelled booking. */
+/** Still owed; nothing is owed on a cancelled booking, or on a no-show (the rest of the due is written off). */
 export const dueOf = (booking: { status: string; total: number }, payments: PaymentLike[]) =>
-  booking.status === 'cancelled' ? 0 : Math.max(booking.total - paidOf(payments), 0);
+  booking.status === 'cancelled' || booking.status === 'no_show' ? 0 : Math.max(booking.total - paidOf(payments), 0);
+
+/** "No-show: 600 due written off: Didn't turn up". Amounts in the smallest unit, as every event detail. */
+export const noShowDetail = (writtenOff: number, reason?: string | null) =>
+  `No-show: ${writtenOff > 0 ? `${writtenOff} due written off` : 'no due written off'}${reason ? `: ${reason}` : ''}`;
 
 /** Pending, with a bKash / Nagad payment waiting for staff to verify it. */
 export const isUnderReview = (booking: { status: string }, payments: (PaymentLike & { method: PaymentMethod })[]) =>

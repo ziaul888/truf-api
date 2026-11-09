@@ -7,7 +7,7 @@ import { isoDate } from '../slots/slots.schemas.js';
 import { DUE_FILTERS } from './booking-due.js';
 import { isWalletMethod } from './booking-rules.js';
 
-export const BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed'] as const;
+export const BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed', 'no_show'] as const;
 export const BOOKING_PAYMENT_STATUSES = ['unpaid', 'partial', 'paid', 'refunded', 'failed'] as const;
 /** Staff-recorded methods; card payments only come through Stripe. */
 export const OFFLINE_METHODS = ['cash', 'bank_transfer', 'bkash', 'nagad'] as const;
@@ -82,7 +82,7 @@ export const ListBookingsQuerySchema = PaginationSchema.extend({
 export type ListBookingsQuery = z.infer<typeof ListBookingsQuerySchema>;
 
 export const BOOKING_EVENT_TYPES = [
-  'created', 'payment_received', 'confirmed', 'cancelled', 'refunded', 'email_sent', 'completed', 'cancel_requested',
+  'created', 'payment_received', 'confirmed', 'cancelled', 'refunded', 'email_sent', 'completed', 'cancel_requested', 'no_show',
 ] as const;
 
 /** `type` may repeat (`?type=payment_received&type=refunded`). */
@@ -138,6 +138,10 @@ export const CancelBookingSchema = z.object({
   rejectWalletPayment: z.boolean('rejectWalletPayment must be true or false').default(false),
 });
 export type CancelBookingInput = z.infer<typeof CancelBookingSchema>;
+
+/** "Mark no-show": the reason is optional, as for a cancel. */
+export const NoShowSchema = z.object({ reason: note(500) });
+export type NoShowInput = z.infer<typeof NoShowSchema>;
 
 export const RecordPaymentSchema = z.object({
   amount: z.number().int('Must be a whole number of the smallest unit').min(1, 'Amount must be above 0'),

@@ -5,15 +5,15 @@ import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
 import { BookingQueriesService } from './booking-queries.service.js';
 import {
-  CancelBookingSchema, ConfirmBookingSchema, CreateStaffBookingSchema, ListBookingsQuerySchema, RecordPaymentSchema,
+  CancelBookingSchema, ConfirmBookingSchema, CreateStaffBookingSchema, ListBookingsQuerySchema, NoShowSchema, RecordPaymentSchema,
   UpcomingQuerySchema, UpdateBookingSchema, type CancelBookingInput, type ConfirmBookingInput, type CreateStaffBookingInput,
-  type ListBookingsQuery, type RecordPaymentInput, type UpcomingQuery, type UpdateBookingInput,
+  type ListBookingsQuery, type NoShowInput, type RecordPaymentInput, type UpcomingQuery, type UpdateBookingInput,
 } from './bookings.schemas.js';
 import { StaffBookingsService } from './staff-bookings.service.js';
 
 /**
  * Dashboard bookings, for admins and managers. Status changes go through the actions
- * (confirm, cancel, payments), never a generic status PATCH, so refunds, slots and emails stay consistent.
+ * (confirm, cancel, payments, no-show), never a generic status PATCH, so refunds, slots and emails stay consistent.
  */
 @Controller('admin/bookings')
 @UseGuards(AuthGuard)
@@ -62,6 +62,23 @@ export class AdminBookingsController {
     @Body(new ZodValidationPipe(CancelBookingSchema)) body: CancelBookingInput,
   ) {
     return this.staff.cancel(user.id, id, body);
+  }
+
+  /** The team didn't turn up: the advance stays, the rest of the due is written off. */
+  @Post(':id/no-show')
+  @HttpCode(200)
+  noShow(
+    @CurrentUser() user: AuthUser,
+    @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
+    @Body(new ZodValidationPipe(NoShowSchema)) body: NoShowInput,
+  ) {
+    return this.staff.markNoShow(user.id, id, body);
+  }
+
+  @Post(':id/undo-no-show')
+  @HttpCode(200)
+  undoNoShow(@CurrentUser() user: AuthUser, @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam) {
+    return this.staff.undoNoShow(user.id, id);
   }
 
   @Post(':id/payments')

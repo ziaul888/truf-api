@@ -32,7 +32,7 @@ Conventions are unchanged from `docs/frontend-integration.md`:
 
 | Field | Values |
 |---|---|
-| `status` (booking) | `pending` · `confirmed` · `cancelled` · `completed` |
+| `status` (booking) | `pending` · `confirmed` · `cancelled` · `completed` · `no_show` |
 | `paymentStatus` | `unpaid` · `partial` · `paid` · `refunded` · `failed` |
 | Slot `status` | `available` · **`held`** (new: a customer is in Stripe checkout) · `booked` · `blocked` |
 | Payment `method` | `card` · `cash` · `bank_transfer` · `bkash` · `nagad` |
@@ -55,6 +55,8 @@ How they move together:
 | Cancelled with refund | `cancelled` | `refunded` | `available` |
 | Staff block with `cancelBooking: true` | `cancelled` | `refunded` | `blocked` |
 | Slot ended | `completed` | unchanged | `booked` |
+| Staff mark no-show (slot started) | `no_show` | unchanged (an advance stays as revenue; the rest of the due is written off) | `booked` |
+| Staff undo the no-show | `completed` if the slot ended, else `confirmed` | unchanged (the due comes back) | `booked` |
 
 ---
 
@@ -131,6 +133,7 @@ Returns the public booking. `404 BOOKING_NOT_FOUND` without a valid token.
 }
 ```
 
+- **`status: "no_show"`**: staff marked that the team didn't turn up. Show "No-show"; `due` is 0 and `canCancel`, `canPay` and `canRequestCancel` are all false. "My bookings" lists it under `past`.
 - **Right after the Stripe redirect,** the webhook may not have arrived yet, so `status` can still be `pending`. Poll every 2 seconds for up to about 20 seconds, showing "Confirming your payment…", until it's `confirmed`.
 - **Replace the hardcoded confirmation page** with this data.
 - **`walletPayment`** is set when the customer paid by bKash / Nagad: `{ method, amount, reference, status }`. `status: "pending"` means the venue is still verifying it; `canPay` is false meanwhile.
@@ -254,19 +257,21 @@ Optional. Guests can still book, and signed links keep working. The session is a
 
 | Method & path | Body / query | Returns |
 |---|---|---|
-| `GET /admin/bookings` | `status`, `paymentStatus`, `groundId`, `customerId`, `from`+`to` (slot date, together), `search` (booking number, name, phone), `sort` (`created` default, or `slot`), `due` (`overdue`, `today`, `any`; see the dashboard doc), `page`, `limit` | `{ data, total, page, limit, counts: { pending, confirmed, cancelled, completed } }`. The counts ignore `status`, for the stat cards |
+| `GET /admin/bookings` | `status`, `paymentStatus`, `groundId`, `customerId`, `from`+`to` (slot date, together), `search` (booking number, name, phone), `sort` (`created` default, or `slot`), `due` (`overdue`, `today`, `any`; see the dashboard doc), `page`, `limit` | `{ data, total, page, limit, counts: { pending, confirmed, cancelled, completed, no_show } }`. The counts ignore `status`, for the stat cards. `status=no_show` is a valid filter |
 | `GET /admin/bookings/upcoming?limit=5` | — | The next pending or confirmed bookings (dashboard home) |
 | `GET /admin/bookings/:id` | — | Booking plus `payments[]`, `events[]` (timeline, newest first) and `customer.totalBookings` |
 | `POST /admin/bookings` | See "New Booking" below | **201** booking |
 | `POST /admin/bookings/:id/confirm` | `{ markPaid?: false, method?: "cash", reference?, notifyCustomer?: true }` | Booking. Works for unpaid staff bookings, portal pay-at-venue bookings and portal bKash / Nagad bookings (**Verify**: the pending payment becomes `succeeded`, recorded by you, and the booking `confirmed` and `paid`). `method` is `cash`, `bank_transfer`, `bkash` or `nagad`; `reference` is an optional TrxID for `bkash` / `nagad`. `409 BOOKING_NOT_PENDING` (also for portal card bookings, which confirm by payment, and when the payment was handled meanwhile). `409 BOOKING_CHANGED` (cancelled meanwhile). `409 WALLET_PAYMENT_EXCEEDS_DUE` (other payments already cover it: reject it instead). `409 REFERENCE_ALREADY_USED` |
 | `POST /admin/bookings/:id/cancel` | `{ reason?, refund: boolean, notifyCustomer?: true, rejectWalletPayment?: false }` | Booking. **Also use it for "Decline" and for rejecting a bKash / Nagad payment** (`refund: false`, `rejectWalletPayment: true`: the payment becomes `failed` and the event says e.g. "bKash payment (TrxID …) rejected"; allowed even after the slot has ended). Frees the slot. Card payments are refunded through Stripe; cash, bank transfers, bKash and Nagad are marked refunded (pay those back by hand). `409 VERIFY_OR_REJECT` for any cancel of an unverified payment without `rejectWalletPayment: true`. `409 PAYMENT_ALREADY_HANDLED` when `rejectWalletPayment` but it was verified meanwhile. `409 BOOKING_CHANGED` when another action changed it at the same moment (any Stripe refund already made is still recorded on the payment, with a `refunded` event) |
-| `POST /admin/bookings/:id/payments` | `{ amount, method: "cash" \| "bank_transfer" \| "bkash" \| "nagad", reference?, note? }` | **201** booking. `reference`: optional TrxID, `bkash` / `nagad` only. On a pending booking it also confirms it (`confirmed` event, confirmation email). `409 BOOKING_NOT_PENDING` on a portal card booking still waiting for its card payment. `409 BOOKING_CHANGED` when it was cancelled at the same moment. `400 PAYMENT_EXCEEDS_DUE`, `409 REFERENCE_ALREADY_USED`, `409 PAYMENT_UNDER_REVIEW` (verify or reject the customer's bKash / Nagad payment first) |
+| `POST /admin/bookings/:id/payments` | `{ amount, method: "cash" \| "bank_transfer" \| "bkash" \| "nagad", reference?, note? }` | **201** booking. `reference`: optional TrxID, `bkash` / `nagad` only. On a pending booking it also confirms it (`confirmed` event, confirmation email). `409 BOOKING_NOT_PENDING` on a portal card booking still waiting for its card payment. `409 BOOKING_CHANGED` when it was cancelled at the same moment. `400 PAYMENT_EXCEEDS_DUE`, `409 REFERENCE_ALREADY_USED`, `409 PAYMENT_UNDER_REVIEW` (verify or reject the customer's bKash / Nagad payment first), `409 BOOKING_NO_SHOW` (undo the no-show first) |
+| `POST /admin/bookings/:id/no-show` | `{ reason? }` (up to 500 characters) | Booking, now `no_show`. For a `pending`, `confirmed` or `completed` booking once its slot has **started** (venue time). Payments and `paymentStatus` don't change, so an advance stays as revenue; `due` becomes 0 (the rest is written off, and the booking leaves dues, overdue, reminders, the due digest, customer due amounts and the CSV due column). The slot stays booked; no email. Logs a `no_show` event, e.g. "No-show: 60000 due written off: Phone off" (amounts in the smallest unit, like other events) or "No-show: no due written off". `409 BOOKING_ALREADY_CANCELLED`, `409 ALREADY_NO_SHOW`, `409 VERIFY_OR_REJECT` (a bKash / Nagad payment under review), `409 BOOKING_NOT_PENDING` (a portal card checkout still in Stripe), `409 SLOT_NOT_STARTED`, `409 BOOKING_CHANGED` (changed at the same moment) |
+| `POST /admin/bookings/:id/undo-no-show` | — | Booking, back to `completed` if the slot has ended, else `confirmed` (`confirmedAt` set if it was never confirmed); the due comes back. Logs a `completed` or `confirmed` event "No-show undone". `409 NOT_NO_SHOW`, `409 BOOKING_CHANGED` |
 | `PATCH /admin/bookings/:id` | `{ notes?, dueDate?, dueNote? }` (`null` clears) | Booking |
 | `POST /admin/bookings/:id/resend-confirmation` | — | `{ sent: boolean }`. `sent: false` if email isn't configured. `409 BOOKING_NOT_CONFIRMED` |
 
 **Payments in the detail view:** `{ id, method, amount, status, cardLast4, stripePaymentIntentId, reference, payerNumber, note, recordedBy, createdAt, refundedAt }`. `reference` is the bKash / Nagad TrxID; `payerNumber` the number a portal customer sent from.
 
-**Events in the detail view:** `{ id, type, detail, user, createdAt }`. `type` is one of `created`, `payment_received`, `confirmed`, `cancelled`, `refunded`, `email_sent`, `completed`, `cancel_requested`. Use these for the Activity timeline instead of the invented one.
+**Events in the detail view:** `{ id, type, detail, user, createdAt }`. `type` is one of `created`, `payment_received`, `confirmed`, `cancelled`, `refunded`, `email_sent`, `completed`, `cancel_requested`, `no_show`. Use these for the Activity timeline instead of the invented one.
 
 **No generic status PATCH:**
 - The list page's inline Pending→Confirmed dropdown should call `confirm`.
@@ -372,7 +377,10 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | 409 | `BOOKING_NOT_PENDING` | Confirming a booking that isn't pending, a portal booking, or resuming payment after the hold |
 | 409 | `BOOKING_NOT_CONFIRMED` | Resending a confirmation for a booking that isn't confirmed |
 | 409 | `BOOKING_ALREADY_CANCELLED` | Cancelling twice, or paying a cancelled booking |
-| 409 | `BOOKING_COMPLETED` | Cancelling after the slot ended |
+| 409 | `BOOKING_COMPLETED` | Cancelling after the slot ended, or cancelling a no-show (undo it first) |
+| 409 | `SLOT_NOT_STARTED` | Marking a no-show before the slot has started |
+| 409 | `ALREADY_NO_SHOW` / `NOT_NO_SHOW` | Marking a no-show twice / undoing one on a booking that isn't a no-show |
+| 409 | `BOOKING_NO_SHOW` | Collecting a payment on a no-show (undo it first) |
 | 400 | `CANCELLATION_WINDOW_PASSED` | Customer cancelling inside the cutoff, or a staff booking through the link |
 | 400 | `PAYMENT_EXCEEDS_DUE` | Recording more than is owed, or an "advance" that covers the whole price |
 | 502 | `REFUND_FAILED` | Stripe refused the refund; nothing changed |

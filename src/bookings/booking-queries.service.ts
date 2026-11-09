@@ -45,7 +45,7 @@ export class BookingQueriesService {
       this.prisma.booking.count({ where }),
       this.prisma.booking.groupBy({ by: ['status'], where: base, orderBy: { status: 'asc' }, _count: { _all: true } }),
     ]);
-    const counts: BookingCounts = { pending: 0, confirmed: 0, cancelled: 0, completed: 0 };
+    const counts: BookingCounts = { pending: 0, confirmed: 0, cancelled: 0, completed: 0, no_show: 0 };
     for (const g of groups) counts[g.status] = (g._count as { _all: number })._all;
     return { data: rows.map(toBookingDto), total, page: q.page, limit: q.limit, counts };
   }

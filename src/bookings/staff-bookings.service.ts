@@ -9,13 +9,14 @@ import { fromDbDate, hasEnded, toDbDate, venueNow } from '../slots/venue-time.js
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
-  bookingChanged, bookingNotFound, bookingNotPending, dueOf, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
+  bookingChanged, bookingNotFound, bookingNotPending, dueOf, noShowDetail, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
   receivedDetail, slotNotAvailable, withBookingNumber, withUniqueReference,
 } from './booking-rules.js';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from './booking.dto.js';
+import { assertCanMarkNoShow, bookingNoShow, undoneStatusOf } from './no-show-rules.js';
 import { verifyWalletPayment } from './wallet-verification.js';
 import type {
-  CancelBookingInput, ConfirmBookingInput, CreateStaffBookingInput, RecordPaymentInput, UpdateBookingInput,
+  CancelBookingInput, ConfirmBookingInput, CreateStaffBookingInput, NoShowInput, RecordPaymentInput, UpdateBookingInput,
 } from './bookings.schemas.js';
 
 const exceedsDue = (message: string) => new AppError(message, 400, 'PAYMENT_EXCEEDS_DUE');
@@ -94,6 +95,7 @@ export class StaffBookingsService {
   async recordPayment(actorId: string, id: string, input: RecordPaymentInput): Promise<BookingDto> {
     const booking = await this.load(id);
     if (booking.status === 'cancelled') throw new AppError('This booking is cancelled', 409, 'BOOKING_ALREADY_CANCELLED');
+    if (booking.status === 'no_show') throw bookingNoShow('This booking is marked no-show. Undo the no-show to collect a payment');
     if (pendingWalletPayment(booking.payments)) {
       throw paymentUnderReview('A bKash / Nagad payment on this booking is waiting to be verified. Verify or reject it first');
     }
@@ -130,6 +132,38 @@ export class StaffBookingsService {
     await this.load(id);
     await this.cancellation.cancel(id, {
       actorId, reason: input.reason, refund: input.refund, notify: input.notifyCustomer, rejectWallet: input.rejectWalletPayment,
+    });
+    return this.dto(id);
+  }
+
+  /**
+   * The team didn't turn up. Payments stay as they are, so an advance is still revenue; the rest of
+   * the due is written off (`dueOf` is 0 for no_show). The slot stays booked and no email is sent.
+   */
+  async markNoShow(actorId: string, id: string, { reason }: NoShowInput): Promise<BookingDto> {
+    const booking = await this.load(id);
+    assertCanMarkNoShow(booking, venueNow());
+    const writtenOff = dueOf(booking, booking.payments);
+    await this.prisma.$transaction(async (tx) => {
+      // From the status it was read in: a cancel, payment or confirm that got in first wins (409, rolled back).
+      const { count } = await tx.booking.updateMany({ where: { id, status: booking.status }, data: { status: 'no_show' } });
+      if (count === 0) throw bookingChanged();
+      await tx.bookingEvent.create({ data: { bookingId: id, type: 'no_show', userId: actorId, detail: noShowDetail(writtenOff, reason) } });
+    });
+    return this.dto(id);
+  }
+
+  /** Back to completed (slot ended) or confirmed; the due comes back with the status. */
+  async undoNoShow(actorId: string, id: string): Promise<BookingDto> {
+    const booking = await this.load(id);
+    if (booking.status !== 'no_show') throw new AppError('This booking is not marked no-show', 409, 'NOT_NO_SHOW');
+    const status = undoneStatusOf(booking, venueNow());
+    await this.prisma.$transaction(async (tx) => {
+      const { count } = await tx.booking.updateMany({
+        where: { id, status: 'no_show' }, data: { status, confirmedAt: booking.confirmedAt ?? new Date() },
+      });
+      if (count === 0) throw bookingChanged();
+      await tx.bookingEvent.create({ data: { bookingId: id, type: status, userId: actorId, detail: 'No-show undone' } });
     });
     return this.dto(id);
   }

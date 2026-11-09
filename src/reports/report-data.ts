@@ -96,19 +96,22 @@ export function moneyTotals(events: MoneyEvent[]): MoneyTotals {
 
 export type StatusCounts = Record<BookingStatus, number>;
 
-export const emptyStatusCounts = (): StatusCounts => ({ pending: 0, confirmed: 0, completed: 0, cancelled: 0 });
+export const emptyStatusCounts = (): StatusCounts => ({ pending: 0, confirmed: 0, completed: 0, cancelled: 0, no_show: 0 });
 
 export function bookingTotals(bookings: ReportBooking[]) {
   const statusCounts = emptyStatusCounts();
   for (const b of bookings) statusCounts[b.status] += 1;
   const kept = bookings.filter((b) => b.status !== 'cancelled');
-  const ended = bookings.filter((b) => b.ended);
   return {
     bookings: bookings.length,
     statusCounts,
     avgBookingValue: kept.length === 0 ? 0 : Math.round(kept.reduce((sum, b) => sum + b.total, 0) / kept.length),
-    /** Of bookings whose slot has ended, the % completed rather than cancelled (or left pending). */
-    completionRate: percent(ended.filter((b) => b.status === 'completed').length, ended.length),
+    /**
+     * Of the bookings with an outcome, the % where the team turned up: completed / (completed + no_show).
+     * Cancelled bookings, and ones still pending or confirmed, have no outcome yet and are left out.
+     */
+    completionRate: percent(statusCounts.completed, statusCounts.completed + statusCounts.no_show),
     cancellationRate: percent(statusCounts.cancelled, bookings.length) ?? 0,
+    noShows: statusCounts.no_show,
   };
 }

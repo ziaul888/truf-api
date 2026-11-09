@@ -42,7 +42,15 @@ The row of action cards at the top. Refresh it every 60 seconds.
   "overdue":      { "count": 2, "amount": 300000 },
   "dueToday":     { "count": 1, "amount": 100000 },
   "payingNow":    { "count": 1 },
-  "startingSoon": { "count": 2, "withinMinutes": 60 }
+  "startingSoon": { "count": 2, "withinMinutes": 60 },
+  "needsOutcome": {
+    "count": 1,
+    "bookings": [
+      { "id": "uuid", "bookingNumber": "CT-24A7F", "customerName": "Rakib Hasan", "groundName": "Green Arena",
+        "slot": { "date": "2026-11-08", "startHour": 18, "endHour": 19 },
+        "total": 155000, "paid": 0, "due": 155000, "payAtVenue": true, "walletPayment": null }
+    ]
+  }
 }
 ```
 
@@ -54,6 +62,7 @@ The row of action cards at the top. Refresh it every 60 seconds.
 | `dueToday` | Bookings with money due and `dueDate` today | `GET /admin/bookings?due=today` |
 | `payingNow` | Slots on hold right now (a customer is in Stripe), any date | `GET /admin/slots?status=held` |
 | `startingSoon` | Pending or confirmed bookings starting in the next 60 minutes. This works across midnight | The upcoming list on the same page |
+| `needsOutcome` | Bookings still `pending` after their slot **ended**: staff should record what happened. Card checkouts still in Stripe are left out; bKash / Nagad bookings under review are included (`walletPayment.status: "pending"`: verify or reject them first, `due` is 0 meanwhile). `bookings` lists at most 10, most recently ended first; `count` has them all. Each row offers **Mark no-show** (`POST /admin/bookings/:id/no-show`) and, for cash or unpaid bookings, **Collect** (recording a payment confirms the booking) | Each booking's detail page; Confirm Bookings for the ones to verify |
 
 **A new filter on the bookings list:** `GET /admin/bookings?due=overdue | today | any`. `any` is every live booking with money due. Card checkouts still in Stripe never count as due.
 

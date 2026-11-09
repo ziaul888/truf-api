@@ -20,10 +20,13 @@ export interface ReportSummary {
   bookingsTrend: number | null;
   avgBookingValue: number;
   avgBookingValueTrend: number | null;
+  /** completed / (completed + no_show), as a %; null when no booking in the range has an outcome yet. */
   completionRate: number | null;
   completionRateTrend: number | null;
   cancellationRate: number;
   statusCounts: StatusCounts;
+  /** Bookings marked no-show (also in `statusCounts.no_show`). */
+  noShows: number;
 }
 
 /** A revenue point, plus what the CSV export needs (`end`, `byMethod`). */
@@ -74,6 +77,7 @@ export class ReportsService {
       completionRateTrend: b.completionRate === null || bb.completionRate === null ? null : trendOf(b.completionRate, bb.completionRate),
       cancellationRate: b.cancellationRate,
       statusCounts: b.statusCounts,
+      noShows: b.noShows,
     };
   }
 

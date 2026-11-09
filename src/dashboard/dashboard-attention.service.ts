@@ -3,6 +3,7 @@ import { isDueToday, isOverdue, loadOwing, type OwingBooking } from '../bookings
 import { CARD_CHECKOUT_IN_PROGRESS, WALLET_UNDER_REVIEW } from '../bookings/booking-rules.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { addDays, fromDbDate, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
+import { loadNeedsOutcome, type NeedsOutcome } from './needs-outcome.js';
 
 const SOON_MINUTES = 60;
 
@@ -14,6 +15,8 @@ export interface DashboardAttention {
   dueToday: { count: number; amount: number };
   payingNow: { count: number };
   startingSoon: { count: number; withinMinutes: number };
+  /** Still pending after the slot ended: collect, verify, or mark no-show. */
+  needsOutcome: NeedsOutcome;
 }
 
 const sumDue = (list: OwingBooking[]) => ({ count: list.length, amount: list.reduce((sum, b) => sum + b.due, 0) });
@@ -25,7 +28,7 @@ export class DashboardAttentionService {
 
   async attention(): Promise<DashboardAttention> {
     const now = venueNow();
-    const [pending, owing, held, nearby, toVerify] = await Promise.all([
+    const [pending, owing, held, nearby, toVerify, needsOutcome] = await Promise.all([
       // Unpaid staff bookings and pay-at-venue requests; card checkouts confirm themselves.
       this.prisma.booking.findMany({ where: { deletedAt: null, status: 'pending', NOT: CARD_CHECKOUT_IN_PROGRESS }, select: { payAtVenue: true } }),
       loadOwing(this.prisma),
@@ -39,6 +42,7 @@ export class DashboardAttentionService {
         select: { slot: { select: { date: true, startHour: true } } },
       }),
       this.prisma.booking.count({ where: { deletedAt: null, ...WALLET_UNDER_REVIEW } }),
+      loadNeedsOutcome(this.prisma, now),
     ]);
     const soon = nearby.filter(({ slot }) => {
       const minutes = minutesUntil(now, fromDbDate(slot.date), slot.startHour);
@@ -51,6 +55,7 @@ export class DashboardAttentionService {
       dueToday: sumDue(owing.filter((b) => isDueToday(b, now))),
       payingNow: { count: held },
       startingSoon: { count: soon.length, withinMinutes: SOON_MINUTES },
+      needsOutcome,
     };
   }
 }
