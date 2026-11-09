@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EmailSchema } from '../auth/auth.schemas.js';
+import { EmailSchema, OptionalEmailSchema } from '../auth/auth.schemas.js';
 import { CustomerNameSchema, PhoneSchema } from '../customers/customers.schemas.js';
 
 export const SendCodeSchema = z.object({ phone: PhoneSchema });
@@ -14,5 +14,6 @@ export const VerifyCodeSchema = z.object({
 });
 export type VerifyCodeInput = z.infer<typeof VerifyCodeSchema>;
 
-export const CustomerProfileSchema = z.object({ name: CustomerNameSchema, email: EmailSchema });
+/** Email optional: blank never clears a stored one (only staff can). */
+export const CustomerProfileSchema = z.object({ name: CustomerNameSchema, email: OptionalEmailSchema });
 export type CustomerProfileInput = z.infer<typeof CustomerProfileSchema>;

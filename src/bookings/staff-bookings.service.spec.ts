@@ -17,7 +17,7 @@ const bookingRow = (overrides: object = {}) => ({
 function setup(booking: object = bookingRow(), foundSlot: object = slot) {
   const tx = {
     slot: { updateMany: vi.fn(async () => ({ count: 1 })) },
-    customer: { findUnique: vi.fn(async () => null), create: vi.fn(async () => ({ id: 'c-1' })) },
+    customer: { findUnique: vi.fn(async (): Promise<object | null> => null), create: vi.fn(async () => ({ id: 'c-1' })) },
     booking: { create: vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: 'b-1' })), update: vi.fn(async (_args: { data: object }) => ({})),
       updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 1 })),
     },
@@ -61,6 +61,25 @@ describe('StaffBookingsService', () => {
     const { service, tx, notifier } = setup();
     await service.create('u-1', { slotId: 's-1', customer, payment: { type: 'none' } }).catch(() => undefined);
     expect(tx.booking.create.mock.calls[0]![0].data).toMatchObject({ status: 'pending', paymentStatus: 'unpaid' });
+    expect(notifier.confirmed).not.toHaveBeenCalled();
+  });
+
+  it('books without an email: the customer\'s stored one if any, else none', async () => {
+    const { service, tx } = setup();
+    await service.create('u-1', { slotId: 's-1', customer: { ...customer, email: null }, payment: { type: 'none' } }).catch(() => undefined);
+    expect(tx.customer.create).toHaveBeenCalledWith({ data: { name: 'Walk In', phone: customer.phone, email: null } });
+    expect(tx.booking.create.mock.calls[0]![0].data).toMatchObject({ customerId: 'c-1', contactEmail: null });
+
+    const known = setup();
+    known.tx.customer.findUnique.mockResolvedValue({ email: 'stored@x.test' });
+    await known.service.create('u-1', { slotId: 's-1', customer: { id: 'c-7', ...customer, email: undefined }, payment: { type: 'none' } })
+      .catch(() => undefined);
+    expect(known.tx.booking.create.mock.calls[0]![0].data).toMatchObject({ customerId: 'c-7', contactEmail: 'stored@x.test' });
+  });
+
+  it('resend confirmation without an email is 409 NO_EMAIL and sends nothing', async () => {
+    const { service, notifier } = setup(bookingRow({ status: 'confirmed', contactEmail: null }));
+    await expect(service.resendConfirmation('b-1')).rejects.toMatchObject({ status: 409, code: 'NO_EMAIL' });
     expect(notifier.confirmed).not.toHaveBeenCalled();
   });
 

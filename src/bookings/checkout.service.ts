@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import { env } from '../config/env.js';
-import { upsertCustomerByPhone } from '../customers/customer-upsert.js';
+import { contactEmailOf, upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import type { Ground, Slot } from '../generated/prisma/client.js';
 import { VISIBLE_GROUND } from '../grounds/ground-rules.js';
 import { cardPaymentsEnabled, StripeService } from '../payments/stripe.service.js';
@@ -47,6 +47,8 @@ export interface CheckoutOptions {
 }
 
 const outsideWindow = (message: string) => new AppError(message, 400, 'OUTSIDE_BOOKING_WINDOW');
+const emailRequired = () =>
+  new AppError('Enter your email: your booking link is sent there. Or sign in with your phone', 400, 'EMAIL_REQUIRED');
 
 /**
  * Portal checkout.
@@ -82,13 +84,16 @@ export class CheckoutService {
 
   /**
    * `verifiedPhone`: the signed-in customer's number. The booking goes on it, and the name and
-   * email given update their record (a guest checkout never changes a customer record).
+   * email given update their record (a guest checkout never changes a customer record). The email
+   * is optional only when signed in (blank: their stored one, else none); a guest card checkout
+   * needs one, as the booking link only reaches them by email (`400 EMAIL_REQUIRED`).
    */
   async start(body: CheckoutInput, verifiedPhone?: string): Promise<CheckoutResult> {
     const input = verifiedPhone ? { ...body, customerPhone: verifiedPhone } : body;
     const settings = await this.settings.get();
     assertMethodAvailable(input.paymentMethod, settings);
     await assertCanBookUnpaid(this.prisma, input.paymentMethod, verifiedPhone);
+    if (!verifiedPhone && !input.customerEmail) throw emailRequired();
     const ground = await this.prisma.ground.findFirst({ where: { id: input.groundId, ...VISIBLE_GROUND } });
     if (!ground) throw groundNotFound();
     const slot = await this.prisma.slot.findUnique({
@@ -173,10 +178,11 @@ export class CheckoutService {
       if (count === 0) throw slotNotAvailable();
       const contact = { name: input.customerName, email: input.customerEmail, phone: input.customerPhone };
       const customerId = await upsertCustomerByPhone(tx, contact, verified);
+      const contactEmail = await contactEmailOf(tx, customerId, contact.email);
       await tx.booking.create({
         data: {
           id: bookingId, bookingNumber, source: 'portal', groundId: ground.id, slotId: slot.id, liveSlotId: slot.id,
-          customerId, contactName: contact.name, contactEmail: contact.email, contactPhone: contact.phone,
+          customerId, contactName: contact.name, contactEmail, contactPhone: contact.phone,
           amount: slot.price, serviceFee: settings.serviceFee, total, payAtVenue: input.paymentMethod === 'cash',
           payments: walletPaymentOf(input, total),
           events: { create: { type: 'created', detail: createdDetail(input) } },

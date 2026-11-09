@@ -80,6 +80,7 @@ How they move together:
 ```
 
 - **`paymentMethod`:** `"card"` (the default), `"cash"`, `"bkash"` or `"nagad"`.
+- **`customerEmail`** is optional for a **signed-in** customer: blank (`""`) or left out, the booking uses the email on their customer record, or none. With no email, no customer emails are sent for the booking (the public booking has `emailed: false`). A **guest** checkout needs one, since the booking link only reaches them by email: without it, `400 EMAIL_REQUIRED` and nothing is reserved. Show it on the email field.
 - **`reference`** (the TrxID) and **`payerNumber`** (the number the money was sent from): required for `bkash` and `nagad`, and refused (`400 VALIDATION_FAILED`) with `card` or `cash`. The TrxID is trimmed and uppercased, and must be 6–20 letters and digits; the number is any common phone format.
 - **Response:** `{ bookingId, paymentMethod, checkoutUrl, confirmationUrl }`.
 - **Cash, bKash and Nagad need a signed-in customer** (phone + SMS code, §2a): they book the slot with no money taken. A guest gets `401 SIGN_IN_REQUIRED` before anything is reserved; show a sign-in link that returns to the checkout. Card checkout stays open to guests.
@@ -129,9 +130,11 @@ Returns the public booking. `404 BOOKING_NOT_FOUND` without a valid token.
   "walletPayment": null,
   "amount": 150000, "serviceFee": 5000, "total": 155000, "paid": 155000, "due": 0,
   "createdAt": "…", "cancelledAt": null, "canCancel": true, "canPay": false,
-  "cancelRequested": false, "canRequestCancel": false
+  "cancelRequested": false, "canRequestCancel": false, "emailed": true
 }
 ```
+
+- **`emailed: false`**: the booking has no contact email, so no confirmation or other emails went to the customer. Don't say "we've emailed you"; point them to My bookings (signed in) instead.
 
 - **`status: "no_show"`**: staff marked that the team didn't turn up. Show "No-show"; `due` is 0 and `canCancel`, `canPay` and `canRequestCancel` are all false. "My bookings" lists it under `past`.
 - **Right after the Stripe redirect,** the webhook may not have arrived yet, so `status` can still be `pending`. Poll every 2 seconds for up to about 20 seconds, showing "Confirming your payment…", until it's `confirmed`.
@@ -189,7 +192,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 |---|---|---|
 | `POST /customer/auth/send-code` | `{ phone }` (any common format) | `{ sent: true }`. An SMS with a 6-digit code, valid 10 minutes |
 | `POST /customer/auth/verify` | `{ phone, code, name?, email? }` | Sets the cookie. Returns the session `{ phone, customerId, name, email, needsProfile }`. With `name` + `email`, a **new** number's customer record is created right away (a known customer's details are not changed) |
-| `POST /customer/auth/profile` | `{ name, email }` (signed in) | The updated session. Creates the customer record for a new number, or updates name and email |
+| `POST /customer/auth/profile` | `{ name, email? }` (signed in) | The updated session. Creates the customer record for a new number, or updates name and email. `email` is optional: blank (`""`) or left out keeps the stored one (a customer can't clear it; staff can) |
 | `GET /customer/auth/me` | — | The session, or `401 UNAUTHENTICATED` when signed out. Call it on page load |
 | `POST /customer/auth/logout` | — | `{ loggedOut: true }`. Clears the cookie and signs out **every device** |
 | `GET /customer/bookings` | `scope` (`upcoming` default, or `past`), `page`, `limit` | `{ data, total, page, limit }`. Each item is the public booking (§2) plus `confirmationUrl` |
@@ -207,7 +210,8 @@ Optional. Guests can still book, and signed links keep working. The session is a
 
 **Checkout when signed in:**
 - **Prefill** name, email and phone from `/customer/auth/me`, and make the phone **read-only**. The booking always goes on the verified phone, whatever is posted.
-- The name and email posted update the customer's record. A guest checkout never changes it.
+- The name and email posted update the customer's record (a blank email keeps the stored one). A guest checkout never changes it.
+- The email is optional when signed in; tell them that without one they won't get confirmation emails.
 
 **My bookings page** (`/bookings/me`, which can come back now):
 - Two tabs: Upcoming (soonest first) and Past (latest first, including cancelled and completed).
@@ -267,7 +271,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | `POST /admin/bookings/:id/no-show` | `{ reason? }` (up to 500 characters) | Booking, now `no_show`. For a `pending`, `confirmed` or `completed` booking once its slot has **started** (venue time). Payments and `paymentStatus` don't change, so an advance stays as revenue; `due` becomes 0 (the rest is written off, and the booking leaves dues, overdue, reminders, the due digest, customer due amounts and the CSV due column). The slot stays booked; no email. Logs a `no_show` event, e.g. "No-show: 60000 due written off: Phone off" (amounts in the smallest unit, like other events) or "No-show: no due written off". `409 BOOKING_ALREADY_CANCELLED`, `409 ALREADY_NO_SHOW`, `409 VERIFY_OR_REJECT` (a bKash / Nagad payment under review), `409 BOOKING_NOT_PENDING` (a portal card checkout still in Stripe), `409 SLOT_NOT_STARTED`, `409 BOOKING_CHANGED` (changed at the same moment) |
 | `POST /admin/bookings/:id/undo-no-show` | — | Booking, back to `completed` if the slot has ended, else `confirmed` (`confirmedAt` set if it was never confirmed); the due comes back. Logs a `completed` or `confirmed` event "No-show undone". `409 NOT_NO_SHOW`, `409 BOOKING_CHANGED` |
 | `PATCH /admin/bookings/:id` | `{ notes?, dueDate?, dueNote? }` (`null` clears) | Booking |
-| `POST /admin/bookings/:id/resend-confirmation` | — | `{ sent: boolean }`. `sent: false` if email isn't configured. `409 BOOKING_NOT_CONFIRMED` |
+| `POST /admin/bookings/:id/resend-confirmation` | — | `{ sent: boolean }`. `sent: false` if email isn't configured. `409 BOOKING_NOT_CONFIRMED`, then `409 NO_EMAIL` when the booking has no contact email (hide the button when `contact.email` is `null`) |
 
 **Payments in the detail view:** `{ id, method, amount, status, cardLast4, stripePaymentIntentId, reference, payerNumber, note, recordedBy, createdAt, refundedAt }`. `reference` is the bKash / Nagad TrxID; `payerNumber` the number a portal customer sent from.
 
@@ -293,6 +297,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 - **`method`** is required unless `type` is `none`: `cash`, `bank_transfer`, `bkash` or `nagad`. `payment.reference` is an optional TrxID for `bkash` / `nagad`, refused with `type: "none"` (nothing is paid).
 - **Pick the slot** from `GET /admin/slots?groundId&date&status=available&openDaysOnly=true`. The price is the slot's `price`, with no service fee.
 - **The customer** is found or created by phone, and staff edits update the name and email. Send `customer.id` to book for a known customer.
+- **`customer.email` is optional** (`""`, `null` or left out). Left blank, the booking uses the customer's stored email if they have one (it is never cleared this way); otherwise the booking has `contact.email: null` and the customer gets no emails.
 - **Errors:** `409 SLOT_NOT_AVAILABLE`, `400 SLOT_IN_PAST`, `400 GROUND_CLOSED` (a day the ground doesn't open, with no staff override), `400 PAYMENT_EXCEEDS_DUE`, `404 CUSTOMER_NOT_FOUND`, `409 REFERENCE_ALREADY_USED` (that TrxID is already recorded for that method).
 
 ---
@@ -304,11 +309,12 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | `GET /admin/customers` | `search`, `tag` (`vip` \| `regular` \| `new`), `hasDue` (`true`/`false`), `sort` (`lastBooking` default, `totalSpent`, `bookings`, `since`, `due`; always high → low), `page`, `limit` | `{ data, total, page, limit, stats: { total, newThisMonth, withDuePayments, totalDueAmount, totalRevenue } }` |
 | `GET /admin/customers/search?phone=` | Any format | `{ id, name, phone, email }` or `null`. Use it to fill the New Booking form |
 | `GET /admin/customers/:id` | — | Customer plus `recentBookings` (latest 20, booking objects), `duePayments[]` (`{ bookingId, bookingNumber, amount, dueDate }`), `favoriteGround` (`{ id, name, bookings }` or `null`) |
-| `POST /admin/customers` | `{ name, phone, email, adminNote? }` | **201** customer. `409 CUSTOMER_PHONE_TAKEN` |
-| `PATCH /admin/customers/:id` | Any of the above | Customer. `409 CUSTOMER_PHONE_TAKEN` |
+| `POST /admin/customers` | `{ name, phone, email?, adminNote? }` | **201** customer. `email` optional (`""` or `null` = none). `409 CUSTOMER_PHONE_TAKEN` |
+| `PATCH /admin/customers/:id` | Any of the above | Customer. `email: null` (or `""`) clears the email. `409 CUSTOMER_PHONE_TAKEN` |
 | `DELETE /admin/customers/:id` | **admin only** | `{ deleted: true }` (soft delete). `409 CUSTOMER_HAS_UPCOMING_BOOKINGS` |
 
 **The customer object:** `{ id, name, phone, email, adminNote, createdAt, bookings, totalSpent, lastBooking, dueAmount, tag }`.
+- `email` may be `null`: the customer has no email and gets no booking emails. The booking object's `customer.email` and `contact.email` may be `null` too.
 - `createdAt` is the "customer since" date.
 - `bookings` counts bookings that weren't cancelled.
 - `tag`: 10 or more bookings = `vip`, 3–9 = `regular`, otherwise `new`.
@@ -376,6 +382,8 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | 400 | `GROUND_CLOSED` | Portal and staff: a new booking on a day the ground doesn't open |
 | 409 | `BOOKING_NOT_PENDING` | Confirming a booking that isn't pending, a portal booking, or resuming payment after the hold |
 | 409 | `BOOKING_NOT_CONFIRMED` | Resending a confirmation for a booking that isn't confirmed |
+| 409 | `NO_EMAIL` | Resending a confirmation for a booking with no contact email |
+| 400 | `EMAIL_REQUIRED` | Guest portal checkout without an email (field `customerEmail`) |
 | 409 | `BOOKING_ALREADY_CANCELLED` | Cancelling twice, or paying a cancelled booking |
 | 409 | `BOOKING_COMPLETED` | Cancelling after the slot ended, or cancelling a no-show (undo it first) |
 | 409 | `SLOT_NOT_STARTED` | Marking a no-show before the slot has started |

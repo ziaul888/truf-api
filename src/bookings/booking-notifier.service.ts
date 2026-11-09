@@ -25,7 +25,8 @@ export interface CancelledNotice {
  * Booking emails. Each one sent is logged as an `email_sent` booking event. Sending never throws,
  * so an email problem can't fail a booking. Never include card data or tokens other than the
  * booking's own signed link. Confirmation and cancellation emails always send (they carry the
- * link); the rest follow the Notifications settings.
+ * link); the rest follow the Notifications settings. A booking with no contact email gets no
+ * customer emails at all: nothing is sent or logged. Staff emails are unaffected.
  */
 @Injectable()
 export class BookingNotifier {
@@ -161,7 +162,9 @@ export class BookingNotifier {
     return admins.map((a) => a.email);
   }
 
-  private async sendTo(b: BookingRow, kind: string, to: string, subject: string, lines: string[]): Promise<boolean> {
+  /** `to` null: the customer gave no email, so nothing is sent (false). */
+  private async sendTo(b: BookingRow, kind: string, to: string | null, subject: string, lines: string[]): Promise<boolean> {
+    if (!to) return false;
     const message: EmailMessage = { to, subject, text: lines.join('\n\n'), kind, bookingId: b.id };
     const sent = await this.email.send(message);
     if (sent) {

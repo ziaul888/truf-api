@@ -60,9 +60,9 @@ export interface BookingDto {
   cancelRequestedAt: Date | null;
   ground: { id: string; name: string; sport: Sport };
   slot: BookingSlotDto;
-  customer: { id: string; name: string; phone: string | null; email: string };
-  /** The details given for this booking (may differ from the customer record). */
-  contact: { name: string; email: string; phone: string };
+  customer: { id: string; name: string; phone: string | null; email: string | null };
+  /** The details given for this booking (may differ from the customer record). Email null: no customer emails. */
+  contact: { name: string; email: string | null; phone: string };
   amount: number;
   serviceFee: number;
   total: number;
@@ -136,6 +136,8 @@ export interface PublicBookingDto {
   canRequestCancel: boolean;
   /** True when something is due and the customer can pay it by card through the link ("Pay now"). */
   canPay: boolean;
+  /** False when the booking has no contact email, so no confirmation or other emails were sent. */
+  emailed: boolean;
 }
 
 const slotOf = (s: BookingRow['slot']): BookingSlotDto => ({
@@ -210,6 +212,6 @@ export const toPublicBookingDto = (b: BookingRow, canCancel: boolean, canPay: bo
     slot,
     amount: b.amount, serviceFee: b.serviceFee, total: b.total, paid: paidOf(b.payments), due: dueOf(b, b.payments),
     createdAt: b.createdAt, cancelledAt: b.cancelledAt, canCancel, canPay,
-    cancelRequested: b.cancelRequestedAt !== null, canRequestCancel,
+    cancelRequested: b.cancelRequestedAt !== null, canRequestCancel, emailed: b.contactEmail !== null,
   };
 };

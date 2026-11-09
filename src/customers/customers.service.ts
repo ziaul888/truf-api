@@ -50,7 +50,7 @@ export class CustomersService {
     const all = rows.map(toCustomerDto);
     const term = search?.toLowerCase();
     const matches = all
-      .filter((c) => !term || [c.name, c.email, c.phone ?? ''].some((v) => v.toLowerCase().includes(term)))
+      .filter((c) => !term || [c.name, c.email ?? '', c.phone ?? ''].some((v) => v.toLowerCase().includes(term)))
       .filter((c) => !tag || c.tag === tag)
       .filter((c) => hasDue === undefined || (c.dueAmount > 0) === hasDue)
       .sort((a, b) => (SORTS[sort](a) < SORTS[sort](b) ? 1 : SORTS[sort](a) > SORTS[sort](b) ? -1 : 0));
@@ -89,7 +89,7 @@ export class CustomersService {
     const existing = await this.prisma.customer.findUnique({ where: { phone: input.phone } });
     if (existing && !existing.deletedAt) throw phoneTaken();
     // A deleted customer with this phone comes back with the new details.
-    const data = { name: input.name, email: input.email, phone: input.phone, adminNote: input.adminNote ?? null, deletedAt: null };
+    const data = { name: input.name, email: input.email ?? null, phone: input.phone, adminNote: input.adminNote ?? null, deletedAt: null };
     const row = await this.write(() => existing
       ? this.prisma.customer.update({ where: { id: existing.id }, data, include: CUSTOMER_SUMMARY_INCLUDE })
       : this.prisma.customer.create({ data, include: CUSTOMER_SUMMARY_INCLUDE }));

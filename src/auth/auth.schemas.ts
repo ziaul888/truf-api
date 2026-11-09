@@ -2,6 +2,12 @@ import { z } from 'zod';
 
 export const EmailSchema = z.string().trim().toLowerCase().pipe(z.email('Enter a valid email'));
 
+/** A customer's email, which they may not have: blank ("") or null → null, missing stays missing. */
+export const OptionalEmailSchema = z.preprocess(
+  (v) => (typeof v === 'string' && v.trim() === '' ? null : v),
+  EmailSchema.nullable().optional(),
+);
+
 /** Rules for any newly chosen password. */
 export const NewPasswordSchema = z
   .string()

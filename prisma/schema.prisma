@@ -317,7 +317,8 @@ model SlotSettings {
 model Customer {
   id               String    @id @default(uuid())
   name             String
-  email            String
+  /// Optional: without one, no customer emails are sent. Phone is the identity key.
+  email            String?
   /// Normalised, e.g. "+8801711000000" — the lookup key for staff and checkout.
   phone            String?   @unique
   stripeCustomerId String?   @unique
@@ -348,7 +349,8 @@ model Booking {
   customerId              String
   /// Contact details given for this booking (portal checkout never overwrites the customer record).
   contactName             String
-  contactEmail            String
+  /// Null: no customer emails for this booking.
+  contactEmail            String?
   contactPhone            String
   status                  BookingStatus        @default(pending)
   paymentStatus           BookingPaymentStatus @default(unpaid)

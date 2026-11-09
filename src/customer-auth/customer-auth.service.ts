@@ -50,7 +50,7 @@ export class CustomerAuthService {
     return toCustomerSession(payload.sub, customer);
   }
 
-  /** Creates the signed-in customer's record, or updates their name and email. */
+  /** Creates the signed-in customer's record, or updates their name and email (a blank email keeps the stored one). */
   async saveProfile(phone: string, profile: CustomerProfileInput): Promise<CustomerSession> {
     await upsertCustomerByPhone(this.prisma, { phone, ...profile }, true);
     return toCustomerSession(phone, await this.prisma.customer.findUnique({ where: { phone } }));

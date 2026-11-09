@@ -26,7 +26,8 @@ export interface CustomerDto {
   id: string;
   name: string;
   phone: string | null;
-  email: string;
+  /** Null: no email on file (no customer emails). */
+  email: string | null;
   adminNote: string | null;
   /** Registration date. */
   createdAt: Date;

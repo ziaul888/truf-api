@@ -34,7 +34,8 @@ export class PublicBookingsController {
    * Card: send the customer to `checkoutUrl` (Stripe). Cash: `checkoutUrl` is null; show
    * `confirmationUrl` (the booking is pending until staff confirm). Signed in, the booking
    * goes on the customer's verified phone. Cash, bKash and Nagad need a signed-in customer
-   * (`401 SIGN_IN_REQUIRED`), at most 3 open per phone (`409 TOO_MANY_OPEN_BOOKINGS`).
+   * (`401 SIGN_IN_REQUIRED`), at most 3 open per phone (`409 TOO_MANY_OPEN_BOOKINGS`). The email
+   * is optional only when signed in (`400 EMAIL_REQUIRED` for a guest).
    * 5 checkouts per 10 minutes per IP + phone (`429 TOO_MANY_ATTEMPTS`).
    */
   @Post('checkout')

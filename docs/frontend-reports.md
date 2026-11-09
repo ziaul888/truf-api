@@ -135,7 +135,7 @@ Each status is the booking's status now.
 |---|---|---|
 | `revenue` | `from`, `to`, `groupBy` = `day` or `week` | Period start, Period end, Received, Refunds, Net revenue, Card, Cash, Bank transfer, Bookings, bKash, Nagad (the last two were added at the end, so earlier columns keep their positions) |
 | `bookings` | `from`, `to` (slot date) | Booking #, Customer, Phone, Ground, Date, Start, End, Amount, Service fee, Total, Paid, Due, Status, Payment status, Source, Created |
-| `customers` | `from`/`to` optional: customers who joined in the range | Name, Phone, Email, Customer since, Bookings, Total spent, Last booking, Due amount, Tag |
+| `customers` | `from`/`to` optional: customers who joined in the range | Name, Phone, Email (empty when the customer has none), Customer since, Bookings, Total spent, Last booking, Due amount, Tag |
 
 **Download example:**
 ```ts
