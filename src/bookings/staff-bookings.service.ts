@@ -4,8 +4,8 @@ import { env } from '../config/env.js';
 import { upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import type { PaymentStatus, Prisma, Slot } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { assertDayOpen, slotInPast, slotNotFound } from '../slots/slot-rules.js';
-import { fromDbDate, hasStarted, toDbDate, venueNow } from '../slots/venue-time.js';
+import { assertDayOpen, slotEnded, slotNotFound } from '../slots/slot-rules.js';
+import { fromDbDate, hasEnded, toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
@@ -32,13 +32,16 @@ export class StaffBookingsService {
     private readonly notifier: BookingNotifier,
   ) {}
 
-  /** Paid in full or in part → confirmed; not paid → pending (the review queue). The slot is booked either way. */
+  /**
+   * Paid in full or in part → confirmed; not paid → pending (the review queue). The slot is booked
+   * either way. Open until the slot ends, so a team walking in just after the start can still play.
+   */
   async create(actorId: string, input: CreateStaffBookingInput): Promise<BookingDto> {
     const slot = await this.prisma.slot.findUnique({
       where: { id: input.slotId }, include: { ground: { select: { availableDays: true, customDays: true } } },
     });
     if (!slot) throw slotNotFound();
-    if (hasStarted(venueNow(), fromDbDate(slot.date), slot.startHour)) throw slotInPast();
+    if (hasEnded(venueNow(), fromDbDate(slot.date), slot.startHour, slot.durationMinutes)) throw slotEnded();
     if (slot.status !== 'available') throw slotNotAvailable();
     assertDayOpen(slot.ground, fromDbDate(slot.date));
     const paid = paymentAmount(input.payment, slot.price);
