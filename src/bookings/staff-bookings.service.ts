@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import { env } from '../config/env.js';
-import { upsertCustomerByPhone } from '../customers/customer-upsert.js';
+import { contactEmailOf, upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import type { PaymentStatus, Prisma, Slot } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { assertDayOpen, slotEnded, slotNotFound } from '../slots/slot-rules.js';
@@ -36,6 +36,7 @@ export class StaffBookingsService {
   /**
    * Paid in full or in part → confirmed; not paid → pending (the review queue). The slot is booked
    * either way. Open until the slot ends, so a team walking in just after the start can still play.
+   * Email optional: left blank, the customer's stored one is used, else no customer emails are sent.
    */
   async create(actorId: string, input: CreateStaffBookingInput): Promise<BookingDto> {
     const slot = await this.prisma.slot.findUnique({
@@ -53,10 +54,11 @@ export class StaffBookingsService {
     const id = await withBookingNumber((bookingNumber) => this.prisma.$transaction(async (tx) => {
       const { count } = await tx.slot.updateMany({ where: { id: slot.id, status: 'available' }, data: { status: 'booked' } });
       if (count === 0) throw slotNotAvailable();
-      const { id: customerId, ...contact } = input.customer;
-      const data = newStaffBooking(actorId, input, slot, paid, bookingNumber);
+      const { id, ...contact } = input.customer;
+      const customerId = id ?? await upsertCustomerByPhone(tx, contact, true);
+      const contactEmail = await contactEmailOf(tx, customerId, contact.email);
       const booking = await tx.booking.create({
-        data: { ...data, customerId: customerId ?? await upsertCustomerByPhone(tx, contact, true) },
+        data: { ...newStaffBooking(actorId, input, slot, paid, bookingNumber), customerId, contactEmail },
       });
       return booking.id;
     }));
@@ -173,6 +175,7 @@ export class StaffBookingsService {
     if (booking.status !== 'confirmed' && booking.status !== 'completed') {
       throw new AppError('Only confirmed bookings have a confirmation to send', 409, 'BOOKING_NOT_CONFIRMED');
     }
+    if (!booking.contactEmail) throw new AppError('This customer has no email address', 409, 'NO_EMAIL');
     return { sent: await this.notifier.confirmed(id) };
   }
 
@@ -219,7 +222,7 @@ function newStaffBooking(actorId: string, input: CreateStaffBookingInput, slot: 
   }
   return {
     bookingNumber, source: 'staff' as const, groundId: slot.groundId, slotId: slot.id, liveSlotId: slot.id,
-    contactName: customer.name, contactEmail: customer.email, contactPhone: customer.phone,
+    contactName: customer.name, contactPhone: customer.phone,
     status: paid > 0 ? 'confirmed' as const : 'pending' as const,
     paymentStatus: paid === 0 ? 'unpaid' as const : paid >= slot.price ? 'paid' as const : 'partial' as const,
     confirmedAt: paid > 0 ? new Date() : null,

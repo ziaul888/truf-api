@@ -9,7 +9,8 @@ export interface CheckoutSessionInput {
   purpose?: 'booking' | 'due';
   total: number;
   description: string;
-  customerEmail: string;
+  /** Prefilled on Stripe's page when we have one; Stripe then asks for it itself. */
+  customerEmail?: string | null;
   successUrl: string;
   cancelUrl: string;
 }
@@ -52,7 +53,7 @@ export class StripeService {
         quantity: 1,
         price_data: { currency: env.CURRENCY, unit_amount: input.total, product_data: { name: input.description } },
       }],
-      customer_email: input.customerEmail,
+      ...(input.customerEmail && { customer_email: input.customerEmail }),
       success_url: input.successUrl,
       cancel_url: input.cancelUrl,
       metadata: { bookingId: input.bookingId, purpose },

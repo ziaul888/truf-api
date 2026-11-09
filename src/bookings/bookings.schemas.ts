@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EmailSchema } from '../auth/auth.schemas.js';
+import { OptionalEmailSchema } from '../auth/auth.schemas.js';
 import { PaginationSchema } from '../common/schemas.js';
 import { CustomerNameSchema, PhoneSchema } from '../customers/customers.schemas.js';
 import { oneOf } from '../grounds/grounds.schemas.js';
@@ -32,7 +32,8 @@ export const CheckoutSchema = z.preprocess(
     date: isoDate,
     startHour,
     customerName: CustomerNameSchema,
-    customerEmail: EmailSchema,
+    /** Optional only for a signed-in customer (`400 EMAIL_REQUIRED` for a guest, checked in the service). */
+    customerEmail: OptionalEmailSchema,
     customerPhone: PhoneSchema,
     /**
      * `cash` = pay at the venue: no Stripe, pending until staff confirm. `bkash` / `nagad`: the
@@ -98,7 +99,8 @@ export type UpcomingQuery = z.infer<typeof UpcomingQuerySchema>;
 export const CreateStaffBookingSchema = z.object({
   slotId: z.uuid('Invalid slot id'),
   /** `id` books for an existing customer; otherwise the customer is found or created by phone. */
-  customer: z.object({ id: z.uuid('Invalid customer id').optional(), name: CustomerNameSchema, phone: PhoneSchema, email: EmailSchema }),
+  /** `email` optional: left blank, the customer's stored one is used, else no customer emails. */
+  customer: z.object({ id: z.uuid('Invalid customer id').optional(), name: CustomerNameSchema, phone: PhoneSchema, email: OptionalEmailSchema }),
   payment: z.object({
     type: oneOf(['full', 'partial', 'none'] as const, 'Payment type'),
     method: oneOf(OFFLINE_METHODS, 'Method').optional(),

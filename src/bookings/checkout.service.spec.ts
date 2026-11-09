@@ -25,7 +25,9 @@ function setup({
 } = {}) {
   const tx = {
     slot: { updateMany: vi.fn(async (_args: { data: object }) => ({ count: held })) },
-    customer: { findUnique: vi.fn(async () => null), create: vi.fn(async () => ({ id: 'c-1' })) },
+    customer: {
+      findUnique: vi.fn(async (): Promise<object | null> => null), create: vi.fn(async () => ({ id: 'c-1' })), update: vi.fn(async () => ({})),
+    },
     booking: { create: vi.fn(async (_args: { data: Record<string, unknown> }) => ({})) },
   };
   const prisma = {
@@ -124,6 +126,26 @@ describe('CheckoutService', () => {
 
     expect(tx.customer.create).toHaveBeenCalledWith({ data: expect.objectContaining({ phone: '+8801711999999', name: 'Rakib' }) });
     expect(tx.booking.create.mock.calls[0]![0].data).toMatchObject({ contactPhone: '+8801711999999' });
+  });
+
+  it('a guest card checkout without an email is 400 EMAIL_REQUIRED, before touching the slot', async () => {
+    const { service, tx } = setup();
+    await expect(service.start({ ...input, customerEmail: null })).rejects.toMatchObject({ status: 400, code: 'EMAIL_REQUIRED' });
+    expect(tx.slot.updateMany).not.toHaveBeenCalled();
+  });
+
+  it('signed in without an email: keeps and uses the stored one, else books with none', async () => {
+    const { service, tx, stripe } = setup();
+    tx.customer.findUnique.mockResolvedValue({ id: 'c-9', email: 'stored@x.test', deletedAt: null });
+    await service.start({ ...input, customerEmail: null }, SIGNED_IN);
+    expect(tx.customer.update).toHaveBeenCalledWith({ where: { id: 'c-9' }, data: { name: 'Rakib', deletedAt: null } });
+    expect(tx.booking.create.mock.calls[0]![0].data).toMatchObject({ customerId: 'c-9', contactEmail: 'stored@x.test' });
+    expect(stripe.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ customerEmail: null }));
+
+    const fresh = setup();
+    await fresh.service.start({ ...input, customerEmail: undefined, paymentMethod: 'cash' }, SIGNED_IN);
+    expect(fresh.tx.customer.create).toHaveBeenCalledWith({ data: expect.objectContaining({ email: null }) });
+    expect(fresh.tx.booking.create.mock.calls[0]![0].data).toMatchObject({ contactEmail: null });
   });
 
   it('refuses dates past the booking window', async () => {

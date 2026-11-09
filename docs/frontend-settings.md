@@ -153,6 +153,7 @@ There's nothing new. The page edits `GET/PUT /admin/settings/slots`: `advanceBoo
 
 **Customer emails:**
 - **`bookingConfirmed` and `bookingCancelled`** are always `true`. Show them as locked switches. Sending `false` returns `400`.
+- A booking with no contact email (the customer has none) gets no customer emails at all, and nothing appears in the email log for them. Staff emails still send.
 - **`slotBlocked`** is the same setting as `notifyCustomerOnBlock` in slot settings, so both pages agree.
 
 **Staff emails:**

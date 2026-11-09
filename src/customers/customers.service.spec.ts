@@ -6,8 +6,8 @@ const booking = (date: string, total: number, paid: number, status = 'confirmed'
   id: `b-${date}-${total}`, bookingNumber: 'CT-AAAAA', status, total, dueDate: null, ground, slot: { date: day(date) },
   payments: paid ? [{ amount: paid, status: 'succeeded' }] : [],
 });
-const customer = (id: string, name: string, bookings: object[], createdAt = new Date('2026-01-01')) => ({
-  id, name, email: `${id}@x.test`, phone: `+88017110000${id.slice(-2)}`, adminNote: null, createdAt, bookings,
+const customer = (id: string, name: string, bookings: object[], email: string | null = `${id}@x.test`, createdAt = new Date('2026-01-01')) => ({
+  id, name, email, phone: `+88017110000${id.slice(-2)}`, adminNote: null, createdAt, bookings,
 });
 
 const rows = [
@@ -41,6 +41,17 @@ describe('CustomersService', () => {
     expect((await service.list({ page: 1, limit: 20, sort: 'lastBooking', hasDue: true })).data.map((c) => c.name)).toEqual(['Owes']);
     expect((await service.list({ page: 1, limit: 20, sort: 'lastBooking', search: 'owe' })).total).toBe(1);
     expect((await service.list({ page: 2, limit: 2, sort: 'lastBooking' })).data).toHaveLength(1);
+  });
+
+  it('searches customers who have no email', async () => {
+    const service = setup();
+    rows.push(customer('c-04', 'No Mail', [], null));
+    try {
+      expect((await service.list({ page: 1, limit: 20, sort: 'lastBooking', search: 'no mail' })).data.map((c) => c.email)).toEqual([null]);
+      expect((await service.list({ page: 1, limit: 20, sort: 'lastBooking', search: 'c-01@' })).total).toBe(1);
+    } finally {
+      rows.pop();
+    }
   });
 
   it('returns dues and the favourite ground on the detail', async () => {

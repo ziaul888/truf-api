@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { EmailSchema } from '../auth/auth.schemas.js';
+import { OptionalEmailSchema } from '../auth/auth.schemas.js';
 import { PaginationSchema } from '../common/schemas.js';
 import { oneOf } from '../grounds/grounds.schemas.js';
 import { normalizePhone } from './phone.js';
@@ -35,7 +35,8 @@ const adminNote = z.string().trim().max(2000).nullable().optional();
 export const CreateCustomerSchema = z.object({
   name: CustomerNameSchema,
   phone: PhoneSchema,
-  email: EmailSchema,
+  /** Optional; on update, null (or "") clears it. */
+  email: OptionalEmailSchema,
   adminNote,
 });
 export type CreateCustomerInput = z.infer<typeof CreateCustomerSchema>;
