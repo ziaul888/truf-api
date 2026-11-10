@@ -308,6 +308,11 @@ model SlotSettings {
   serviceFee              Int      @default(5000)
   /// Lets portal customers choose "pay cash at the venue" instead of card.
   portalCashEnabled       Boolean  @default(true)
+  /// Card on the portal; also needs the Stripe keys. Off hides it even with them.
+  portalCardEnabled       Boolean  @default(true)
+  /// bKash / Nagad on the portal; also needs that number. Off hides it and keeps the number.
+  portalBkashEnabled      Boolean  @default(true)
+  portalNagadEnabled      Boolean  @default(true)
   /// The venue's bKash / Nagad number customers send money to. Null = not offered on the portal.
   bkashNumber             String?
   nagadNumber             String?

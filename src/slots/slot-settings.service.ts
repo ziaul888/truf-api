@@ -13,6 +13,9 @@ export const DEFAULT_SLOT_SETTINGS: SlotSettings = {
   holdMinutes: 15,
   serviceFee: 5000,
   portalCashEnabled: true,
+  portalCardEnabled: true,
+  portalBkashEnabled: true,
+  portalNagadEnabled: true,
   bkashNumber: null,
   nagadNumber: null,
 };
@@ -29,6 +32,9 @@ const toSettings = (row: SlotSettingsRow): SlotSettings => ({
   holdMinutes: row.holdMinutes,
   serviceFee: row.serviceFee,
   portalCashEnabled: row.portalCashEnabled,
+  portalCardEnabled: row.portalCardEnabled,
+  portalBkashEnabled: row.portalBkashEnabled,
+  portalNagadEnabled: row.portalNagadEnabled,
   bkashNumber: row.bkashNumber,
   nagadNumber: row.nagadNumber,
 });

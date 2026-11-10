@@ -223,11 +223,14 @@ describe('Slots (e2e)', () => {
       expect((await adminAgent.get(SETTINGS).expect(200)).body.data).toMatchObject({ advanceBookingDays: 30, autoGenerate: true });
       await (await signIn(manager)).put(SETTINGS).send({ autoGenerate: false }).expect(403);
       expect((await adminAgent.put(SETTINGS).send({ advanceBookingDays: 0 }).expect(400)).body.code).toBe('VALIDATION_FAILED');
+      // The portal method switches: only true here, as other files book by card, bKash and Nagad in parallel (unit-tested off).
+      expect((await adminAgent.put(SETTINGS).send({ portalBkashEnabled: 'no' }).expect(400)).body.code).toBe('VALIDATION_FAILED');
+      await adminAgent.put(SETTINGS).send({ portalCardEnabled: true, portalBkashEnabled: true, portalNagadEnabled: true }).expect(200);
 
       const res = await adminAgent.put(SETTINGS).send({ autoGenerate: false }).expect(200);
       expect(res.body.data).toEqual({
         advanceBookingDays: 30, autoGenerate: false, cancellationCutoffHours: 2, notifyCustomerOnBlock: true, notifyAdminOnBooking: false,
-        holdMinutes: 15, serviceFee: 5000, portalCashEnabled: true,
+        holdMinutes: 15, serviceFee: 5000, portalCashEnabled: true, portalCardEnabled: true, portalBkashEnabled: true, portalNagadEnabled: true,
         // wallet-payments.e2e-spec sets these meanwhile.
         bkashNumber: expect.toSatisfy(nullOrString), nagadNumber: expect.toSatisfy(nullOrString),
         updatedAt: expect.any(String), updatedBy: { id: expect.any(String), name: 'Admin' },
