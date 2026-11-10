@@ -1,3 +1,4 @@
+import type { BookingSeriesBooker } from '../booking-series/booking-series-booker.js';
 import type { SystemStateService } from '../settings/system-state.service.js';
 import { SlotAutoGenerateJob } from './slot-auto-generate.job.js';
 import type { SlotGeneratorService } from './slot-generator.service.js';
@@ -10,8 +11,11 @@ function setup(stored: object | null = null) {
     fillWindow: vi.fn(async () => 0),
   };
   const state = { get: vi.fn(async () => stored), set: vi.fn(async () => undefined) };
-  const job = new SlotAutoGenerateJob(generator as unknown as SlotGeneratorService, state as unknown as SystemStateService);
-  return { generator, state, run: () => (job as unknown as { run(): Promise<void> }).run() };
+  const series = { extendOngoing: vi.fn(async () => 0) };
+  const job = new SlotAutoGenerateJob(
+    generator as unknown as SlotGeneratorService, state as unknown as SystemStateService, series as unknown as BookingSeriesBooker,
+  );
+  return { generator, state, series, run: () => (job as unknown as { run(): Promise<void> }).run() };
 }
 
 describe('SlotAutoGenerateJob', () => {
@@ -38,5 +42,19 @@ describe('SlotAutoGenerateJob', () => {
     expect(generator.fillWindow).toHaveBeenCalled();
     await run();
     expect(state.set).toHaveBeenCalledTimes(1);
+  });
+
+  it('extends repeat bookings after filling the window', async () => {
+    const { generator, series, run } = setup({ done: true });
+    await run();
+    expect(generator.fillWindow.mock.invocationCallOrder[0]!).toBeLessThan(series.extendOngoing.mock.invocationCallOrder[0]!);
+  });
+
+  it('still extends repeat bookings when generation fails, and never throws itself', async () => {
+    const { generator, series, run } = setup({ done: true });
+    generator.fillWindow.mockRejectedValueOnce(new Error('db down'));
+    series.extendOngoing.mockRejectedValueOnce(new Error('db down'));
+    await expect(run()).resolves.toBeUndefined();
+    expect(series.extendOngoing).toHaveBeenCalledTimes(1);
   });
 });

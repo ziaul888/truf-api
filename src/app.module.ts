@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from './auth/auth.module.js';
+import { BookingSeriesModule } from './booking-series/booking-series.module.js';
 import { BookingsModule } from './bookings/bookings.module.js';
 import { CustomerAuthModule } from './customer-auth/customer-auth.module.js';
 import { CustomersModule } from './customers/customers.module.js';
@@ -13,6 +14,6 @@ import { SlotsModule } from './slots/slots.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
-  imports: [PrismaModule, HealthModule, AuthModule, UsersModule, GroundsModule, SlotsModule, BookingsModule, CustomersModule, CustomerAuthModule, DashboardModule, ReportsModule, SettingsModule],
+  imports: [PrismaModule, HealthModule, AuthModule, UsersModule, GroundsModule, SlotsModule, BookingsModule, BookingSeriesModule, CustomersModule, CustomerAuthModule, DashboardModule, ReportsModule, SettingsModule],
 })
 export class AppModule {}

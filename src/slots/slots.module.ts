@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { AuthModule } from '../auth/auth.module.js';
+import { BookingSeriesModule } from '../booking-series/booking-series.module.js';
 import { SettingsCoreModule } from '../settings/settings-core.module.js';
 import { BookingCoreModule } from '../bookings/booking-core.module.js';
 import { AdminClosuresController } from './admin-closures.controller.js';
@@ -17,7 +18,7 @@ import { SlotSettingsModule } from './slot-settings.module.js';
 import { SlotsService } from './slots.service.js';
 
 @Module({
-  imports: [AuthModule, SlotSettingsModule, BookingCoreModule, SettingsCoreModule],
+  imports: [AuthModule, SlotSettingsModule, BookingCoreModule, SettingsCoreModule, BookingSeriesModule],
   controllers: [
     AdminSlotsController, AdminSlotEventsController, AdminClosuresController,
     PublicSlotsController, PublicClosuresController, SlotSettingsController,

@@ -37,6 +37,12 @@ enum BookingStatus {
   no_show
 }
 
+/// A repeat booking: `active` keeps booking (ongoing series), `stopped` was turned off by staff.
+enum BookingSeriesStatus {
+  active
+  stopped
+}
+
 enum BookingSource {
   portal
   staff
@@ -148,6 +154,8 @@ model User {
   closuresCreated Closure[] @relation("ClosureCreatedBy")
   closuresLifted  Closure[] @relation("ClosureLiftedBy")
   settingsEvents  SettingsEvent[]
+  seriesCreated   BookingSeries[] @relation("BookingSeriesCreatedBy")
+  seriesStopped   BookingSeries[] @relation("BookingSeriesStoppedBy")
 }
 
 model Ground {
@@ -200,6 +208,7 @@ model Ground {
   slots      Slot[]
   bookings   Booking[]
   slotEvents SlotEvent[]
+  series     BookingSeries[]
 
   @@index([sport])
 }
@@ -336,6 +345,7 @@ model Customer {
   deletedAt        DateTime?
 
   bookings Booking[]
+  series   BookingSeries[]
 
   @@index([email])
 }
@@ -381,6 +391,8 @@ model Booking {
   cancelledById           String?
   /// The customer asked to cancel while their bKash / Nagad payment was under review; staff decide.
   cancelRequestedAt       DateTime?
+  /// Made by a repeat booking (BookingSeries); otherwise null.
+  seriesId                String?
   createdAt               DateTime             @default(now())
   updatedAt               DateTime             @updatedAt
   deletedAt               DateTime?
@@ -390,14 +402,73 @@ model Booking {
   customer    Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
   createdBy   User?          @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   cancelledBy User?          @relation("BookingCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  series      BookingSeries? @relation(fields: [seriesId], references: [id], onDelete: Restrict)
   payments    Payment[]
   events      BookingEvent[]
 
   @@index([groundId])
   @@index([slotId])
   @@index([customerId])
+  @@index([seriesId])
   @@index([status])
   @@index([createdAt])
+}
+
+/// A repeat booking made by staff: one ground, one start hour, chosen weekdays. Each matching
+/// date with a free slot gets its own normal Booking (seriesId set). Fixed: fromDate–untilDate,
+/// all booked at creation. Ongoing (untilDate null): booked up to the slots that exist, then the
+/// hourly slot job keeps booking new dates until staff stop it. Busy dates are skipped, never retried.
+model BookingSeries {
+  id            String              @id @default(uuid())
+  groundId      String
+  customerId    String
+  contactName   String
+  contactPhone  String
+  /// Null: none given and none stored. Series bookings never email the customer.
+  contactEmail  String?
+  /// Whole hour, 0–23: the slot that starts then is booked on each date.
+  startHour     Int
+  /// `mon` … `sun` (WEEKDAYS in grounds.schemas.ts), validated by the API.
+  weekdays      String[]
+  fromDate      DateTime            @db.Date
+  /// Null = ongoing.
+  untilDate     DateTime?           @db.Date
+  status        BookingSeriesStatus @default(active)
+  /// The last date considered (booked or skipped): the hourly job continues from the day after.
+  bookedThrough DateTime?           @db.Date
+  /// Staff only.
+  notes         String?
+  createdById   String?
+  stoppedAt     DateTime?
+  stoppedById   String?
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  deletedAt     DateTime?
+
+  ground    Ground              @relation(fields: [groundId], references: [id], onDelete: Restrict)
+  customer  Customer            @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy User?               @relation("BookingSeriesCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  stoppedBy User?               @relation("BookingSeriesStoppedBy", fields: [stoppedById], references: [id], onDelete: SetNull)
+  bookings  Booking[]
+  skips     BookingSeriesSkip[]
+
+  @@index([groundId])
+  @@index([customerId])
+  @@index([status])
+}
+
+/// A date a series could not book (slot taken, blocked, held, closed day, ended, or no slot). Never retried.
+model BookingSeriesSkip {
+  id        String   @id @default(uuid())
+  seriesId  String
+  date      DateTime @db.Date
+  /// 'booked' | 'blocked' | 'held' | 'closed' | 'ended' | 'no_slot'
+  reason    String
+  createdAt DateTime @default(now())
+
+  series BookingSeries @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+
+  @@unique([seriesId, date])
 }
 
 model Payment {
