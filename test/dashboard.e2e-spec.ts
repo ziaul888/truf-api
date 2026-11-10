@@ -54,7 +54,7 @@ describe('Dashboard (e2e)', () => {
     await prisma.slot.createMany({ data: Array.from({ length: 24 }, (_, startHour) => ({ groundId, date: toDbDate(today), startHour, price: 1000 })) });
     const book = async (key: string, date: string, hour: number, slotStatus: 'booked' | 'held' | 'available', data: object) => {
       const slot = await prisma.slot.upsert({
-        where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour: hour } },
+        where: { groundId_date_startHour_startMinute: { groundId, date: toDbDate(date), startHour: hour, startMinute: 0 } },
         create: { groundId, date: toDbDate(date), startHour: hour, price: 1000, status: slotStatus },
         update: { status: slotStatus },
       });
@@ -141,7 +141,11 @@ describe('Dashboard (e2e)', () => {
       bookedHours: hasNext ? 2 : 1, revenueToday: hasNext ? 800 : 300,
       current: { bookingId: ids.O, customerName: 'Customer O', startHour: nowHour, endHour: nowHour + 1 },
     });
-    expect(g.next).toEqual(hasNext ? { bookingId: ids.N, bookingNumber: 'CT-DSHN', customerName: 'Customer N', startHour: nowHour + 1, endHour: nowHour + 2, due: 1500 } : null);
+    const hh = (h: number) => `${String(h).padStart(2, '0')}:00`;
+    expect(g.next).toEqual(hasNext ? {
+      bookingId: ids.N, bookingNumber: 'CT-DSHN', customerName: 'Customer N', due: 1500,
+      startHour: nowHour + 1, startMinute: 0, endHour: nowHour + 2, endMinute: 0, startTime: hh(nowHour + 1), endTime: hh(nowHour + 2),
+    } : null);
     expect(g.timeline).toHaveLength(24);
   });
 

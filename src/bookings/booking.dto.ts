@@ -2,7 +2,7 @@ import type {
   BookingEventType, BookingPaymentStatus, BookingSource, BookingStatus, PaymentMethod, PaymentStatus, Prisma, Sport,
 } from '../generated/prisma/client.js';
 import { photoUrl } from '../grounds/photo-storage.js';
-import { endHourOf } from '../slots/slot.dto.js';
+import { slotHour, slotTimes, type SlotTimes } from '../slots/slot-time.js';
 import { fromDbDate, minutesUntil, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 import { dueOf, isUnderReview, isWalletMethod, paidOf, type WalletMethod } from './booking-rules.js';
 
@@ -11,7 +11,7 @@ const STAFF = { select: { id: true, name: true } } as const;
 /** Joins every booking response needs. */
 export const BOOKING_INCLUDE = {
   ground: { select: { id: true, name: true, sport: true, format: true, address: true, photos: true } },
-  slot: { select: { id: true, date: true, startHour: true, durationMinutes: true } },
+  slot: { select: { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } },
   customer: { select: { id: true, name: true, phone: true, email: true } },
   payments: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' }, include: { recordedBy: STAFF } },
   createdBy: STAFF,
@@ -27,11 +27,9 @@ export type BookingDetailRow = Prisma.BookingGetPayload<{ include: typeof BOOKIN
 
 type Staff = { id: string; name: string } | null;
 
-export interface BookingSlotDto {
+export interface BookingSlotDto extends SlotTimes {
   id: string;
   date: IsoDate;
-  startHour: number;
-  endHour: number;
 }
 
 /** A bKash / Nagad payment the customer sent from the portal checkout (it has the sender's number). */
@@ -143,7 +141,7 @@ export interface PublicBookingDto {
 }
 
 const slotOf = (s: BookingRow['slot']): BookingSlotDto => ({
-  id: s.id, date: fromDbDate(s.date), startHour: s.startHour, endHour: endHourOf(s),
+  id: s.id, date: fromDbDate(s.date), ...slotTimes(s),
 });
 
 /** The latest wallet payment sent from the portal (staff-recorded ones have no sender number). */
@@ -189,7 +187,7 @@ export const customerCanPay = (b: BookingRow) =>
   && !(b.source === 'portal' && !b.payAtVenue && b.status === 'pending');
 
 const outsideCutoff = (b: BookingRow, now: VenueNow, cutoffHours: number) =>
-  minutesUntil(now, fromDbDate(b.slot.date), b.slot.startHour) > cutoffHours * 60;
+  minutesUntil(now, fromDbDate(b.slot.date), slotHour(b.slot)) > cutoffHours * 60;
 
 /** Whether a customer may cancel through the signed link right now (not while a wallet payment is under review). */
 export const customerCanCancel = (b: BookingRow, now: VenueNow, cutoffHours: number) =>

@@ -5,6 +5,7 @@ import { contactEmailOf, upsertCustomerByPhone } from '../customers/customer-ups
 import type { PaymentStatus, Prisma, Slot } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { assertDayOpen, slotEnded, slotNotFound } from '../slots/slot-rules.js';
+import { slotHour } from '../slots/slot-time.js';
 import { fromDbDate, hasEnded, toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
@@ -43,7 +44,7 @@ export class StaffBookingsService {
       where: { id: input.slotId }, include: { ground: { select: { availableDays: true, customDays: true } } },
     });
     if (!slot) throw slotNotFound();
-    if (hasEnded(venueNow(), fromDbDate(slot.date), slot.startHour, slot.durationMinutes)) throw slotEnded();
+    if (hasEnded(venueNow(), fromDbDate(slot.date), slotHour(slot), slot.durationMinutes)) throw slotEnded();
     if (slot.status !== 'available') throw slotNotAvailable();
     assertDayOpen(slot.ground, fromDbDate(slot.date));
     const paid = paymentAmount(input.payment, slot.price);

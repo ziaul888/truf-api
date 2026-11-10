@@ -10,7 +10,7 @@ import type { SlotGeneratorService } from './slot-generator.service.js';
 const NOW = new Date('2026-10-28T04:00:00Z');
 
 const slot = (overrides: Partial<Slot> = {}): Slot => ({
-  id: 's-1', groundId: 'g-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18, durationMinutes: 60,
+  id: 's-1', groundId: 'g-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18, startMinute: 0, durationMinutes: 60,
   price: 1500, status: 'available', blockReason: null, blockNote: null, blockedById: null, blockedAt: null, closureId: null,
   heldUntil: null, heldByBookingId: null, createdAt: NOW, updatedAt: NOW, ...overrides,
 });
@@ -135,7 +135,7 @@ describe('SlotBlocksService — bulk', () => {
   it('blocks a weekly repeat on the chosen weekdays only', async () => {
     const { service, tx, generator } = setup([]);
     await service.bulkBlock('u-1', {
-      ...base, type: 'recurringWeekly', date: '2026-11-01', untilDate: '2026-11-15', weekdays: ['sun'], startHour: 18,
+      ...base, type: 'recurringWeekly', date: '2026-11-01', untilDate: '2026-11-15', weekdays: ['sun'], startHour: 18, startMinute: 0,
     });
     expect(generator.fillDates.mock.calls[0]![2]).toEqual(['2026-11-01', '2026-11-08', '2026-11-15']);
     expect(tx.slot.findMany.mock.calls[0]![0].where).toMatchObject({ startHour: 18 });
@@ -150,8 +150,25 @@ describe('SlotBlocksService — bulk', () => {
     await expectAppError(service.bulkBlock('u-1', { ...base, ...input } as never), status, code);
   });
 
+  it('blocks a single :30 slot by hour and minute, and skips one that started at the half hour', async () => {
+    const today = new Date('2026-10-28T00:00:00Z');
+    const { service, tx } = setup([slot({ id: 'h', date: today, startHour: 10, startMinute: 30, durationMinutes: 90 })]);
+    await expect(service.bulkBlock('u-1', { ...base, type: 'single', date: '2026-10-28', startHour: 10, startMinute: 30 }))
+      .resolves.toMatchObject({ blocked: 1 });
+    expect(tx.slot.findMany.mock.calls[0]![0].where).toMatchObject({ startHour: 10, startMinute: 30 });
+    // 10:00 now: a 09:30 slot has started.
+    const started = setup([slot({ id: 'p', date: today, startHour: 9, startMinute: 30, durationMinutes: 90 })]);
+    await expectAppError(started.service.bulkBlock('u-1', { ...base, type: 'single', date: '2026-10-28', startHour: 9, startMinute: 30 }), 400, 'SLOT_IN_PAST');
+  });
+
+  it('a weekly repeat without an hour blocks whole days, whatever the minute', async () => {
+    const { service, tx } = setup([]);
+    await service.bulkBlock('u-1', { ...base, type: 'recurringWeekly', date: '2026-11-01', untilDate: '2026-11-08', weekdays: ['sun'], startMinute: 0 });
+    expect(tx.slot.findMany.mock.calls[0]![0].where).not.toHaveProperty('startMinute');
+  });
+
   it('single type needs a slot that starts at that hour', async () => {
-    await expectAppError(setup([]).service.bulkBlock('u-1', { ...base, type: 'single', date: '2026-10-29', startHour: 7 }), 404, 'SLOT_NOT_FOUND');
+    await expectAppError(setup([]).service.bulkBlock('u-1', { ...base, type: 'single', date: '2026-10-29', startHour: 7, startMinute: 0 }), 404, 'SLOT_NOT_FOUND');
   });
 
   it('404s for an unknown ground', async () => {

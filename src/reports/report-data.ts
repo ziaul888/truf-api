@@ -1,7 +1,8 @@
 import { ABANDONED_CHECKOUT } from '../bookings/booking-rules.js';
 import type { BookingStatus, PaymentMethod, Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { fromDbDate, minutesUntil, toDbDate, venueNow, type IsoDate } from '../slots/venue-time.js';
+import { slotHour } from '../slots/slot-time.js';
+import { fromDbDate, hasEnded, toDbDate, venueNow, type IsoDate } from '../slots/venue-time.js';
 import { instantsOf, percent, venueDateOf } from './report-periods.js';
 import type { ReportRange } from './reports.schemas.js';
 
@@ -64,13 +65,13 @@ export async function loadMoney(prisma: PrismaService, r: ReportRange): Promise<
 export async function loadBookings(prisma: PrismaService, r: ReportRange): Promise<ReportBooking[]> {
   const rows = await prisma.booking.findMany({
     where: reportBookingsWhere(r),
-    select: { status: true, total: true, groundId: true, slot: { select: { date: true, startHour: true, durationMinutes: true } } },
+    select: { status: true, total: true, groundId: true, slot: { select: { date: true, startHour: true, startMinute: true, durationMinutes: true } } },
   });
   const now = venueNow();
   return rows.map((b) => {
     const date = fromDbDate(b.slot.date);
     const hours = b.slot.durationMinutes / 60;
-    return { date, status: b.status, total: b.total, groundId: b.groundId, hours, ended: minutesUntil(now, date, b.slot.startHour + hours) <= 0 };
+    return { date, status: b.status, total: b.total, groundId: b.groundId, hours, ended: hasEnded(now, date, slotHour(b.slot), b.slot.durationMinutes) };
   });
 }
 

@@ -57,7 +57,7 @@ const GroundFields = z.object({
     z.object({ fromHour: hour(0, 23, 'Peak start'), toHour: hour(1, 24, 'Peak end') })
       .refine((r) => r.fromHour < r.toHour, { path: ['toHour'], message: 'Peak end must be after peak start' }),
   ).max(6, 'At most 6 peak ranges'),
-  slotDurationMinutes: z.union([z.literal(60), z.literal(120)], 'Slot length must be 60 or 120 minutes'),
+  slotDurationMinutes: z.union([z.literal(60), z.literal(90), z.literal(120)], 'Slot length must be 60, 90 or 120 minutes'),
 });
 
 const opensBeforeCloses = (v: { openingHour?: number; closingHour?: number }) =>

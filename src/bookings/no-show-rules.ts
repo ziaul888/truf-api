@@ -1,4 +1,5 @@
 import { AppError } from '../common/app-error.js';
+import { slotHour } from '../slots/slot-time.js';
 import { fromDbDate, hasEnded, hasStarted, type VenueNow } from '../slots/venue-time.js';
 import { bookingNotPending, isUnderReview } from './booking-rules.js';
 import type { BookingRow } from './booking.dto.js';
@@ -22,11 +23,11 @@ export function assertCanMarkNoShow(b: NoShowBooking, now: VenueNow) {
   if (b.status === 'pending' && b.source === 'portal' && !b.payAtVenue) {
     throw bookingNotPending('The customer is paying this booking by card. Wait for the card payment, or cancel it');
   }
-  if (!hasStarted(now, fromDbDate(b.slot.date), b.slot.startHour)) {
+  if (!hasStarted(now, fromDbDate(b.slot.date), slotHour(b.slot))) {
     throw new AppError("This slot hasn't started yet, so the team can't be a no-show", 409, 'SLOT_NOT_STARTED');
   }
 }
 
 /** Undoing a no-show: completed once the slot has ended, confirmed before that (the hourly job completes it later). */
 export const undoneStatusOf = (b: Pick<BookingRow, 'slot'>, now: VenueNow): 'completed' | 'confirmed' =>
-  hasEnded(now, fromDbDate(b.slot.date), b.slot.startHour, b.slot.durationMinutes) ? 'completed' : 'confirmed';
+  hasEnded(now, fromDbDate(b.slot.date), slotHour(b.slot), b.slot.durationMinutes) ? 'completed' : 'confirmed';

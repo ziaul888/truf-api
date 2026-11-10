@@ -10,6 +10,7 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { assertDayOpen, groundNotFound, slotInPast } from '../slots/slot-rules.js';
 import type { SlotSettings } from '../slots/slots.schemas.js';
+import { slotHour, slotTimes } from '../slots/slot-time.js';
 import { addDays, hasStarted, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
@@ -97,8 +98,9 @@ export class CheckoutService {
     if (!verifiedPhone && !input.customerEmail) throw emailRequired();
     const ground = await this.prisma.ground.findFirst({ where: { id: input.groundId, ...VISIBLE_GROUND } });
     if (!ground) throw groundNotFound();
+    const { date, startHour, startMinute } = input;
     const slot = await this.prisma.slot.findUnique({
-      where: { groundId_date_startHour: { groundId: ground.id, date: toDbDate(input.date), startHour: input.startHour } },
+      where: { groundId_date_startHour_startMinute: { groundId: ground.id, date: toDbDate(date), startHour, startMinute } },
     });
     if (!slot) throw slotNotAvailable();
     assertBookable(slot, input.date, settings);
@@ -113,7 +115,7 @@ export class CheckoutService {
     try {
       const session = await this.stripe.createCheckoutSession({
         bookingId, total: slot.price + settings.serviceFee, customerEmail: input.customerEmail,
-        description: `${ground.name}, ${input.date} ${String(input.startHour).padStart(2, '0')}:00`,
+        description: `${ground.name}, ${input.date} ${slotTimes(slot).startTime}`,
         successUrl: `${env.PUBLIC_APP_URL}/confirmation/${bookingId}?token=${bookingToken(bookingId)}`,
         cancelUrl: `${env.PUBLIC_APP_URL}/grounds/${ground.id}`,
       });
@@ -230,12 +232,12 @@ function createdDetail(input: CheckoutInput) {
 /** Customers can book only free slots, inside the booking window and outside the cutoff. */
 function assertBookable(slot: Slot, date: string, settings: SlotSettings) {
   const now = venueNow();
-  if (hasStarted(now, date, slot.startHour)) throw slotInPast();
+  if (hasStarted(now, date, slotHour(slot))) throw slotInPast();
   if (slot.status !== 'available') throw slotNotAvailable();
   if (date > addDays(now.date, settings.advanceBookingDays)) {
     throw outsideWindow(`Bookings open ${settings.advanceBookingDays} days ahead`);
   }
-  if (minutesUntil(now, date, slot.startHour) <= settings.cancellationCutoffHours * 60) {
+  if (minutesUntil(now, date, slotHour(slot)) <= settings.cancellationCutoffHours * 60) {
     throw outsideWindow(`Online bookings close ${settings.cancellationCutoffHours} hours before the start`);
   }
 }

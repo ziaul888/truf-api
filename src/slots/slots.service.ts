@@ -3,13 +3,14 @@ import type { Paginated } from '../common/schemas.js';
 import type { Prisma, SlotStatus } from '../generated/prisma/client.js';
 import { peakRangesOf } from '../grounds/ground.dto.js';
 import { VISIBLE_GROUND } from '../grounds/ground-rules.js';
-import { isOpenOn, isPeakHour } from '../grounds/ground-schedule.js';
+import { isOpenOn, isPeakSlot } from '../grounds/ground-schedule.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { paidOf } from '../bookings/booking-rules.js';
-import { endHourOf, SLOT_INCLUDE, toSlotDto, type PublicSlotDto, type SlotDto, type SlotRow } from './slot.dto.js';
+import { SLOT_INCLUDE, toSlotDto, type PublicSlotDto, type SlotDto, type SlotRow } from './slot.dto.js';
 import { SlotSettingsService } from './slot-settings.service.js';
 import { activeClosuresWhere, assertRange, closureOn, dateWhere, groundNotFound, isOpenDay, slotNotFound } from './slot-rules.js';
 import type { CalendarQuery, ListSlotsQuery, PublicSlotsQuery } from './slots.schemas.js';
+import { slotHour, slotTimes, type SlotTimes } from './slot-time.js';
 import { addDays, datesBetween, fromDbDate, minutesUntil, toDbDate, venueNow, weekdayOf, type IsoDate } from './venue-time.js';
 
 export const MAX_PUBLIC_DAYS = 14;
@@ -18,13 +19,11 @@ const MAX_LIST_DAYS = 366;
 
 export type SlotStats = Record<SlotStatus | 'total', number>;
 
-export interface CalendarSlot {
+export interface CalendarSlot extends SlotTimes {
   id: string;
   groundId: string;
   groundName: string;
   date: IsoDate;
-  startHour: number;
-  endHour: number;
   status: SlotStatus;
   /** Blocked slots: the reason, plus the note if any. */
   note?: string;
@@ -45,7 +44,7 @@ function toCalendarSlot(s: SlotRow): CalendarSlot {
   const booking = s.bookings[0];
   return {
     id: s.id, groundId: s.groundId, groundName: s.ground.name, date: fromDbDate(s.date),
-    startHour: s.startHour, endHour: endHourOf(s), status: s.status,
+    ...slotTimes(s), status: s.status,
     ...(s.status === 'blocked' && s.blockReason && { note: s.blockNote ? `${s.blockReason}: ${s.blockNote}` : s.blockReason }),
     ...(booking && {
       bookingId: booking.id, customerName: booking.contactName, customerPhone: booking.contactPhone,
@@ -54,7 +53,7 @@ function toCalendarSlot(s: SlotRow): CalendarSlot {
   };
 }
 
-const ORDER: Prisma.SlotOrderByWithRelationInput[] = [{ date: 'asc' }, { startHour: 'asc' }, { ground: { name: 'asc' } }];
+const ORDER: Prisma.SlotOrderByWithRelationInput[] = [{ date: 'asc' }, { startHour: 'asc' }, { startMinute: 'asc' }, { ground: { name: 'asc' } }];
 
 @Injectable()
 export class SlotsService {
@@ -124,7 +123,7 @@ export class SlotsService {
     if (!ground) throw groundNotFound();
     const { advanceBookingDays, cancellationCutoffHours } = await this.settings.get();
     const [rows, closures] = await Promise.all([
-      this.prisma.slot.findMany({ where: { groundId, ...dateWhere(from, to) }, orderBy: [{ date: 'asc' }, { startHour: 'asc' }] }),
+      this.prisma.slot.findMany({ where: { groundId, ...dateWhere(from, to) }, orderBy: [{ date: 'asc' }, { startHour: 'asc' }, { startMinute: 'asc' }] }),
       this.prisma.closure.findMany({ where: activeClosuresWhere(groundId, from, to) }),
     ]);
 
@@ -135,12 +134,12 @@ export class SlotsService {
       .filter((s) => isOpenOn(ground, weekdayOf(fromDbDate(s.date))) && !closureOn(closures, fromDbDate(s.date)))
       .map((s) => {
         const date = fromDbDate(s.date);
-        const endHour = endHourOf(s);
         return {
-          id: s.id, date, startHour: s.startHour, endHour, price: s.price,
-          isPeak: Array.from({ length: endHour - s.startHour }, (_, i) => s.startHour + i).some((h) => isPeakHour(schedule, h)),
+          id: s.id, date, ...slotTimes(s), price: s.price,
+          // The slot's own length: it may predate a change to the ground's.
+          isPeak: isPeakSlot({ ...schedule, slotDurationMinutes: s.durationMinutes }, s.startHour, s.startMinute),
           available: s.status === 'available' && date <= lastBookable
-            && minutesUntil(now, date, s.startHour) > cancellationCutoffHours * 60,
+            && minutesUntil(now, date, slotHour(s)) > cancellationCutoffHours * 60,
         };
       });
   }

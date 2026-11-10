@@ -7,8 +7,11 @@ const booking = (id: string, total = 1000, paid = 0) => ({
   id, bookingNumber: `CT-${id}`, contactName: `Customer ${id}`, status: 'confirmed' as const, total,
   payments: paid ? [{ amount: paid, status: 'succeeded' as const }] : [],
 });
-const slot = (startHour: number, status: 'available' | 'held' | 'booked' | 'blocked', b?: ReturnType<typeof booking>, closureId: string | null = null) => ({
-  groundId: 'g-1', startHour, durationMinutes: 60, status, closureId, bookings: b ? [b] : [],
+const slot = (
+  startHour: number, status: 'available' | 'held' | 'booked' | 'blocked', b?: ReturnType<typeof booking>, closureId: string | null = null,
+  startMinute = 0, durationMinutes = 60,
+) => ({
+  groundId: 'g-1', startHour, startMinute, durationMinutes, status, closureId, bookings: b ? [b] : [],
 });
 const SLOTS = [slot(16, 'available'), slot(17, 'booked', booking('A')), slot(18, 'available'), slot(19, 'booked', booking('B', 1000, 400)), slot(20, 'blocked')];
 const at = (hour: number, minute: number) => ({ date: '2026-10-31', minutes: hour * 60 + minute });
@@ -27,7 +30,18 @@ describe('groundToday', () => {
       current: { bookingId: 'A', bookingNumber: 'CT-A', customerName: 'Customer A', startHour: 17, endHour: 18 },
       next: { bookingId: 'B', startHour: 19, due: 600 },
     });
-    expect(day.timeline[1]).toEqual({ startHour: 17, endHour: 18, status: 'booked' });
+    expect(day.timeline[1]).toEqual({
+      startHour: 17, startMinute: 0, endHour: 18, endMinute: 0, startTime: '17:00', endTime: '18:00', status: 'booked',
+    });
+  });
+
+  it('90-minute slots: on now and next to the minute', () => {
+    const ninety = [slot(15, 'booked', booking('A'), null, 0, 90), slot(16, 'booked', booking('B'), null, 30, 90), slot(18, 'available', undefined, null, 0, 90)];
+    const day = groundToday(ground, ninety, [], [], at(16, 29));
+    expect(day.current).toMatchObject({ bookingId: 'A', startTime: '15:00', endTime: '16:30', endHour: 16, endMinute: 30 });
+    expect(day.next).toMatchObject({ bookingId: 'B', startHour: 16, startMinute: 30, startTime: '16:30', endTime: '18:00' });
+    expect(day).toMatchObject({ bookedHours: 3, remainingFreeHours: 1.5 });
+    expect(groundToday(ground, ninety, [], [], at(16, 30)).current?.bookingId).toBe('B');
   });
 
   it('a 17–18 slot is over at 18:00 sharp', () => {

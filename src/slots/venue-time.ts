@@ -1,7 +1,7 @@
 import { env } from '../config/env.js';
 import type { Weekday } from '../generated/prisma/client.js';
 
-// Slots live in venue-local time: a calendar date plus whole hours, never UTC timestamps.
+// Slots live in venue-local time: a calendar date plus an hour and minute (slot-time.ts), never UTC timestamps.
 // Dates travel as "YYYY-MM-DD" strings and are stored as Postgres DATE (UTC midnight in JS).
 
 export type IsoDate = string;
@@ -36,7 +36,7 @@ export function datesBetween(from: IsoDate, to: IsoDate): IsoDate[] {
   return dates;
 }
 
-/** Minutes until a slot starts; zero or less once it has started. */
+/** Minutes until a slot starts; zero or less once it has started. `startHour` may be fractional: pass `slotHour(slot)`. */
 export const minutesUntil = (now: VenueNow, date: IsoDate, startHour: number) =>
   daysBetween(now.date, date) * 1440 + startHour * 60 - now.minutes;
 

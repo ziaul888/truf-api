@@ -3,13 +3,14 @@ import { Injectable, Logger } from '@nestjs/common';
 import { newBookingNumber, withBookingNumber } from '../bookings/booking-rules.js';
 import type { AvailableDays, BookingSeries, Prisma, Slot, Weekday } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import type { SlotStart } from '../slots/slot-time.js';
 import { addDays, fromDbDate, toDbDate, venueNow, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 import { seriesDates, skipReasonOf, type SkipReason } from './booking-series-rules.js';
 
 type Db = PrismaService | Prisma.TransactionClient;
 type GroundDaysOnly = { availableDays: AvailableDays; customDays: Weekday[] };
 
-/** One matching date: the slot at the series' hour (if any) and why it can't be booked (null = it can). */
+/** One matching date: the slot at the series' start time (if any) and why it can't be booked (null = it can). */
 export interface DatePlan {
   date: IsoDate;
   slot: Slot | null;
@@ -43,10 +44,11 @@ export class BookingSeriesBooker {
 
   constructor(private readonly prisma: PrismaService) {}
 
-  /** The slot at `startHour` on each date, and whether it can be booked. */
-  async survey(db: Db, groundId: string, ground: GroundDaysOnly, startHour: number, dates: IsoDate[], now: VenueNow): Promise<DatePlan[]> {
+  /** The slot starting at `start` (hour and minute) on each date, and whether it can be booked. */
+  async survey(db: Db, groundId: string, ground: GroundDaysOnly, start: SlotStart, dates: IsoDate[], now: VenueNow): Promise<DatePlan[]> {
     if (dates.length === 0) return [];
-    const slots = await db.slot.findMany({ where: { groundId, startHour, date: { in: dates.map(toDbDate) } } });
+    const { startHour, startMinute } = start;
+    const slots = await db.slot.findMany({ where: { groundId, startHour, startMinute, date: { in: dates.map(toDbDate) } } });
     const byDate = new Map(slots.map((s) => [fromDbDate(s.date), s]));
     return dates.map((date) => {
       const slot = byDate.get(date) ?? null;
@@ -58,7 +60,7 @@ export class BookingSeriesBooker {
   async book(
     tx: Prisma.TransactionClient, series: BookingSeries, ground: GroundDaysOnly, dates: IsoDate[], actorId: string | null, now: VenueNow,
   ): Promise<BookedDate[]> {
-    const plans = await this.survey(tx, series.groundId, ground, series.startHour, dates, now);
+    const plans = await this.survey(tx, series.groundId, ground, series, dates, now);
     const free = plans.filter((p) => p.reason === null).map((p) => p.slot!);
     const taken = free.length === 0 ? [] : await tx.slot.updateManyAndReturn({
       where: { id: { in: free.map((s) => s.id) }, status: 'available' }, data: { status: 'booked' },

@@ -65,7 +65,7 @@ export class CustomersService {
     if (!row) throw notFound();
     const recent = await this.prisma.booking.findMany({
       where: { customerId: id, deletedAt: null }, include: BOOKING_INCLUDE,
-      orderBy: [{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }], take: 20,
+      orderBy: [{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }, { slot: { startMinute: 'desc' } }], take: 20,
     });
     const owing = row.bookings.filter((b) => owedOf(b, b.payments) > 0);
     return {

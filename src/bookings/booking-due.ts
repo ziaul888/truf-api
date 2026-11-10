@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service.js';
+import { slotHour } from '../slots/slot-time.js';
 import { fromDbDate, hasStarted, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 import { CARD_CHECKOUT_IN_PROGRESS, dueOf, WALLET_UNDER_REVIEW } from './booking-rules.js';
 
@@ -13,6 +14,7 @@ export interface OwingBooking {
   dueDate: IsoDate | null;
   date: IsoDate;
   startHour: number;
+  startMinute: number;
   /** Part of a repeat booking: paid per month whenever the customer pays, so never overdue without a due date. */
   inSeries: boolean;
 }
@@ -29,21 +31,21 @@ export async function loadOwing(prisma: PrismaService): Promise<OwingBooking[]> 
       NOT: [CARD_CHECKOUT_IN_PROGRESS, WALLET_UNDER_REVIEW],
     },
     select: {
-      id: true, bookingNumber: true, contactName: true, status: true, total: true, dueDate: true, seriesId: true, slot: { select: { date: true, startHour: true } },
+      id: true, bookingNumber: true, contactName: true, status: true, total: true, dueDate: true, seriesId: true, slot: { select: { date: true, startHour: true, startMinute: true } },
       payments: { where: { deletedAt: null }, select: { amount: true, status: true } },
     },
   });
   return rows
     .map((b) => ({
       id: b.id, bookingNumber: b.bookingNumber, customerName: b.contactName, due: dueOf(b, b.payments), dueDate: b.dueDate ? fromDbDate(b.dueDate) : null,
-      date: fromDbDate(b.slot.date), startHour: b.slot.startHour, inSeries: b.seriesId !== null,
+      date: fromDbDate(b.slot.date), startHour: b.slot.startHour, startMinute: b.slot.startMinute, inSeries: b.seriesId !== null,
     }))
     .filter((b) => b.due > 0);
 }
 
 /** Past its due date; with no due date, once the slot has started (except repeat bookings, which have no deadline). */
 export const isOverdue = (b: OwingBooking, now: VenueNow) =>
-  (b.dueDate ? b.dueDate < now.date : !b.inSeries && hasStarted(now, b.date, b.startHour));
+  (b.dueDate ? b.dueDate < now.date : !b.inSeries && hasStarted(now, b.date, slotHour(b)));
 
 export const isDueToday = (b: OwingBooking, now: VenueNow) => b.dueDate === now.date;
 

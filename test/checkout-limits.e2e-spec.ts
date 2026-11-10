@@ -67,7 +67,7 @@ describe('Checkout limits (e2e)', () => {
 
   const http = () => request(app.getHttpServer());
   const slotAt = (startHour: number) =>
-    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour } } });
+    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour_startMinute: { groundId, date: toDbDate(date), startHour, startMinute: 0 } } });
   const checkout = (
     client: ReturnType<typeof request.agent> | ReturnType<typeof http>, hour: number, phoneEnd: string, extra: object = { paymentMethod: 'cash' },
   ) => client.post(`${API}/checkout`).send({

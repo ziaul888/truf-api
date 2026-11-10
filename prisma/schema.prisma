@@ -200,7 +200,7 @@ model Ground {
   peakPrice           Int?
   /// `[{ fromHour, toHour }]`, inside opening hours, no overlaps — validated by the API.
   peakRanges          Json     @default("[]")
-  /// 60 or 120. Slots start at openingHour in steps of this length; a trailing partial slot is dropped.
+  /// 60, 90 or 120. Slots start at openingHour in steps of this length; a trailing partial slot is dropped.
   slotDurationMinutes Int      @default(60)
   /// Stored file names, in display order (first = cover). Files live in UPLOAD_DIR/grounds/<id>/.
   photos              String[] @default([])
@@ -219,9 +219,11 @@ model Slot {
   groundId        String
   /// Venue-local calendar date.
   date            DateTime     @db.Date
-  /// Start hour, 0–23; the slot covers [startHour, startHour + durationMinutes / 60).
+  /// Start hour, 0–23. The slot starts at startHour:startMinute and covers durationMinutes.
   startHour       Int
-  /// 60 or 120 — copied from the ground when the slot was created.
+  /// 0 or 30 (validated by the API): 90-minute slots can start on the half hour.
+  startMinute     Int          @default(0)
+  /// 60, 90 or 120 — copied from the ground when the slot was created.
   durationMinutes Int          @default(60)
   /// slotPrice() at creation, smallest currency unit. Later price changes don't touch existing bookings.
   price           Int
@@ -245,7 +247,7 @@ model Slot {
   bookings  Booking[]
   events    SlotEvent[]
 
-  @@unique([groundId, date, startHour])
+  @@unique([groundId, date, startHour, startMinute])
   @@index([closureId])
   @@index([heldUntil])
   @@index([groundId])
@@ -426,8 +428,10 @@ model BookingSeries {
   contactPhone  String
   /// Null: none given and none stored. Series bookings never email the customer.
   contactEmail  String?
-  /// Whole hour, 0–23: the slot that starts then is booked on each date.
+  /// 0–23, with startMinute: the slot that starts at startHour:startMinute is booked on each date.
   startHour     Int
+  /// 0 or 30 (validated by the API).
+  startMinute   Int                 @default(0)
   /// `mon` … `sun` (WEEKDAYS in grounds.schemas.ts), validated by the API.
   weekdays      String[]
   fromDate      DateTime            @db.Date

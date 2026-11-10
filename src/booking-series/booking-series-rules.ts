@@ -1,6 +1,7 @@
 import { AppError } from '../common/app-error.js';
 import type { AvailableDays, SlotStatus, Weekday } from '../generated/prisma/client.js';
 import { isOpenDay } from '../slots/slot-rules.js';
+import { slotHour } from '../slots/slot-time.js';
 import { addDays, datesBetween, hasEnded, weekdayOf, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 
 /** Why a series could not book a date. Recorded once, never retried. */
@@ -18,9 +19,10 @@ export const amountExceedsDue = (due: number) =>
 export const seriesDates = (from: IsoDate, to: IsoDate, weekdays: readonly string[]): IsoDate[] =>
   datesBetween(from, to).filter((date) => weekdays.includes(weekdayOf(date)));
 
-/** What the skip check needs to know about the slot at the series' hour on a date. */
+/** What the skip check needs to know about the slot at the series' start time on a date. */
 export interface SlotAtHour {
   startHour: number;
+  startMinute: number;
   durationMinutes: number;
   status: SlotStatus;
   closureId: string | null;
@@ -35,7 +37,7 @@ export function skipReasonOf(
 ): SkipReason | null {
   if (!isOpenDay(ground, date)) return 'closed';
   if (!slot) return 'no_slot';
-  if (hasEnded(now, date, slot.startHour, slot.durationMinutes)) return 'ended';
+  if (hasEnded(now, date, slotHour(slot), slot.durationMinutes)) return 'ended';
   if (slot.status === 'available') return null;
   if (slot.status === 'blocked') return slot.closureId ? 'closed' : 'blocked';
   return slot.status;

@@ -75,7 +75,7 @@ describe('Optional customer email (e2e)', () => {
   });
 
   const slotId = async (startHour: number) =>
-    (await prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour } } })).id;
+    (await prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour_startMinute: { groundId, date: toDbDate(date), startHour, startMinute: 0 } } })).id;
   const staffBook = async (startHour: number, customer: object) =>
     staff.post(`${API}/admin/bookings`).send({ slotId: await slotId(startHour), customer, payment: { type: 'full', method: 'cash' } });
   const checkout = (client: ReturnType<typeof request.agent>, hour: number, phoneEnd: string, extra: object) =>

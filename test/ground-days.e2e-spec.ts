@@ -85,7 +85,7 @@ describe('Ground days and rules (e2e)', () => {
     return ground.id;
   };
   const slotAt = (groundId: string, date: IsoDate, startHour: number) =>
-    prisma.slot.findUnique({ where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour } } });
+    prisma.slot.findUnique({ where: { groundId_date_startHour_startMinute: { groundId, date: toDbDate(date), startHour, startMinute: 0 } } });
   const book = async (agent: Awaited<ReturnType<typeof signIn>>, groundId: string, startHour: number, phoneEnd: string) => {
     const slot = await slotAt(groundId, sunday, startHour);
     const res = await agent.post(`${API}/admin/bookings`).send({

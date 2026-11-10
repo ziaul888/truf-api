@@ -7,7 +7,7 @@ const day = (date: string) => new Date(`${date}T00:00:00Z`);
 
 const row = (id: string, date: string, startHour: number, overrides: object = {}) => ({
   id, bookingNumber: `CT-${id}`, contactName: 'Rakib', status: 'pending', total: 1000, payAtVenue: true,
-  ground: { name: 'Main' }, slot: { date: day(date), startHour, durationMinutes: 60 }, payments: [], ...overrides,
+  ground: { name: 'Main' }, slot: { date: day(date), startHour, startMinute: 0, durationMinutes: 60 }, payments: [], ...overrides,
 });
 
 function setup(rows: object[]) {
@@ -21,19 +21,21 @@ describe('loadNeedsOutcome', () => {
     await loadNeedsOutcome(prisma, now);
     const args = findMany.mock.calls[0]![0];
     expect(args.where).toMatchObject({ deletedAt: null, status: 'pending', NOT: expect.objectContaining({ source: 'portal', payAtVenue: false }) });
-    expect(args.orderBy).toEqual([{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }]);
+    expect(args.orderBy).toEqual([{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }, { slot: { startMinute: 'desc' } }]);
   });
 
   it('keeps only slots that have ended, with what the card needs', async () => {
     const { prisma } = setup([
       row('A', '2026-10-28', 9), // 09:00–10:00: ended at 10:00
-      row('B', '2026-10-28', 9, { slot: { date: day('2026-10-28'), startHour: 9, durationMinutes: 120 } }), // still on
+      row('B', '2026-10-28', 9, { slot: { date: day('2026-10-28'), startHour: 9, startMinute: 0, durationMinutes: 120 } }), // still on
       row('C', '2026-10-27', 20, { payAtVenue: false, payments: [{ amount: 1200, status: 'pending', method: 'bkash', payerNumber: '+8801811000000' }] }),
     ]);
     const result = await loadNeedsOutcome(prisma, now);
     expect(result.count).toBe(2);
     expect(result.bookings[0]).toEqual({
-      id: 'A', bookingNumber: 'CT-A', customerName: 'Rakib', groundName: 'Main', slot: { date: '2026-10-28', startHour: 9, endHour: 10 },
+      id: 'A', bookingNumber: 'CT-A', customerName: 'Rakib', groundName: 'Main', slot: {
+        date: '2026-10-28', startHour: 9, startMinute: 0, endHour: 10, endMinute: 0, startTime: '09:00', endTime: '10:00',
+      },
       total: 1000, paid: 0, due: 1000, payAtVenue: true, walletPayment: null,
     });
     // Under review: not money owed; the card says Verify.

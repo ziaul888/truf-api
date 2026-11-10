@@ -6,6 +6,7 @@ import { contactEmailOf, upsertCustomerByPhone } from '../customers/customer-ups
 import type { Ground, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { groundNotFound } from '../slots/slot-rules.js';
+import { slotHour } from '../slots/slot-time.js';
 import { fromDbDate, hasStarted, toDbDate, venueNow, type IsoDate } from '../slots/venue-time.js';
 import { BookingSeriesBooker, lastSlotDate, SERIES_TX, type BookedDate } from './booking-series-booker.js';
 import { recordAllocated } from './booking-series-payments.js';
@@ -38,7 +39,7 @@ export class BookingSeriesService {
     const ground = await this.activeGround(input.groundId);
     const horizon = await this.horizonOf(input);
     const dates = seriesDates(input.fromDate, horizon, input.weekdays);
-    const plans = await this.booker.survey(this.prisma, ground.id, ground, input.startHour, dates, venueNow());
+    const plans = await this.booker.survey(this.prisma, ground.id, ground, input, dates, venueNow());
     const free = plans.filter((p) => p.reason === null);
     return {
       dates: plans.map((p) => ({
@@ -113,9 +114,9 @@ export class BookingSeriesService {
     const now = venueNow();
     const bookings = await this.prisma.booking.findMany({
       where: { seriesId: id, deletedAt: null, status: { in: ['pending', 'confirmed'] }, slot: { date: { gte: toDbDate(fromDate) } } },
-      include: { slot: { select: { date: true, startHour: true } } },
+      include: { slot: { select: { date: true, startHour: true, startMinute: true } } },
     });
-    for (const b of bookings.filter((x) => !hasStarted(now, fromDbDate(x.slot.date), x.slot.startHour))) {
+    for (const b of bookings.filter((x) => !hasStarted(now, fromDbDate(x.slot.date), slotHour(x.slot)))) {
       try {
         await this.cancellation.cancel(b.id, { actorId, reason: reason ?? 'Repeat booking stopped', refund, notify: false });
       } catch (err) {
@@ -133,7 +134,7 @@ export class BookingSeriesService {
     return tx.bookingSeries.create({
       data: {
         groundId: input.groundId, customerId, contactName: contact.name, contactPhone: contact.phone, contactEmail,
-        startHour: input.startHour, weekdays: input.weekdays, fromDate: toDbDate(input.fromDate),
+        startHour: input.startHour, startMinute: input.startMinute, weekdays: input.weekdays, fromDate: toDbDate(input.fromDate),
         untilDate: input.untilDate ? toDbDate(input.untilDate) : null, bookedThrough: toDbDate(horizon),
         notes: input.notes ?? null, createdById: actorId,
       },

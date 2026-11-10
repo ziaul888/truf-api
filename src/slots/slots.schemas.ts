@@ -67,16 +67,20 @@ export const BlockSlotSchema = z.object({
 export type BlockSlotInput = z.infer<typeof BlockSlotSchema>;
 
 const startHour = hour(0, 23, 'Start hour');
+/** 0 or 30: 90-minute slots can start on the half hour. */
+export const startMinute = z.union([z.literal(0), z.literal(30)], 'Start minute must be 0 or 30');
 const bulkBase = { groundId: z.uuid('Invalid ground id'), date: isoDate, ...blockFields };
 
 export const BulkBlockSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('single'), ...bulkBase, startHour }),
+  z.object({ type: z.literal('single'), ...bulkBase, startHour, startMinute: startMinute.default(0) }),
   z.object({ type: z.literal('fullDay'), ...bulkBase }),
   z.object({
     type: z.literal('recurringWeekly'),
     ...bulkBase,
     /** Omit to block whole days. */
     startHour: startHour.optional(),
+    /** With startHour only. */
+    startMinute: startMinute.default(0),
     weekdays: z.array(oneOf(WEEKDAYS, 'Day')).min(1, 'Pick at least one day')
       .refine((list) => new Set(list).size === list.length, 'Days must not repeat'),
     untilDate: isoDate,

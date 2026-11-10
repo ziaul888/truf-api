@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { isDueToday, isOverdue, loadOwing, type OwingBooking } from '../bookings/booking-due.js';
 import { CARD_CHECKOUT_IN_PROGRESS, WALLET_UNDER_REVIEW } from '../bookings/booking-rules.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { slotHour } from '../slots/slot-time.js';
 import { addDays, fromDbDate, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
 import { loadNeedsOutcome, type NeedsOutcome } from './needs-outcome.js';
 
@@ -39,13 +40,13 @@ export class DashboardAttentionService {
           deletedAt: null, status: { in: ['pending', 'confirmed'] }, NOT: CARD_CHECKOUT_IN_PROGRESS,
           slot: { date: { in: [toDbDate(now.date), toDbDate(addDays(now.date, 1))] } },
         },
-        select: { slot: { select: { date: true, startHour: true } } },
+        select: { slot: { select: { date: true, startHour: true, startMinute: true } } },
       }),
       this.prisma.booking.count({ where: { deletedAt: null, ...WALLET_UNDER_REVIEW } }),
       loadNeedsOutcome(this.prisma, now),
     ]);
     const soon = nearby.filter(({ slot }) => {
-      const minutes = minutesUntil(now, fromDbDate(slot.date), slot.startHour);
+      const minutes = minutesUntil(now, fromDbDate(slot.date), slotHour(slot));
       return minutes > 0 && minutes <= SOON_MINUTES;
     });
     return {

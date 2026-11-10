@@ -3,7 +3,7 @@ import { BOOKING_INCLUDE } from '../bookings/booking.dto.js';
 import { owedOf, paidOf } from '../bookings/booking-rules.js';
 import { CUSTOMER_SUMMARY_INCLUDE, toCustomerDto } from '../customers/customer.dto.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { endHourOf } from '../slots/slot.dto.js';
+import { slotTimes } from '../slots/slot-time.js';
 import { fromDbDate, venueNow } from '../slots/venue-time.js';
 import { csvLine, csvMoney } from './csv.js';
 import { reportBookingsWhere } from './report-data.js';
@@ -18,7 +18,6 @@ export interface CsvFile {
 }
 
 const BATCH = 500;
-const hh = (hour: number) => `${String(hour).padStart(2, '0')}:00`;
 /** Venue-local "YYYY-MM-DD HH:mm". */
 const localTime = (instant: Date) => {
   const { date, minutes } = venueNow(instant);
@@ -63,12 +62,13 @@ export class ReportExportService {
     for (let cursor: string | undefined; ;) {
       const rows = await this.prisma.booking.findMany({
         where: reportBookingsWhere(r), include: BOOKING_INCLUDE, take: BATCH,
-        orderBy: [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { id: 'asc' }],
+        orderBy: [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }, { id: 'asc' }],
         ...(cursor && { cursor: { id: cursor }, skip: 1 }),
       });
       for (const b of rows) {
+        const { startTime, endTime } = slotTimes(b.slot);
         yield csvLine([
-          b.bookingNumber, b.contactName, b.contactPhone, b.ground.name, fromDbDate(b.slot.date), hh(b.slot.startHour), hh(endHourOf(b.slot)),
+          b.bookingNumber, b.contactName, b.contactPhone, b.ground.name, fromDbDate(b.slot.date), startTime, endTime,
           csvMoney(b.amount), csvMoney(b.serviceFee), csvMoney(b.total), csvMoney(paidOf(b.payments)), csvMoney(owedOf(b, b.payments)),
           b.status, b.paymentStatus, b.source, localTime(b.createdAt),
         ]);

@@ -1,4 +1,4 @@
-import { isOpenOn, slotPrice, slotStartHours, type GroundSchedule } from './ground-schedule.js';
+import { isOpenOn, isPeakSlot, slotPrice, slotStarts, type GroundSchedule } from './ground-schedule.js';
 
 const base: GroundSchedule = {
   openingHour: 6,
@@ -9,13 +9,25 @@ const base: GroundSchedule = {
   peakRanges: [],
 };
 
-describe('slotStartHours', () => {
+const times = (schedule: GroundSchedule) =>
+  slotStarts(schedule).map(({ startHour, startMinute }) => `${startHour}:${String(startMinute).padStart(2, '0')}`);
+
+describe('slotStarts', () => {
   it('makes one slot per hour by default', () => {
-    expect(slotStartHours({ ...base, openingHour: 8, closingHour: 12 })).toEqual([8, 9, 10, 11]);
+    expect(times({ ...base, openingHour: 8, closingHour: 12 })).toEqual(['8:00', '9:00', '10:00', '11:00']);
   });
 
   it('steps by two hours and drops a slot that would overrun closing', () => {
-    expect(slotStartHours({ ...base, slotDurationMinutes: 120 })).toEqual([6, 8, 10, 12, 14, 16, 18, 20]);
+    expect(slotStarts({ ...base, slotDurationMinutes: 120 }).map((s) => s.startHour)).toEqual([6, 8, 10, 12, 14, 16, 18, 20]);
+  });
+
+  it('steps by 90 minutes, on the half hour, with the last slot ending by closing', () => {
+    expect(times({ ...base, openingHour: 15, closingHour: 24, slotDurationMinutes: 90 }))
+      .toEqual(['15:00', '16:30', '18:00', '19:30', '21:00', '22:30']);
+    // 6–23: 11 slots, the last 21:00–22:30; one at 22:30 would run past closing.
+    const day = times({ ...base, slotDurationMinutes: 90 });
+    expect(day).toHaveLength(11);
+    expect(day.at(-1)).toBe('21:00');
   });
 });
 
@@ -37,6 +49,28 @@ describe('slotPrice', () => {
     expect(slotPrice(twoHour, 14)).toBe(2000);
     expect(slotPrice(twoHour, 16)).toBe(2500);
     expect(slotPrice(twoHour, 18)).toBe(3000);
+  });
+
+  it('prices 90 minutes as one and a half hours, per half hour across a peak edge', () => {
+    const ninety = { ...peak, slotDurationMinutes: 90, peakRanges: [{ fromHour: 18, toHour: 22 }] };
+    expect(slotPrice(ninety, 15)).toBe(1500);
+    expect(slotPrice(ninety, 16, 30)).toBe(1500);
+    // 17:30–18:00 off-peak (500) + 18:00–19:00 peak (1500)
+    expect(slotPrice(ninety, 17, 30)).toBe(2000);
+    expect(slotPrice(ninety, 18)).toBe(2250);
+    expect(slotPrice(ninety, 21, 30)).toBe(1750); // 21:30–22 peak (750), 22–23 off-peak (1000)
+  });
+
+  it('rounds an odd price over 90 minutes to the nearest unit', () => {
+    expect(slotPrice({ ...base, hourlyPrice: 1001, slotDurationMinutes: 90 }, 8)).toBe(1502);
+  });
+
+  it('flags a slot as peak when any half hour is peak', () => {
+    const ninety = { ...peak, slotDurationMinutes: 90, peakRanges: [{ fromHour: 18, toHour: 22 }] };
+    expect(isPeakSlot(ninety, 16, 30)).toBe(false);
+    expect(isPeakSlot(ninety, 17, 30)).toBe(true);
+    expect(isPeakSlot(peak, 16)).toBe(false);
+    expect(isPeakSlot({ ...peak, slotDurationMinutes: 120 }, 16)).toBe(true);
   });
 });
 

@@ -2,7 +2,7 @@ import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import type { Ground, Prisma } from '../generated/prisma/client.js';
 import { peakRangesOf } from '../grounds/ground.dto.js';
-import { isOpenOn, slotStartHours } from '../grounds/ground-schedule.js';
+import { isOpenOn, slotStarts } from '../grounds/ground-schedule.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from './slot-settings.service.js';
 import {
@@ -70,7 +70,7 @@ export class SlotGeneratorService {
       if (!dryRun) await this.prisma.slot.createMany({ data: plan.create, skipDuplicates: true });
       result.generated += plan.create.length;
       result.skipped += plan.skipped;
-      result.slotsPerDay += slotStartHours(ground).length;
+      result.slotsPerDay += slotStarts(ground).length;
     }
     return result;
   }
@@ -157,7 +157,7 @@ export class SlotGeneratorService {
     if (dates.length === 0) return { create: [], skipped: 0 };
     const stored = await db.slot.findMany({
       where: { groundId: ground.id, ...dateWhere(dates[0], dates.at(-1)) },
-      select: { date: true, startHour: true, durationMinutes: true },
+      select: { date: true, startHour: true, startMinute: true, durationMinutes: true },
     });
     const closures = await db.closure.findMany({ where: activeClosuresWhere(ground.id, dates[0]!, dates.at(-1)!) });
     const byDate = new Map<IsoDate, SlotSpan[]>();
