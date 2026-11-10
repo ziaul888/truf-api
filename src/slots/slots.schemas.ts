@@ -128,6 +128,11 @@ export const SlotSettingsSchema = z.object({
   serviceFee: z.number().int('Must be a whole number of the smallest unit').min(0).max(1_000_000),
   /** Portal customers may choose "pay cash at the venue". */
   portalCashEnabled: z.boolean('portalCashEnabled must be true or false'),
+  /** Card on the portal (also needs the Stripe keys). */
+  portalCardEnabled: z.boolean('portalCardEnabled must be true or false'),
+  /** bKash / Nagad on the portal (also needs that number): off keeps the number. */
+  portalBkashEnabled: z.boolean('portalBkashEnabled must be true or false'),
+  portalNagadEnabled: z.boolean('portalNagadEnabled must be true or false'),
   /** The venue's bKash / Nagad number for portal payments; null or "" = not offered. */
   bkashNumber: walletNumber,
   nagadNumber: walletNumber,

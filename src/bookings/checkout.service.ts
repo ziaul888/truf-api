@@ -20,6 +20,7 @@ import {
 } from './booking-rules.js';
 import type { CheckoutInput } from './bookings.schemas.js';
 import { assertCanBookUnpaid } from './checkout-limits.js';
+import { portalCardOn, portalWalletNumber } from './portal-methods.js';
 
 export interface CheckoutResult {
   bookingId: string;
@@ -59,7 +60,7 @@ const emailRequired = () =>
  *   in the staff review queue. Off when the `portalCashEnabled` setting is.
  * - bKash / Nagad: the customer has sent the total to the venue's number and gives the TrxID.
  *   Books the slot like cash, with a pending payment that staff verify in their own app. Off
- *   while the admin hasn't set that number.
+ *   while the admin hasn't set that number or has switched it off (`portal-methods.ts`, as card).
  * - Cash, bKash and Nagad need a signed-in customer and are capped per phone (`checkout-limits.ts`).
  */
 @Injectable()
@@ -76,10 +77,10 @@ export class CheckoutService {
     const settings = await this.settings.get();
     const { portalCashEnabled, serviceFee, holdMinutes } = settings;
     const wallets = (['bkash', 'nagad'] as const).flatMap((method) => {
-      const number = walletNumberOf(settings, method);
+      const number = portalWalletNumber(settings, method);
       return number ? [{ method, number }] : [];
     });
-    return { cardEnabled: cardPaymentsEnabled(), cashEnabled: portalCashEnabled, wallets, serviceFee, currency: env.CURRENCY, holdMinutes };
+    return { cardEnabled: portalCardOn(settings), cashEnabled: portalCashEnabled, wallets, serviceFee, currency: env.CURRENCY, holdMinutes };
   }
 
   /**
@@ -125,9 +126,12 @@ export class CheckoutService {
     }
   }
 
-  /** "Complete payment" on a pending booking: the open Stripe link while the hold lasts. */
+  /**
+   * "Complete payment" on a pending booking: the open Stripe link while the hold lasts. Needs only the
+   * Stripe keys: a checkout already under way can finish after the admin switches card off.
+   */
   async resume(bookingId: string, token: string | undefined): Promise<CheckoutResult> {
-    assertCardAvailable();
+    if (!cardPaymentsEnabled()) throw cardNotAvailable();
     if (!isValidBookingToken(bookingId, token)) throw bookingNotFound();
     const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
     if (!booking) throw bookingNotFound();
@@ -143,7 +147,7 @@ export class CheckoutService {
    * (pay-at-venue, unpaid staff bookings, or the rest after an advance). The webhook records it.
    */
   async payDue(bookingId: string, token: string | undefined): Promise<DuePaymentResult> {
-    assertCardAvailable();
+    if (!portalCardOn(await this.settings.get())) throw cardNotAvailable();
     if (!isValidBookingToken(bookingId, token)) throw bookingNotFound();
     const booking = await this.prisma.booking.findFirst({ where: { id: bookingId, deletedAt: null }, include: BOOKING_INCLUDE });
     if (!booking) throw bookingNotFound();
@@ -193,19 +197,15 @@ export class CheckoutService {
   }
 }
 
-const walletNumberOf = (settings: SlotSettings, method: WalletMethod) => (method === 'bkash' ? settings.bkashNumber : settings.nagadNumber);
+const cardNotAvailable = () => new AppError('Card payment is not available right now', 400, 'CARD_NOT_AVAILABLE');
 
-function assertCardAvailable() {
-  if (!cardPaymentsEnabled()) throw new AppError('Card payment is not available right now', 400, 'CARD_NOT_AVAILABLE');
-}
-
-/** Each payment method only while it's switched on (card: Stripe keys; cash: setting; wallets: number set). */
+/** Each payment method only while the portal offers it (`portal-methods.ts`). */
 function assertMethodAvailable(method: CheckoutInput['paymentMethod'], settings: SlotSettings) {
-  if (method === 'card') assertCardAvailable();
+  if (method === 'card' && !portalCardOn(settings)) throw cardNotAvailable();
   if (method === 'cash' && !settings.portalCashEnabled) {
     throw new AppError('Paying at the venue is not available right now. Please pay by card', 400, 'CASH_NOT_AVAILABLE');
   }
-  if (isWalletMethod(method) && !walletNumberOf(settings, method)) {
+  if (isWalletMethod(method) && !portalWalletNumber(settings, method)) {
     throw new AppError(`${methodName(method)} payment is not available right now`, 400, 'WALLET_NOT_AVAILABLE');
   }
 }

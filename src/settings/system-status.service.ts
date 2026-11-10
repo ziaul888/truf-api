@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import { Injectable } from '@nestjs/common';
 import { lastJobRun, type JobName, type JobRun } from '../common/job-runs.js';
 import { env } from '../config/env.js';
-import { cardPaymentsEnabled } from '../payments/stripe.service.js';
+import { portalCardOn, portalWalletNumber } from '../bookings/portal-methods.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { SystemStateService, type WebhookState } from './system-state.service.js';
@@ -38,7 +38,7 @@ export class SystemStatusService {
 
   async payments(): Promise<PaymentsStatus> {
     const key = env.STRIPE_SECRET_KEY;
-    const [webhook, { portalCashEnabled, bkashNumber, nagadNumber }] = await Promise.all([
+    const [webhook, settings] = await Promise.all([
       this.state.get<WebhookState>('stripe_webhook', { lastEventAt: null, lastEventOk: null }),
       this.slots.get(),
     ]);
@@ -49,8 +49,11 @@ export class SystemStatusService {
         webhook: { configured: Boolean(env.STRIPE_WEBHOOK_SECRET), ...webhook },
         currency: env.CURRENCY,
       },
-      methods: { card: cardPaymentsEnabled(), cash: true, bankTransfer: true, bkash: Boolean(bkashNumber), nagad: Boolean(nagadNumber) },
-      portalCashEnabled,
+      methods: {
+        card: portalCardOn(settings), cash: true, bankTransfer: true,
+        bkash: Boolean(portalWalletNumber(settings, 'bkash')), nagad: Boolean(portalWalletNumber(settings, 'nagad')),
+      },
+      portalCashEnabled: settings.portalCashEnabled,
     };
   }
 

@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Paginated } from '../common/schemas.js';
 import type { BookingStatus, Prisma } from '../generated/prisma/client.js';
-import { cardPaymentsEnabled, StripeService } from '../payments/stripe.service.js';
+import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { upcomingWhere } from '../slots/slot-rules.js';
@@ -16,6 +16,7 @@ import {
   type BookingDetailDto, type BookingDto, type PublicBookingDto,
 } from './booking.dto.js';
 import type { ListBookingsQuery, MyBookingsQuery } from './bookings.schemas.js';
+import { portalCardOn } from './portal-methods.js';
 
 /** A signed-in customer's booking, with its signed link for view / cancel / pay. */
 export type MyBookingDto = PublicBookingDto & { confirmationUrl: string };
@@ -84,7 +85,7 @@ export class BookingQueriesService {
       ...(q.scope === 'upcoming' ? { ...upcoming, NOT: ABANDONED_CHECKOUT } : { NOT: [ABANDONED_CHECKOUT, upcoming] }),
     };
     const dir = q.scope === 'upcoming' ? 'asc' : 'desc';
-    const [rows, total, { cancellationCutoffHours }] = await Promise.all([
+    const [rows, total, settings] = await Promise.all([
       this.prisma.booking.findMany({
         where, include: BOOKING_INCLUDE, orderBy: [{ slot: { date: dir } }, { slot: { startHour: dir } }],
         skip: (q.page - 1) * q.limit, take: q.limit,
@@ -92,9 +93,10 @@ export class BookingQueriesService {
       this.prisma.booking.count({ where }),
       this.settings.get(),
     ]);
+    const { cancellationCutoffHours } = settings;
     const data = rows.map((b) => ({
       ...toPublicBookingDto(
-        b, customerCanCancel(b, now, cancellationCutoffHours), cardPaymentsEnabled() && customerCanPay(b),
+        b, customerCanCancel(b, now, cancellationCutoffHours), portalCardOn(settings) && customerCanPay(b),
         customerCanRequestCancel(b, now, cancellationCutoffHours),
       ),
       confirmationUrl: confirmationUrl(b.id),
@@ -107,10 +109,11 @@ export class BookingQueriesService {
     if (!isValidBookingToken(id, token)) throw bookingNotFound();
     const booking = await this.prisma.booking.findFirst({ where: { id, deletedAt: null }, include: BOOKING_INCLUDE });
     if (!booking) throw bookingNotFound();
-    const { cancellationCutoffHours } = await this.settings.get();
+    const settings = await this.settings.get();
+    const { cancellationCutoffHours } = settings;
     const now = venueNow();
     return toPublicBookingDto(
-      booking, customerCanCancel(booking, now, cancellationCutoffHours), cardPaymentsEnabled() && customerCanPay(booking),
+      booking, customerCanCancel(booking, now, cancellationCutoffHours), portalCardOn(settings) && customerCanPay(booking),
       customerCanRequestCancel(booking, now, cancellationCutoffHours),
     );
   }

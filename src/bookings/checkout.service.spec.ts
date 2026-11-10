@@ -21,7 +21,7 @@ const SIGNED_IN = input.customerPhone;
 
 function setup({
   slot = slotRow() as object | null, ground = { id: 'g-1', name: 'Arena', availableDays: 'everyday', customDays: [] } as object | null,
-  held = 1, cash = true, existing = null as object | null, bkashNumber = null as string | null, openUnpaid = 0,
+  held = 1, cash = true, existing = null as object | null, bkashNumber = null as string | null, openUnpaid = 0, switches = {},
 } = {}) {
   const tx = {
     slot: { updateMany: vi.fn(async (_args: { data: object }) => ({ count: held })) },
@@ -44,7 +44,7 @@ function setup({
     openSessionUrl: vi.fn(async () => 'https://stripe.test/open'),
   };
   const cancellation = { cancel: vi.fn(async () => undefined) };
-  const settings = { get: vi.fn(async () => ({ ...DEFAULT_SLOT_SETTINGS, portalCashEnabled: cash, bkashNumber })) };
+  const settings = { get: vi.fn(async () => ({ ...DEFAULT_SLOT_SETTINGS, portalCashEnabled: cash, bkashNumber, ...switches })) };
   const notifier = { received: vi.fn(async () => true), newBookingToAdmins: vi.fn(async () => undefined) };
   const service = new CheckoutService(
     prisma as unknown as PrismaService, stripe as unknown as StripeService,
@@ -187,8 +187,38 @@ describe('CheckoutService', () => {
     await expect(setup({ cash: false }).service.options()).resolves.toEqual({ cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15 });
   });
 
+  describe('card switched off by the admin (Stripe keys set)', () => {
+    const off = { switches: { portalCardEnabled: false } };
+
+    it('offers no card and refuses a card checkout before touching the slot', async () => {
+      const { service, tx, stripe } = setup(off);
+      await expect(service.options()).resolves.toMatchObject({ cardEnabled: false, cashEnabled: true });
+      await expect(service.start(input)).rejects.toMatchObject({ status: 400, code: 'CARD_NOT_AVAILABLE' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+      expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('refuses "Pay now", but a checkout already under way can still finish', async () => {
+      const { service } = setup({ ...off, existing: { id: 'b-1', status: 'pending', stripeCheckoutSessionId: 'cs_1' } });
+      await expect(service.payDue('b-1', bookingToken('b-1'))).rejects.toMatchObject({ status: 400, code: 'CARD_NOT_AVAILABLE' });
+      await expect(service.resume('b-1', bookingToken('b-1'))).resolves.toMatchObject({ checkoutUrl: 'https://stripe.test/open' });
+    });
+  });
+
   describe('bKash / Nagad', () => {
     const bkash = { ...input, paymentMethod: 'bkash' as const, reference: 'ABC123XYZ', payerNumber: '+8801811000000' };
+
+    it('switched off: not listed and refused before touching the slot, though the number is kept', async () => {
+      const { service, tx } = setup({ bkashNumber: '+8801700000000', switches: { portalBkashEnabled: false } });
+      await expect(service.options()).resolves.toMatchObject({ wallets: [] });
+      await expect(service.start(bkash, SIGNED_IN)).rejects.toMatchObject({ status: 400, code: 'WALLET_NOT_AVAILABLE' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('Nagad off leaves bKash on', async () => {
+      const { service } = setup({ bkashNumber: '+8801700000000', switches: { nagadNumber: '+8801900000000', portalNagadEnabled: false } });
+      await expect(service.options()).resolves.toMatchObject({ wallets: [{ method: 'bkash', number: '+8801700000000' }] });
+    });
 
     it('lists only the wallets with a number set', async () => {
       await expect(setup({ bkashNumber: '+8801700000000' }).service.options())
