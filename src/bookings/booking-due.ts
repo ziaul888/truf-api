@@ -13,6 +13,8 @@ export interface OwingBooking {
   dueDate: IsoDate | null;
   date: IsoDate;
   startHour: number;
+  /** Part of a repeat booking: paid per month whenever the customer pays, so never overdue without a due date. */
+  inSeries: boolean;
 }
 
 /**
@@ -27,20 +29,21 @@ export async function loadOwing(prisma: PrismaService): Promise<OwingBooking[]> 
       NOT: [CARD_CHECKOUT_IN_PROGRESS, WALLET_UNDER_REVIEW],
     },
     select: {
-      id: true, bookingNumber: true, contactName: true, status: true, total: true, dueDate: true, slot: { select: { date: true, startHour: true } },
+      id: true, bookingNumber: true, contactName: true, status: true, total: true, dueDate: true, seriesId: true, slot: { select: { date: true, startHour: true } },
       payments: { where: { deletedAt: null }, select: { amount: true, status: true } },
     },
   });
   return rows
     .map((b) => ({
       id: b.id, bookingNumber: b.bookingNumber, customerName: b.contactName, due: dueOf(b, b.payments), dueDate: b.dueDate ? fromDbDate(b.dueDate) : null,
-      date: fromDbDate(b.slot.date), startHour: b.slot.startHour,
+      date: fromDbDate(b.slot.date), startHour: b.slot.startHour, inSeries: b.seriesId !== null,
     }))
     .filter((b) => b.due > 0);
 }
 
-/** Past its due date; with no due date, once the slot has started. */
-export const isOverdue = (b: OwingBooking, now: VenueNow) => (b.dueDate ? b.dueDate < now.date : hasStarted(now, b.date, b.startHour));
+/** Past its due date; with no due date, once the slot has started (except repeat bookings, which have no deadline). */
+export const isOverdue = (b: OwingBooking, now: VenueNow) =>
+  (b.dueDate ? b.dueDate < now.date : !b.inSeries && hasStarted(now, b.date, b.startHour));
 
 export const isDueToday = (b: OwingBooking, now: VenueNow) => b.dueDate === now.date;
 

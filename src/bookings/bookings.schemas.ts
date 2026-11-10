@@ -20,9 +20,9 @@ export const TrxIdSchema = z.string('Enter the transaction ID (TrxID)').trim().t
   .regex(/^[A-Z0-9]{6,20}$/, 'Enter the TrxID: 6 to 20 letters and digits');
 
 /** The optional TrxID staff may record, only for bKash and Nagad. */
-const trxIdOnlyForWallets = (p: { method?: string; reference?: string }) =>
+export const trxIdOnlyForWallets = (p: { method?: string; reference?: string }) =>
   p.reference === undefined || (p.method !== undefined && isWalletMethod(p.method));
-const TRX_ID_ONLY_FOR_WALLETS = { path: ['reference'], message: 'A TrxID is only recorded for bKash and Nagad' };
+export const TRX_ID_ONLY_FOR_WALLETS = { path: ['reference'], message: 'A TrxID is only recorded for bKash and Nagad' };
 
 /** The portal form posts the hour as `hour`; `startHour` is accepted too. */
 export const CheckoutSchema = z.preprocess(

@@ -58,6 +58,8 @@ export interface BookingDto {
   walletPayment: WalletPaymentDto | null;
   /** The customer asked to cancel while their bKash / Nagad payment was under review ("Cancel requested"). */
   cancelRequestedAt: Date | null;
+  /** Made by a repeat booking (`/admin/booking-series/:id`); null otherwise. */
+  seriesId: string | null;
   ground: { id: string; name: string; sport: Sport };
   slot: BookingSlotDto;
   customer: { id: string; name: string; phone: string | null; email: string | null };
@@ -154,7 +156,7 @@ const walletPaymentOf = (b: BookingRow): WalletPaymentDto | null => {
 
 export const toBookingDto = (b: BookingRow): BookingDto => ({
   id: b.id, bookingNumber: b.bookingNumber, source: b.source, status: b.status, paymentStatus: b.paymentStatus,
-  payAtVenue: b.payAtVenue, walletPayment: walletPaymentOf(b), cancelRequestedAt: b.cancelRequestedAt,
+  payAtVenue: b.payAtVenue, walletPayment: walletPaymentOf(b), cancelRequestedAt: b.cancelRequestedAt, seriesId: b.seriesId,
   ground: { id: b.ground.id, name: b.ground.name, sport: b.ground.sport },
   slot: slotOf(b.slot),
   customer: b.customer,

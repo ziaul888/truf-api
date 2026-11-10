@@ -1,4 +1,5 @@
 import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import { BookingSeriesBooker } from '../booking-series/booking-series-booker.js';
 import { trackJob } from '../common/job-runs.js';
 import { env } from '../config/env.js';
 import { SystemStateService } from '../settings/system-state.service.js';
@@ -10,7 +11,8 @@ const WEEKEND_CLEANUP_KEY = 'weekend_fri_sat_cleanup';
 
 /**
  * Keeps slots created up to the booking window: once at startup, then every hour (cheap — it
- * only inserts what's missing). Respects the `autoGenerate` setting. Off under tests.
+ * only inserts what's missing). Respects the `autoGenerate` setting. Then ongoing repeat bookings
+ * book the dates that now have slots. Off under tests.
  */
 @Injectable()
 export class SlotAutoGenerateJob implements OnApplicationBootstrap, OnModuleDestroy {
@@ -20,6 +22,7 @@ export class SlotAutoGenerateJob implements OnApplicationBootstrap, OnModuleDest
   constructor(
     private readonly generator: SlotGeneratorService,
     private readonly state: SystemStateService,
+    private readonly series: BookingSeriesBooker,
   ) {}
 
   onApplicationBootstrap() {
@@ -40,6 +43,17 @@ export class SlotAutoGenerateJob implements OnApplicationBootstrap, OnModuleDest
       if (generated > 0) this.logger.log(`Generated ${generated} slots`);
     } catch (err) {
       this.logger.error('Slot auto-generation failed', err instanceof Error ? err.stack : String(err));
+    }
+    await this.extendSeries();
+  }
+
+  /** Runs even when generation failed or is off: slots may exist from before. Never throws. */
+  private async extendSeries() {
+    try {
+      const booked = await this.series.extendOngoing();
+      if (booked > 0) this.logger.log(`Repeat bookings: booked ${booked} more dates`);
+    } catch (err) {
+      this.logger.error('Extending repeat bookings failed', err instanceof Error ? err.stack : String(err));
     }
   }
 
