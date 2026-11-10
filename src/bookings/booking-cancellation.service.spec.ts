@@ -238,8 +238,14 @@ describe('BookingCancellationService', () => {
     ['a no-show, even before its slot ends', bookingRow({ status: 'no_show' }), {}, 409, 'BOOKING_COMPLETED'],
     ['a booking whose slot has ended', bookingRow({ slot: { id: 's-1', date: day('2026-10-28'), startHour: 8, durationMinutes: 60 } }), {}, 409, 'BOOKING_COMPLETED'],
     ['a customer inside the cutoff', bookingRow({ slot: { id: 's-1', date: day('2026-10-28'), startHour: 11, durationMinutes: 60 } }), { byCustomer: true }, 400, 'CANCELLATION_WINDOW_PASSED'],
+    ['a customer inside the cutoff of a 12:00 slot (2 hours at 10:00)', bookingRow({ slot: { id: 's-1', date: day('2026-10-28'), startHour: 12, startMinute: 0, durationMinutes: 90 } }), { byCustomer: true }, 400, 'CANCELLATION_WINDOW_PASSED'],
     ['a customer cancelling a staff booking', bookingRow({ source: 'staff' }), { byCustomer: true }, 400, 'CANCELLATION_WINDOW_PASSED'],
   ])('refuses %s', async (_label, booking, extra, status, code) => {
     await expect(setup(booking).service.cancel('b-1', { ...opts, ...extra })).rejects.toMatchObject({ status, code });
+  });
+
+  it('lets a customer cancel a 12:30 slot at 10:00: the cutoff counts from the half hour', async () => {
+    const booking = bookingRow({ slot: { id: 's-1', date: day('2026-10-28'), startHour: 12, startMinute: 30, durationMinutes: 90 } });
+    await expect(setup(booking).service.cancel('b-1', { ...opts, byCustomer: true })).resolves.not.toThrow();
   });
 });

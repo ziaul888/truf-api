@@ -1,7 +1,7 @@
 import { isDueToday, isOverdue, matchesDue, type OwingBooking } from './booking-due.js';
 
 const now = { date: '2026-10-31', minutes: 17 * 60 };
-const owing = (overrides: Partial<OwingBooking>): OwingBooking => ({ id: 'b', bookingNumber: 'CT-1', customerName: 'A', due: 500, dueDate: null, date: '2026-11-02', startHour: 18, inSeries: false, ...overrides });
+const owing = (overrides: Partial<OwingBooking>): OwingBooking => ({ id: 'b', bookingNumber: 'CT-1', customerName: 'A', due: 500, dueDate: null, date: '2026-11-02', startHour: 18, startMinute: 0, inSeries: false, ...overrides });
 
 describe('money due', () => {
   it('is overdue after its due date', () => {

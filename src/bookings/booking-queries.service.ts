@@ -39,7 +39,7 @@ export class BookingQueriesService {
     const base: Prisma.BookingWhereInput = { ...listWhere(q), ...(q.due && { id: { in: await this.owingIds(q.due) } }) };
     const where: Prisma.BookingWhereInput = { ...base, ...(q.status && { status: q.status }) };
     const orderBy: Prisma.BookingOrderByWithRelationInput[] = q.sort === 'slot'
-      ? [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }]
+      ? [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }]
       : [{ createdAt: 'desc' }];
     const [rows, total, groups] = await this.prisma.$transaction([
       this.prisma.booking.findMany({ where, include: BOOKING_INCLUDE, orderBy, skip: (q.page - 1) * q.limit, take: q.limit }),
@@ -70,7 +70,7 @@ export class BookingQueriesService {
     const rows = await this.prisma.booking.findMany({
       where: { deletedAt: null, status: { in: ['pending', 'confirmed'] }, slot: upcomingWhere(venueNow()) },
       include: BOOKING_INCLUDE,
-      orderBy: [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }],
+      orderBy: [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }],
       take: limit,
     });
     return rows.map(toBookingDto);
@@ -87,7 +87,7 @@ export class BookingQueriesService {
     const dir = q.scope === 'upcoming' ? 'asc' : 'desc';
     const [rows, total, settings] = await Promise.all([
       this.prisma.booking.findMany({
-        where, include: BOOKING_INCLUDE, orderBy: [{ slot: { date: dir } }, { slot: { startHour: dir } }],
+        where, include: BOOKING_INCLUDE, orderBy: [{ slot: { date: dir } }, { slot: { startHour: dir } }, { slot: { startMinute: dir } }],
         skip: (q.page - 1) * q.limit, take: q.limit,
       }),
       this.prisma.booking.count({ where }),

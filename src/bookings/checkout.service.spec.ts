@@ -11,9 +11,9 @@ import { CheckoutService } from './checkout.service.js';
 // 04:00 UTC = 10:00 in Dhaka, Wed 28 Oct 2026.
 const NOW = new Date('2026-10-28T04:00:00Z');
 
-const slotRow = (overrides: object = {}) => ({ id: 's-1', groundId: 'g-1', startHour: 18, price: 1500, status: 'available', ...overrides });
+const slotRow = (overrides: object = {}) => ({ id: 's-1', groundId: 'g-1', startHour: 18, startMinute: 0, price: 1500, status: 'available', ...overrides });
 const input = {
-  groundId: 'g-1', date: '2026-10-29', startHour: 18, customerName: 'Rakib', customerEmail: 'r@x.test', customerPhone: '+8801711000000',
+  groundId: 'g-1', date: '2026-10-29', startHour: 18, startMinute: 0 as 0 | 30, customerName: 'Rakib', customerEmail: 'r@x.test', customerPhone: '+8801711000000',
   paymentMethod: 'card' as 'card' | 'cash' | 'bkash' | 'nagad',
 };
 /** Cash, bKash and Nagad need a signed-in customer: their verified phone. */
@@ -111,6 +111,18 @@ describe('CheckoutService', () => {
   ])('refuses %s', async (_label, options, code) => {
     const date = 'slot' in options && options.slot && (options.slot as { startHour: number }).startHour < 18 ? '2026-10-28' : input.date;
     await expect(setup(options as never).service.start({ ...input, date })).rejects.toMatchObject({ code });
+  });
+
+  it('checks the start and the cutoff to the minute for a :30 slot', async () => {
+    // 10:00 now, cutoff 2 hours. Read as whole hours, 10:30 would have started and 12:30 would be inside the cutoff.
+    const today = { ...input, date: '2026-10-28', startMinute: 30 as const };
+    await expect(setup({ slot: slotRow({ startHour: 9, startMinute: 30 }) }).service.start({ ...today, startHour: 9 }))
+      .rejects.toMatchObject({ code: 'SLOT_IN_PAST' });
+    await expect(setup({ slot: slotRow({ startHour: 10, startMinute: 30 }) }).service.start({ ...today, startHour: 10 }))
+      .rejects.toMatchObject({ code: 'OUTSIDE_BOOKING_WINDOW' });
+    const { service, stripe } = setup({ slot: slotRow({ startHour: 12, startMinute: 30, durationMinutes: 90 }) });
+    await expect(service.start({ ...today, startHour: 12 })).resolves.toMatchObject({ paymentMethod: 'card' });
+    expect(stripe.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ description: 'Arena, 2026-10-28 12:30' }));
   });
 
   it.each(['card', 'cash'] as const)('takes nothing for a %s checkout on a closed day', async (paymentMethod) => {

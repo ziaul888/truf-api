@@ -1,5 +1,6 @@
 import type { BookingSeriesStatus, BookingStatus, Prisma } from '../generated/prisma/client.js';
 import { dueOf, paidOf } from '../bookings/booking-rules.js';
+import { slotTimes } from '../slots/slot-time.js';
 import { fromDbDate, type IsoDate } from '../slots/venue-time.js';
 import { monthOf, type SkipReason } from './booking-series-rules.js';
 
@@ -50,7 +51,14 @@ export interface SeriesDto {
   ground: { id: string; name: string };
   customer: { id: string; name: string; phone: string };
   startHour: number;
+  /** 0 or 30. */
+  startMinute: number;
+  /** "HH:MM" */
+  startTime: string;
+  /** The end with the ground's current slot length: hour part (19:30 → 19), minute, "HH:MM". */
   endHour: number;
+  endMinute: number;
+  endTime: string;
   weekdays: string[];
   fromDate: IsoDate;
   /** Null = ongoing. */
@@ -106,7 +114,8 @@ export function toSeriesDto(s: SeriesRow): SeriesDto {
     id: s.id, status: s.status,
     ground: { id: s.ground.id, name: s.ground.name },
     customer: { id: s.customer.id, name: s.customer.name, phone: s.customer.phone ?? s.contactPhone },
-    startHour: s.startHour, endHour: s.startHour + s.ground.slotDurationMinutes / 60, weekdays: s.weekdays,
+    ...slotTimes({ startHour: s.startHour, startMinute: s.startMinute, durationMinutes: s.ground.slotDurationMinutes }),
+    weekdays: s.weekdays,
     fromDate: fromDbDate(s.fromDate), untilDate: s.untilDate ? fromDbDate(s.untilDate) : null,
     bookedThrough: s.bookedThrough ? fromDbDate(s.bookedThrough) : null,
     notes: s.notes, createdAt: s.createdAt, stoppedAt: s.stoppedAt,

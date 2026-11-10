@@ -11,6 +11,7 @@ import {
   assertRange, eventRows, groundClosed, groundNotFound, slotInPast, slotNotFound, UNBLOCK_DATA,
 } from './slot-rules.js';
 import type { BlockSlotInput, BulkBlockInput, BulkSlotsInput, BulkUnblockInput } from './slots.schemas.js';
+import { slotHour } from './slot-time.js';
 import { datesBetween, fromDbDate, hasStarted, toDbDate, venueNow, weekdayOf, type IsoDate, type VenueNow } from './venue-time.js';
 
 /** A recurring block may run at most a year. */
@@ -118,11 +119,12 @@ export class SlotBlocksService {
       const slots = await tx.slot.findMany({
         where: {
           groundId: ground.id, date: { in: dates.map(toDbDate) },
-          ...(input.type !== 'fullDay' && input.startHour !== undefined && { startHour: input.startHour }),
+          // Minute only with an hour: a whole-day recurring block leaves both out.
+          ...(input.type !== 'fullDay' && input.startHour !== undefined && { startHour: input.startHour, startMinute: input.startMinute }),
         },
       });
       if (input.type === 'single') return this.blockSingle(tx, slots[0], now, actorId, input);
-      const free = slots.filter((s) => s.status === 'available' && !hasStarted(now, fromDbDate(s.date), s.startHour));
+      const free = slots.filter((s) => s.status === 'available' && !hasStarted(now, fromDbDate(s.date), slotHour(s)));
       const blocked = await this.apply(tx, free, 'block', actorId, input);
       return { blocked, skippedBooked: slots.filter((s) => s.status === 'booked').length, cancelledBookings: 0 };
     }, { timeout: 20_000 });
@@ -133,7 +135,7 @@ export class SlotBlocksService {
     const now = venueNow();
     return this.prisma.$transaction(async (tx) => {
       const slots = await tx.slot.findMany({ where: { ...(groundId && { groundId }), date: toDbDate(date), status: 'blocked' } });
-      const upcoming = slots.filter((s) => !hasStarted(now, date, s.startHour));
+      const upcoming = slots.filter((s) => !hasStarted(now, date, slotHour(s)));
       return { unblocked: await this.apply(tx, upcoming, 'unblock', actorId) };
     });
   }
@@ -142,7 +144,7 @@ export class SlotBlocksService {
     tx: Prisma.TransactionClient, slot: Slot | undefined, now: VenueNow, actorId: string, input: BlockFields,
   ): Promise<BulkBlockResult> {
     if (!slot) throw slotNotFound();
-    if (hasStarted(now, fromDbDate(slot.date), slot.startHour)) throw slotInPast();
+    if (hasStarted(now, fromDbDate(slot.date), slotHour(slot))) throw slotInPast();
     if (slot.status === 'booked') throw hasBooking();
     if (slot.status === 'held') throw slotHeld();
     if (slot.status === 'blocked') throw new AppError('This slot is already blocked', 409, 'SLOT_ALREADY_BLOCKED');
@@ -167,7 +169,7 @@ export class SlotBlocksService {
   private async upcomingSlot(tx: Prisma.TransactionClient | PrismaService, id: string): Promise<Slot> {
     const slot = await tx.slot.findUnique({ where: { id } });
     if (!slot) throw slotNotFound();
-    if (hasStarted(venueNow(), fromDbDate(slot.date), slot.startHour)) throw slotInPast();
+    if (hasStarted(venueNow(), fromDbDate(slot.date), slotHour(slot))) throw slotInPast();
     return slot;
   }
 

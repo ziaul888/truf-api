@@ -83,7 +83,7 @@ describe('Booking a closed day (e2e)', () => {
     return ground.id;
   };
   const slotOn = (groundId: string, date: IsoDate) =>
-    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour: 9 } } });
+    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour_startMinute: { groundId, date: toDbDate(date), startHour: 9, startMinute: 0 } } });
   const closeOnSundays = (groundId: string) => prisma.ground.update({ where: { id: groundId }, data: { availableDays: 'weekends' } });
 
   const checkout = (groundId: string, date: IsoDate, phoneEnd: string) =>

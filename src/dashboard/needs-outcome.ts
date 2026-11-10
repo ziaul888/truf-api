@@ -1,7 +1,7 @@
 import { CARD_CHECKOUT_IN_PROGRESS, isWalletMethod, owedOf, paidOf } from '../bookings/booking-rules.js';
 import type { PaymentMethod, PaymentStatus } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { endHourOf } from '../slots/slot.dto.js';
+import { slotHour, slotTimes, type SlotTimes } from '../slots/slot-time.js';
 import { fromDbDate, hasEnded, toDbDate, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 
 /** The card lists this many; `count` has them all. */
@@ -12,7 +12,7 @@ export interface NeedsOutcomeBooking {
   bookingNumber: string;
   customerName: string;
   groundName: string;
-  slot: { date: IsoDate; startHour: number; endHour: number };
+  slot: { date: IsoDate } & SlotTimes;
   total: number;
   /** Received so far: what stays if staff mark it no-show. */
   paid: number;
@@ -40,19 +40,19 @@ export async function loadNeedsOutcome(prisma: PrismaService, now: VenueNow): Pr
     select: {
       id: true, bookingNumber: true, contactName: true, status: true, total: true, payAtVenue: true,
       ground: { select: { name: true } },
-      slot: { select: { date: true, startHour: true, durationMinutes: true } },
+      slot: { select: { date: true, startHour: true, startMinute: true, durationMinutes: true } },
       payments: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' }, select: { amount: true, status: true, method: true, payerNumber: true } },
     },
-    orderBy: [{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }],
+    orderBy: [{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }, { slot: { startMinute: 'desc' } }],
   });
-  const ended = rows.filter((b) => hasEnded(now, fromDbDate(b.slot.date), b.slot.startHour, b.slot.durationMinutes));
+  const ended = rows.filter((b) => hasEnded(now, fromDbDate(b.slot.date), slotHour(b.slot), b.slot.durationMinutes));
   return {
     count: ended.length,
     bookings: ended.slice(0, NEEDS_OUTCOME_LIMIT).map((b) => {
       const wallet = b.payments.findLast((p) => isWalletMethod(p.method) && p.payerNumber !== null);
       return {
         id: b.id, bookingNumber: b.bookingNumber, customerName: b.contactName, groundName: b.ground.name,
-        slot: { date: fromDbDate(b.slot.date), startHour: b.slot.startHour, endHour: endHourOf(b.slot) },
+        slot: { date: fromDbDate(b.slot.date), ...slotTimes(b.slot) },
         total: b.total, paid: paidOf(b.payments), due: owedOf(b, b.payments), payAtVenue: b.payAtVenue,
         walletPayment: wallet ? { method: wallet.method, status: wallet.status } : null,
       };

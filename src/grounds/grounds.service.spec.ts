@@ -268,7 +268,7 @@ describe('ground schemas', () => {
     ['too-long dimensions', { dimensions: 'x'.repeat(51) }, 'dimensions'],
     ['closing before opening', { openingHour: 22, closingHour: 6 }, 'closingHour'],
     ['a fractional price', { hourlyPrice: 15.5 }, 'hourlyPrice'],
-    ['a 90-minute slot', { slotDurationMinutes: 90 }, 'slotDurationMinutes'],
+    ['a 45-minute slot', { slotDurationMinutes: 45 }, 'slotDurationMinutes'],
     ['a peak range ending before it starts', { peakRanges: [{ fromHour: 20, toHour: 18 }] }, 'peakRanges.0.toHour'],
   ])('rejects %s', (_label, change, field) => {
     const result = CreateGroundSchema.safeParse({ ...valid, ...change });

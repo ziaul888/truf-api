@@ -173,7 +173,7 @@ describe('Grounds (e2e)', () => {
       expect(outside.body.code).toBe('INVALID_PEAK_PRICING');
       const shrink = await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ closingHour: 20 }).expect(400);
       expect(shrink.body.code).toBe('INVALID_PEAK_PRICING');
-      await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ slotDurationMinutes: 90 }).expect(400);
+      await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ slotDurationMinutes: 45 }).expect(400);
 
       await asAdmin.patch(`${ADMIN_GROUNDS}/${activeId}`).send({ peakPrice: null, peakRanges: [], slotDurationMinutes: 60 }).expect(200);
 

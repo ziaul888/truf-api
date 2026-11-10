@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { CreateStaffBookingSchema, OFFLINE_METHODS, TRX_ID_ONLY_FOR_WALLETS, TrxIdSchema, trxIdOnlyForWallets } from '../bookings/bookings.schemas.js';
 import { hour, oneOf, WEEKDAYS } from '../grounds/grounds.schemas.js';
-import { isoDate } from '../slots/slots.schemas.js';
+import { isoDate, startMinute } from '../slots/slots.schemas.js';
 import { daysBetween, venueNow } from '../slots/venue-time.js';
 
 /** A fixed series covers at most this many days, both ends included. */
@@ -14,6 +14,8 @@ const amount = z.number().int('Must be a whole number of the smallest unit').min
 const seriesFields = {
   groundId: z.uuid('Invalid ground id'),
   startHour: hour(0, 23, 'Start hour'),
+  /** 0 or 30 (90-minute slots start on the half hour); default 0. */
+  startMinute: startMinute.default(0),
   weekdays: z.array(oneOf(WEEKDAYS, 'Day')).min(1, 'Pick at least one day')
     .refine((list) => new Set(list).size === list.length, 'Days must not repeat'),
   fromDate: isoDate.refine(isTodayOrLater, TODAY_OR_LATER),

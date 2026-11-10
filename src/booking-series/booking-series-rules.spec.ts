@@ -2,7 +2,7 @@ import { allocate, monthOf, monthRange, seriesDates, skipReasonOf, type SlotAtHo
 
 const everyday = { availableDays: 'everyday' as const, customDays: [] };
 const now = { date: '2026-11-10', minutes: 12 * 60 };
-const slot = (over: Partial<SlotAtHour> = {}): SlotAtHour => ({ startHour: 21, durationMinutes: 60, status: 'available', closureId: null, ...over });
+const slot = (over: Partial<SlotAtHour> = {}): SlotAtHour => ({ startHour: 21, startMinute: 0, durationMinutes: 60, status: 'available', closureId: null, ...over });
 
 describe('booking series rules', () => {
   it('matches only the chosen weekdays in the range, both ends included', () => {

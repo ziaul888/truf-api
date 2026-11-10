@@ -1,4 +1,5 @@
 import type { BlockReason, BookingPaymentStatus, Prisma, SlotStatus } from '../generated/prisma/client.js';
+import { slotTimes, type SlotTimes } from './slot-time.js';
 import { fromDbDate, type IsoDate } from './venue-time.js';
 
 /** Joins every admin slot query needs. */
@@ -34,13 +35,11 @@ export interface SlotBookingDto {
 }
 
 /** What the dashboard sees. */
-export interface SlotDto {
+export interface SlotDto extends SlotTimes {
   id: string;
   groundId: string;
   groundName: string;
   date: IsoDate;
-  startHour: number;
-  endHour: number;
   durationMinutes: number;
   price: number;
   status: SlotStatus;
@@ -54,25 +53,20 @@ export interface SlotDto {
 }
 
 /** What customers see: no status reason, no booking or block details. */
-export interface PublicSlotDto {
+export interface PublicSlotDto extends SlotTimes {
   id: string;
   date: IsoDate;
-  startHour: number;
-  endHour: number;
   price: number;
   isPeak: boolean;
   available: boolean;
 }
-
-export const endHourOf = (slot: { startHour: number; durationMinutes: number }) => slot.startHour + slot.durationMinutes / 60;
 
 export const toSlotDto = (s: SlotRow): SlotDto => ({
   id: s.id,
   groundId: s.groundId,
   groundName: s.ground.name,
   date: fromDbDate(s.date),
-  startHour: s.startHour,
-  endHour: endHourOf(s),
+  ...slotTimes(s),
   durationMinutes: s.durationMinutes,
   price: s.price,
   status: s.status,

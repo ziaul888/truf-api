@@ -4,7 +4,8 @@ import type { BlockReason, Payment, Prisma } from '../generated/prisma/client.js
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
-import { fromDbDate, minutesUntil, venueNow } from '../slots/venue-time.js';
+import { slotHour } from '../slots/slot-time.js';
+import { fromDbDate, hasEnded, minutesUntil, venueNow } from '../slots/venue-time.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
   bookingChanged, bookingNotFound, isUnderReview, isWalletMethod, methodName, paymentStatusOf, paymentUnderReview,
@@ -137,15 +138,14 @@ export class BookingCancellationService {
     if (underReview && !opts.rejectWallet) {
       throw new AppError('This bKash / Nagad payment is not verified yet: verify it first to refund it, or reject it', 409, 'VERIFY_OR_REJECT');
     }
-    const slotEnd = b.slot.startHour + b.slot.durationMinutes / 60;
     // Staff may still reject an unverified bKash / Nagad payment after the slot has ended.
-    const ended = minutesUntil(venueNow(), fromDbDate(b.slot.date), slotEnd) <= 0;
+    const ended = hasEnded(venueNow(), fromDbDate(b.slot.date), slotHour(b.slot), b.slot.durationMinutes);
     if (b.status === 'completed' || (ended && !(underReview && opts.rejectWallet))) {
       throw new AppError('This booking has already taken place', 409, 'BOOKING_COMPLETED');
     }
     if (!opts.byCustomer) return;
     const { cancellationCutoffHours } = await this.settings.get();
-    const started = minutesUntil(venueNow(), fromDbDate(b.slot.date), b.slot.startHour);
+    const started = minutesUntil(venueNow(), fromDbDate(b.slot.date), slotHour(b.slot));
     if (b.source !== 'portal' || started <= cancellationCutoffHours * 60) {
       throw new AppError(
         `Bookings can't be cancelled online within ${cancellationCutoffHours} hours of the start. Please contact the venue`,

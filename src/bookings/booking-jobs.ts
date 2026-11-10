@@ -4,7 +4,8 @@ import { env } from '../config/env.js';
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SystemStateService } from '../settings/system-state.service.js';
-import { addDays, fromDbDate, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
+import { slotHour } from '../slots/slot-time.js';
+import { addDays, fromDbDate, hasEnded, toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { isDueToday, isOverdue, loadOwing } from './booking-due.js';
@@ -84,9 +85,9 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
     const now = venueNow();
     const candidates = await this.prisma.booking.findMany({
       where: { status: 'confirmed', deletedAt: null, slot: { date: { lte: toDbDate(now.date) } } },
-      include: { slot: { select: { date: true, startHour: true, durationMinutes: true } } },
+      include: { slot: { select: { date: true, startHour: true, startMinute: true, durationMinutes: true } } },
     });
-    const ended = candidates.filter((b) => minutesUntil(now, fromDbDate(b.slot.date), b.slot.startHour + b.slot.durationMinutes / 60) <= 0);
+    const ended = candidates.filter((b) => hasEnded(now, fromDbDate(b.slot.date), slotHour(b.slot), b.slot.durationMinutes));
     if (ended.length === 0) return 0;
     const ids = ended.map((b) => b.id);
     await this.prisma.$transaction([

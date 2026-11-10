@@ -1,6 +1,7 @@
 import { AppError } from '../common/app-error.js';
 import type { BlockReason, Closure, Prisma, Slot, SlotEventAction } from '../generated/prisma/client.js';
-import { isOpenOn, slotPrice, slotStartHours, type GroundDays, type GroundSchedule } from '../grounds/ground-schedule.js';
+import { isOpenOn, slotPrice, slotStarts, type GroundDays, type GroundSchedule } from '../grounds/ground-schedule.js';
+import { endMinutesOf, slotHour, startMinutesOf } from './slot-time.js';
 import { daysBetween, fromDbDate, hasStarted, toDbDate, weekdayOf, type IsoDate, type VenueNow } from './venue-time.js';
 
 export const slotNotFound = () => new AppError('Slot not found', 404, 'SLOT_NOT_FOUND');
@@ -30,13 +31,17 @@ export function assertRange(from: IsoDate, to: IsoDate, maxDays: number) {
 export const dateWhere = (from?: IsoDate, to?: IsoDate): Prisma.SlotWhereInput =>
   from && to ? { date: { gte: toDbDate(from), lte: toDbDate(to) } } : {};
 
-/** Slots that have not started yet, in venue time. */
-export const upcomingWhere = (now: VenueNow): Prisma.SlotWhereInput => ({
-  OR: [
-    { date: { gt: toDbDate(now.date) } },
-    { date: toDbDate(now.date), startHour: { gt: Math.floor(now.minutes / 60) } },
-  ],
-});
+/** Slots that have not started yet, in venue time (to the minute: at 16:10 the 16:30 slot is still upcoming). */
+export const upcomingWhere = (now: VenueNow): Prisma.SlotWhereInput => {
+  const hour = Math.floor(now.minutes / 60);
+  return {
+    OR: [
+      { date: { gt: toDbDate(now.date) } },
+      { date: toDbDate(now.date), startHour: { gt: hour } },
+      { date: toDbDate(now.date), startHour: hour, startMinute: { gt: now.minutes % 60 } },
+    ],
+  };
+};
 
 /** What generation needs to know about a ground. */
 export type GroundForSlots = GroundSchedule & GroundDays & { id: string };
@@ -44,6 +49,7 @@ export type GroundForSlots = GroundSchedule & GroundDays & { id: string };
 /** A stored slot's place in the day, for overlap checks. */
 export interface SlotSpan {
   startHour: number;
+  startMinute: number;
   durationMinutes: number;
 }
 
@@ -59,20 +65,21 @@ export interface DayPlan {
  */
 export function planDay(ground: GroundForSlots, date: IsoDate, existing: SlotSpan[], now: VenueNow): DayPlan {
   if (!isOpenOn(ground, weekdayOf(date))) return { create: [], skipped: 0 };
-  const hours = ground.slotDurationMinutes / 60;
   const plan: DayPlan = { create: [], skipped: 0 };
-  for (const startHour of slotStartHours(ground)) {
-    const overlaps = existing.some((e) => startHour < e.startHour + e.durationMinutes / 60 && e.startHour < startHour + hours);
-    if (overlaps || hasStarted(now, date, startHour)) {
+  for (const start of slotStarts(ground)) {
+    const span = { ...start, durationMinutes: ground.slotDurationMinutes };
+    const overlaps = existing.some((e) => startMinutesOf(span) < endMinutesOf(e) && startMinutesOf(e) < endMinutesOf(span));
+    if (overlaps || hasStarted(now, date, slotHour(span))) {
       plan.skipped++;
       continue;
     }
     plan.create.push({
       groundId: ground.id,
       date: toDbDate(date),
-      startHour,
+      startHour: start.startHour,
+      startMinute: start.startMinute,
       durationMinutes: ground.slotDurationMinutes,
-      price: slotPrice(ground, startHour),
+      price: slotPrice(ground, start.startHour, start.startMinute),
     });
   }
   return plan;

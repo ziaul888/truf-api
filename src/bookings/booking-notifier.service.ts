@@ -4,15 +4,17 @@ import { EmailService, type EmailMessage } from '../email/email.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SettingsStore } from '../settings/settings-store.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
+import { slotTimes } from '../slots/slot-time.js';
 import { fromDbDate } from '../slots/venue-time.js';
 import { confirmationUrl, methodName, pendingWalletPayment } from './booking-rules.js';
 import { BOOKING_INCLUDE, type BookingRow } from './booking.dto.js';
 
 const money = (amount: number) => `${(amount / 100).toFixed(2)} ${env.CURRENCY.toUpperCase()}`;
-const hour = (h: number) => `${String(h).padStart(2, '0')}:00`;
 const section = (title: string, lines: string[]) => (lines.length > 0 ? [`${title}:\n${lines.join('\n')}`] : []);
-const when = (b: BookingRow) =>
-  `${fromDbDate(b.slot.date)}, ${hour(b.slot.startHour)}–${hour(b.slot.startHour + b.slot.durationMinutes / 60)}`;
+const when = (b: BookingRow) => {
+  const { startTime, endTime } = slotTimes(b.slot);
+  return `${fromDbDate(b.slot.date)}, ${startTime}–${endTime}`;
+};
 
 export interface CancelledNotice {
   reason?: string | null;

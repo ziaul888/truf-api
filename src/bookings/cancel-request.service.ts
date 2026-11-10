@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
+import { slotHour } from '../slots/slot-time.js';
 import { fromDbDate, minutesUntil, venueNow } from '../slots/venue-time.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { bookingNotFound, isUnderReview, isValidBookingToken, methodName, pendingWalletPayment } from './booking-rules.js';
@@ -29,7 +30,7 @@ export class CancelRequestService {
     const b = await this.prisma.booking.findFirst({ where: { id, deletedAt: null }, include: BOOKING_INCLUDE });
     if (!b) throw bookingNotFound();
     const { cancellationCutoffHours } = await this.settings.get();
-    if (b.source !== 'portal' || minutesUntil(venueNow(), fromDbDate(b.slot.date), b.slot.startHour) <= cancellationCutoffHours * 60) {
+    if (b.source !== 'portal' || minutesUntil(venueNow(), fromDbDate(b.slot.date), slotHour(b.slot)) <= cancellationCutoffHours * 60) {
       throw new AppError(
         `Bookings can't be cancelled online within ${cancellationCutoffHours} hours of the start. Please contact the venue`,
         400, 'CANCELLATION_WINDOW_PASSED',

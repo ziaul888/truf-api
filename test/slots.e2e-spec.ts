@@ -88,7 +88,7 @@ describe('Slots (e2e)', () => {
   }
 
   const slotAt = (id: string, date: string, startHour: number) =>
-    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId: id, date: toDbDate(date), startHour } } });
+    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour_startMinute: { groundId: id, date: toDbDate(date), startHour, startMinute: 0 } } });
 
   it('requires sign-in', async () => {
     await request(app.getHttpServer()).get(SLOTS).expect(401);
@@ -161,7 +161,8 @@ describe('Slots (e2e)', () => {
       expect(res.body.data.map((s: { startHour: number; available: boolean }) => [s.startHour, s.available]))
         .toEqual([[8, true], [9, false], [10, true], [11, true]]);
       expect(res.body.data[3]).toEqual({
-        id: expect.any(String), date: d1, startHour: 11, endHour: 12, price: 1500, isPeak: true, available: true,
+        id: expect.any(String), date: d1, startHour: 11, startMinute: 0, endHour: 12, endMinute: 0, startTime: '11:00', endTime: '12:00',
+        price: 1500, isPeak: true, available: true,
       });
     });
 

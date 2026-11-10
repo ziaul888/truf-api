@@ -81,7 +81,7 @@ describe('Hold release (e2e)', () => {
   });
 
   const slotAt = (hour: number, on = date) =>
-    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId, date: toDbDate(on), startHour: hour } } });
+    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour_startMinute: { groundId, date: toDbDate(on), startHour: hour, startMinute: 0 } } });
   const booking = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id }, include: { payments: true } });
 
   /** Starts a card checkout, which holds the slot. */

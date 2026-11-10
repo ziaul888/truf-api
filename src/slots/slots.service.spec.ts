@@ -11,7 +11,7 @@ const NOW = new Date('2026-10-28T04:00:00Z');
 const day = (date: string) => new Date(`${date}T00:00:00Z`);
 
 const slot = (overrides: Partial<Slot>): Slot => ({
-  id: 's', groundId: 'g-1', date: day('2026-10-28'), startHour: 18, durationMinutes: 60, price: 1500,
+  id: 's', groundId: 'g-1', date: day('2026-10-28'), startHour: 18, startMinute: 0, durationMinutes: 60, price: 1500,
   status: 'available', blockReason: null, blockNote: null, blockedById: null, blockedAt: null, closureId: null,
   heldUntil: null, heldByBookingId: null, createdAt: NOW, updatedAt: NOW, ...overrides,
 });
@@ -56,7 +56,8 @@ describe('SlotsService — customer availability', () => {
       started: false, cutoff: false, free: true, peak: true, blocked: false, 'too-far': false,
     });
     expect(result.find((s) => s.id === 'peak')).toEqual({
-      id: 'peak', date: '2026-10-28', startHour: 18, endHour: 19, price: 1500, isPeak: true, available: true,
+      id: 'peak', date: '2026-10-28', startHour: 18, startMinute: 0, endHour: 19, endMinute: 0, startTime: '18:00', endTime: '19:00',
+      price: 1500, isPeak: true, available: true,
     });
     expect(result.find((s) => s.id === 'free')!.isPeak).toBe(false);
   });
@@ -64,7 +65,9 @@ describe('SlotsService — customer availability', () => {
   it('never reveals why a slot is unavailable', async () => {
     const [blocked] = await setup([slot({ status: 'blocked', blockReason: 'event', blockNote: 'VIP' })]).service
       .listPublic('g-1', { from: '2026-10-28', to: '2026-10-28' });
-    expect(Object.keys(blocked!).sort()).toEqual(['available', 'date', 'endHour', 'id', 'isPeak', 'price', 'startHour']);
+    expect(Object.keys(blocked!).sort()).toEqual([
+      'available', 'date', 'endHour', 'endMinute', 'endTime', 'id', 'isPeak', 'price', 'startHour', 'startMinute', 'startTime',
+    ]);
   });
 
   it('returns nothing on closed days', async () => {

@@ -13,6 +13,7 @@ export const BOOKING_PAYMENT_STATUSES = ['unpaid', 'partial', 'paid', 'refunded'
 export const OFFLINE_METHODS = ['cash', 'bank_transfer', 'bkash', 'nagad'] as const;
 
 const startHour = z.coerce.number('Must be a number').int('Must be a whole hour').min(0).max(23);
+const startMinute = z.coerce.number('Must be a number').pipe(z.union([z.literal(0), z.literal(30)], 'Start minute must be 0 or 30'));
 const note = (max: number) => z.string().trim().max(max).optional();
 
 /** A bKash / Nagad transaction id: trimmed, uppercase, letters and digits, 6–20 characters. */
@@ -24,13 +25,24 @@ export const trxIdOnlyForWallets = (p: { method?: string; reference?: string }) 
   p.reference === undefined || (p.method !== undefined && isWalletMethod(p.method));
 export const TRX_ID_ONLY_FOR_WALLETS = { path: ['reference'], message: 'A TrxID is only recorded for bKash and Nagad' };
 
-/** The portal form posts the hour as `hour`; `startHour` is accepted too. */
+/** `hour` → `startHour` and `minute` → `startMinute`, unless the long name is sent too. */
+function aliasTimeFields(v: unknown) {
+  if (!v || typeof v !== 'object') return v;
+  const body = { ...(v as Record<string, unknown>) };
+  if (!('startHour' in body) && 'hour' in body) body.startHour = body.hour;
+  if (!('startMinute' in body) && 'minute' in body) body.startMinute = body.minute;
+  return body;
+}
+
+/** The portal form posts the hour as `hour` (and the minute as `minute`); `startHour` / `startMinute` are accepted too. */
 export const CheckoutSchema = z.preprocess(
-  (v) => (v && typeof v === 'object' && !('startHour' in v) && 'hour' in v ? { ...v, startHour: (v as { hour: unknown }).hour } : v),
+  aliasTimeFields,
   z.object({
     groundId: z.uuid('Invalid ground id'),
     date: isoDate,
     startHour,
+    /** 0 or 30 (90-minute slots start on the half hour); default 0. */
+    startMinute: startMinute.default(0),
     customerName: CustomerNameSchema,
     /** Optional only for a signed-in customer (`400 EMAIL_REQUIRED` for a guest, checked in the service). */
     customerEmail: OptionalEmailSchema,

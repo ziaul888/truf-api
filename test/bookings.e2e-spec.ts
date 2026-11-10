@@ -103,7 +103,7 @@ describe('Bookings (e2e)', () => {
 
   const http = () => request(app.getHttpServer());
   const slotAt = (date: string, startHour: number) =>
-    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour: { groundId, date: toDbDate(date), startHour } } });
+    prisma.slot.findUniqueOrThrow({ where: { groundId_date_startHour_startMinute: { groundId, date: toDbDate(date), startHour, startMinute: 0 } } });
   const booking = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id }, include: { payments: true } });
   /** Cash needs a signed-in customer: pass their agent as `client`. */
   const checkout = (
