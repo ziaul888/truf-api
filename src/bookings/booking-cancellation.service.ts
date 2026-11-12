@@ -4,12 +4,12 @@ import type { BlockReason, Payment, Prisma } from '../generated/prisma/client.js
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
-import { slotHour } from '../slots/slot-time.js';
-import { fromDbDate, hasEnded, minutesUntil, venueNow } from '../slots/venue-time.js';
+import { minutesUntil, venueNow } from '../slots/venue-time.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
   bookingChanged, bookingNotFound, isUnderReview, isWalletMethod, methodName, paymentStatusOf, paymentUnderReview,
 } from './booking-rules.js';
+import { liveSlots, primaryOf, windowHasEnded, windowOf, type BookingSlotRef } from './booking-slots.js';
 import { BOOKING_INCLUDE, type BookingRow } from './booking.dto.js';
 
 export interface CancelOptions {
@@ -23,8 +23,13 @@ export interface CancelOptions {
   byCustomer?: boolean;
   /** Staff "Reject": only while a bKash / Nagad payment is still unverified (else 409 PAYMENT_ALREADY_HANDLED). */
   rejectWallet?: boolean;
-  /** Staff blocking the booked slot: the slot ends blocked instead of available. */
+  /**
+   * Staff blocking one booked slot: that slot ends blocked instead of available. The booking is still
+   * cancelled whole (all or nothing), so its other slots become available.
+   */
   blockSlot?: { reason: BlockReason; note?: string };
+  /** Which of the booking's slots `blockSlot` applies to; default the earliest (the only one for a single-slot booking). */
+  blockSlotId?: string;
   /**
    * The system giving up on a checkout that was never paid: acts only while the booking is still
    * pending, so a payment landing at the same moment wins, and also after the slot has ended.
@@ -100,7 +105,9 @@ export class BookingCancellationService {
       },
     });
     if (count === 0) throw bookingChanged();
-    if (booking.liveSlotId) await this.releaseSlot(tx, booking, opts);
+    const live = liveSlots(booking);
+    await tx.bookingSlot.updateMany({ where: { bookingId, cancelledAt: null }, data: { liveSlotId: null, cancelledAt: new Date() } });
+    if (live.length > 0) await this.releaseSlots(tx, booking, live.map((s) => s.slot), opts);
     await this.logEvents(tx, booking, opts, refunds);
   }
 
@@ -139,13 +146,16 @@ export class BookingCancellationService {
       throw new AppError('This bKash / Nagad payment is not verified yet: verify it first to refund it, or reject it', 409, 'VERIFY_OR_REJECT');
     }
     // Staff may still reject an unverified bKash / Nagad payment after the slot has ended.
-    const ended = hasEnded(venueNow(), fromDbDate(b.slot.date), slotHour(b.slot), b.slot.durationMinutes);
+    // Taken place once the last live slot has ended.
+    const ended = windowHasEnded(venueNow(), windowOf(b));
     if (b.status === 'completed' || (ended && !(underReview && opts.rejectWallet))) {
       throw new AppError('This booking has already taken place', 409, 'BOOKING_COMPLETED');
     }
     if (!opts.byCustomer) return;
     const { cancellationCutoffHours } = await this.settings.get();
-    const started = minutesUntil(venueNow(), fromDbDate(b.slot.date), slotHour(b.slot));
+    // The cutoff counts from the earliest live slot.
+    const window = windowOf(b);
+    const started = minutesUntil(venueNow(), window.date, window.startMinutes / 60);
     if (b.source !== 'portal' || started <= cancellationCutoffHours * 60) {
       throw new AppError(
         `Bookings can't be cancelled online within ${cancellationCutoffHours} hours of the start. Please contact the venue`,
@@ -169,20 +179,26 @@ export class BookingCancellationService {
     }
   }
 
-  /** Frees the slot this booking held or booked, or blocks it when staff blocked over the booking. */
-  private async releaseSlot(tx: Prisma.TransactionClient, b: BookingRow, opts: CancelOptions) {
+  /** Frees every slot this booking held or booked, except the one staff blocked over the booking (it ends blocked). */
+  private async releaseSlots(tx: Prisma.TransactionClient, b: BookingRow, slots: BookingSlotRef['slot'][], opts: CancelOptions) {
     const cleared = { heldUntil: null, heldByBookingId: null };
-    const data = opts.blockSlot
-      ? {
-        ...cleared, status: 'blocked' as const, blockReason: opts.blockSlot.reason, blockNote: opts.blockSlot.note ?? null,
+    const blocked = opts.blockSlot ? slots.find((s) => s.id === (opts.blockSlotId ?? primaryOf(b).slot.id)) : undefined;
+    const freeIds = slots.filter((s) => s !== blocked).map((s) => s.id);
+    if (freeIds.length > 0) {
+      await tx.slot.updateMany({ where: { id: { in: freeIds }, status: { in: ['held', 'booked'] } }, data: { ...cleared, status: 'available' } });
+    }
+    if (!blocked || !opts.blockSlot) return;
+    await tx.slot.updateMany({
+      where: { id: blocked.id, status: { in: ['held', 'booked'] } },
+      data: {
+        ...cleared, status: 'blocked', blockReason: opts.blockSlot.reason, blockNote: opts.blockSlot.note ?? null,
         blockedById: opts.actorId, blockedAt: new Date(),
-      }
-      : { ...cleared, status: 'available' as const };
-    await tx.slot.updateMany({ where: { id: b.slot.id, status: { in: ['held', 'booked'] } }, data });
-    if (opts.blockSlot && opts.actorId) {
+      },
+    });
+    if (opts.actorId) {
       await tx.slotEvent.create({
         data: {
-          slotId: b.slot.id, groundId: b.ground.id, date: b.slot.date, startHour: b.slot.startHour, action: 'block',
+          slotId: blocked.id, groundId: b.ground.id, date: blocked.date, startHour: blocked.startHour, action: 'block',
           userId: opts.actorId, reason: opts.blockSlot.reason, note: opts.blockSlot.note ?? null,
         },
       });

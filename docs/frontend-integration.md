@@ -124,7 +124,10 @@ List endpoints, once they exist, return `data: { data: [...], total, page, limit
 | 400 | `GROUND_CLOSED` | Generating or blocking only on days the ground doesn't open, or for an inactive ground; or a new booking (checkout or staff) on a day the ground doesn't open | Show `error`; for a booking, have them pick another slot |
 | 409 | `SLOT_HAS_BOOKING` | Blocking a booked slot | Show `error` |
 | 409 | `SLOT_ALREADY_BLOCKED`, `SLOT_NOT_BLOCKED` | Blocking twice, or unblocking a slot that isn't blocked | Refresh the slot |
-| 409 | `SLOT_NOT_AVAILABLE` | A slot changed while saving (someone else acted first) | Refresh and try again |
+| 409 | `SLOT_NOT_AVAILABLE` | A slot changed while saving (someone else acted first); for a multi-slot booking, any one of its slots | Refresh and try again |
+| 400 | `TOO_MANY_SLOTS` | A booking (checkout or staff) with more slots than `maxSlotsPerBooking` (4, from `GET /checkout/options`) | Cap the slot picker at that number |
+| 409 | `BOOKING_IN_PROGRESS` | Blocking one slot (`cancelBooking: true`) of a multi-slot booking that has already started: it would cancel and refund the whole booking | Show `error`; handle that booking from its own page |
+| 400 | `SLOTS_MUST_SHARE_GROUND_DATE` | Staff `slotIds` of different grounds or dates | Pick the slots on one ground and date |
 | 404 | `CLOSURE_NOT_FOUND` | No closure with that id | Refresh the list |
 | 409 | `CLOSURE_ALREADY_LIFTED` | Lifting a closure twice | Refresh the list |
 | 409 | `EMAIL_TAKEN` | Creating or editing a user with an email that's already used | Show `error` under the email field |
@@ -370,7 +373,7 @@ Slots are stored rows, one per bookable period on one ground. They're created fr
 }
 ```
 
-- `status` is `available`, `held` (a customer is in Stripe checkout; see `heldUntil`), `booked` or `blocked`. There is **no `partial` status**: payment state is in `booking.paymentStatus`. `booking` is `{ id, bookingNumber, customerName, paymentStatus }` for held and booked slots, otherwise `null`.
+- `status` is `available`, `held` (a customer is in Stripe checkout; see `heldUntil`), `booked` or `blocked`. There is **no `partial` status**: payment state is in `booking.paymentStatus`. `booking` is `{ id, bookingNumber, customerName, paymentStatus }` for held and booked slots, otherwise `null`. A booking can hold up to 4 slots (`GET /checkout/options` → `maxSlotsPerBooking`): **every** slot of a multi-slot booking carries the same `booking`. See "Several slots in one booking" in [`frontend-bookings.md`](frontend-bookings.md).
 - `price` was fixed when the slot was created (`slotPrice()`, peak hours included). Show it as is; don't recalculate it.
 - `block` is `null` unless `status` is `blocked`. Block reasons: `maintenance`, `reserved`, `event`, `weather`, `other`. `note` is optional, up to 500 characters.
 
@@ -399,7 +402,7 @@ Slots are stored rows, one per bookable period on one ground. They're created fr
 
 - **`stats`** = `{ total, available, booked, blocked }` for the same ground and dates, **ignoring** the `status` and `reason` filters, so the stat cards stay put while you filter.
 - **Generate** never overwrites. `skipExisting` may be sent but must be `true`, so remove the "No, overwrite existing slots" option. Use `dryRun: true` for the form's preview instead of the invented 12% figure. The custom-times inputs aren't used: hours and price always come from the ground.
-- **Blocking a booked slot** returns `409 SLOT_HAS_BOOKING` unless the body has `cancelBooking: true`, which cancels the booking with a full refund and returns `cancelledBooking: true`. Bulk and full-day blocks still skip booked slots (`skippedBooked`).
+- **Blocking a booked slot** returns `409 SLOT_HAS_BOOKING` unless the body has `cancelBooking: true`, which cancels the booking with a full refund and returns `cancelledBooking: true`. If the booking holds several slots it is cancelled **whole** (all or nothing): the blocked slot ends `blocked`, the booking's other slots become `available`. Bulk and full-day blocks still skip booked slots (`skippedBooked`).
 - **Unblocking** sets the slot back to `available`. Every block and unblock is recorded (who and when) for the audit history.
 
 **Block types for `POST /admin/slots/block`** (all need `groundId`, `date`, `reason`, and optionally `note`):

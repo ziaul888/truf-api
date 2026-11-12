@@ -1,11 +1,11 @@
 import { Injectable } from '@nestjs/common';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from '../bookings/booking.dto.js';
 import { owedOf } from '../bookings/booking-rules.js';
+import { hasUpcomingSlot } from '../bookings/booking-slots.js';
 import { AppError } from '../common/app-error.js';
 import { violatedUniqueIndex } from '../common/prisma-errors.js';
 import type { Paginated } from '../common/schemas.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { upcomingWhere } from '../slots/slot-rules.js';
 import { fromDbDate, venueDayStart, venueNow, type IsoDate } from '../slots/venue-time.js';
 import { CUSTOMER_SUMMARY_INCLUDE, toCustomerDto, type CustomerDto } from './customer.dto.js';
 import type { CreateCustomerInput, ListCustomersQuery, UpdateCustomerInput } from './customers.schemas.js';
@@ -106,7 +106,7 @@ export class CustomersService {
   async remove(id: string): Promise<{ deleted: true }> {
     await this.findOrThrow(id);
     const upcoming = await this.prisma.booking.count({
-      where: { customerId: id, deletedAt: null, status: { in: ['pending', 'confirmed'] }, slot: upcomingWhere(venueNow()) },
+      where: { customerId: id, deletedAt: null, status: { in: ['pending', 'confirmed'] }, ...hasUpcomingSlot(venueNow()) },
     });
     if (upcoming > 0) {
       throw new AppError('This customer has upcoming bookings. Cancel them first', 409, 'CUSTOMER_HAS_UPCOMING_BOOKINGS');

@@ -4,14 +4,15 @@ import { env } from '../config/env.js';
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SystemStateService } from '../settings/system-state.service.js';
-import { slotHour } from '../slots/slot-time.js';
-import { addDays, fromDbDate, hasEnded, toDbDate, venueNow } from '../slots/venue-time.js';
+import { addDays, toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { isDueToday, isOverdue, loadOwing } from './booking-due.js';
 import { dueOf, WALLET_UNDER_REVIEW } from './booking-rules.js';
+import { windowHasEnded, windowOf } from './booking-slots.js';
 
 const MINUTE_MS = 60_000;
+const SLOT_CLOCK = { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } as const;
 /** The due digest goes out on the first hourly run from 09:00 venue time. */
 const DIGEST_HOUR = 9;
 
@@ -74,20 +75,25 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
       if (cancelled && booking.stripeCheckoutSessionId) await this.stripe.expireSession(booking.stripeCheckoutSessionId);
       return;
     }
-    // No pending booking behind it any more: just free the slot.
+    // No pending booking behind it any more: just free the slot. Only if it is still held by the booking
+    // we read: a stale snapshot must not free a slot another booking has taken a new hold on since.
     await this.prisma.slot.updateMany({
-      where: { id: slot.id, status: 'held' }, data: { status: 'available', heldUntil: null, heldByBookingId: null },
+      where: { id: slot.id, status: 'held', heldByBookingId: slot.heldByBookingId },
+      data: { status: 'available', heldUntil: null, heldByBookingId: null },
     });
   }
 
-  /** Confirmed bookings whose slot has ended become completed (and can no longer be cancelled). */
+  /** Confirmed bookings whose last slot has ended become completed (and can no longer be cancelled). */
   async completeEnded(): Promise<number> {
     const now = venueNow();
     const candidates = await this.prisma.booking.findMany({
       where: { status: 'confirmed', deletedAt: null, slot: { date: { lte: toDbDate(now.date) } } },
-      include: { slot: { select: { date: true, startHour: true, startMinute: true, durationMinutes: true } } },
+      include: {
+        slot: { select: SLOT_CLOCK },
+        bookingSlots: { select: { price: true, cancelledAt: true, slot: { select: SLOT_CLOCK } } },
+      },
     });
-    const ended = candidates.filter((b) => hasEnded(now, fromDbDate(b.slot.date), slotHour(b.slot), b.slot.durationMinutes));
+    const ended = candidates.filter((b) => windowHasEnded(now, windowOf(b)));
     if (ended.length === 0) return 0;
     const ids = ended.map((b) => b.id);
     await this.prisma.$transaction([

@@ -14,13 +14,14 @@ const bookingRow = (overrides: object = {}) => ({
   id: 'b-1', status: 'pending', source: 'staff', total: 1000, payments: [{ amount: 400, status: 'succeeded' }], ...overrides,
 });
 
-function setup(booking: object = bookingRow(), foundSlot: object = slot) {
+function setup(booking: object = bookingRow(), foundSlot: object | object[] = slot, claimed = 1) {
   const tx = {
-    slot: { updateMany: vi.fn(async () => ({ count: 1 })) },
+    slot: { updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: claimed })) },
     customer: { findUnique: vi.fn(async (): Promise<object | null> => null), create: vi.fn(async () => ({ id: 'c-1' })) },
     booking: { create: vi.fn(async (_args: { data: Record<string, unknown> }) => ({ id: 'b-1' })), update: vi.fn(async (_args: { data: object }) => ({})),
       updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 1 })),
     },
+    bookingSlot: { updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 0 })) },
     payment: {
       create: vi.fn(async ({ data }: { data: object }) => ({ ...data, status: 'succeeded' })),
       updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 1 })),
@@ -28,7 +29,7 @@ function setup(booking: object = bookingRow(), foundSlot: object = slot) {
     bookingEvent: { create: vi.fn(async (_args: { data: { type: string; detail?: string } }) => ({})) },
   };
   const prisma = {
-    slot: { findUnique: vi.fn(async () => foundSlot) },
+    slot: { findMany: vi.fn(async (_args: object) => [foundSlot].flat()) },
     customer: { findFirst: vi.fn(async () => ({ id: 'c-1' })) },
     booking: { findFirst: vi.fn(async () => booking), findUniqueOrThrow: vi.fn(async () => { throw new Error('dto not needed'); }) },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
@@ -75,6 +76,72 @@ describe('StaffBookingsService', () => {
     await known.service.create('u-1', { slotId: 's-1', customer: { id: 'c-7', ...customer, email: undefined }, payment: { type: 'none' } })
       .catch(() => undefined);
     expect(known.tx.booking.create.mock.calls[0]![0].data).toMatchObject({ customerId: 'c-7', contactEmail: 'stored@x.test' });
+  });
+
+  describe('with several slots', () => {
+    const second = { ...slot, id: 's-2', startHour: 19, price: 1200 };
+    const third = { ...slot, id: 's-3', startHour: 21, price: 800 };
+
+    it('books them together: amount is the sum, the earliest is the primary, one BookingSlot each', async () => {
+      const { service, tx } = setup(bookingRow(), [third, slot, second], 3);
+      await service.create('u-1', { slotIds: ['s-3', 's-1', 's-2'], customer, payment: { type: 'full', method: 'cash' } }).catch(() => undefined);
+      expect(tx.slot.updateMany).toHaveBeenCalledTimes(1);
+      expect(tx.slot.updateMany).toHaveBeenCalledWith({ where: { id: { in: ['s-1', 's-2', 's-3'] }, status: 'available' }, data: { status: 'booked' } });
+      const data = tx.booking.create.mock.calls[0]![0].data;
+      expect(data).toMatchObject({ slotId: 's-1', liveSlotId: 's-1', amount: 3000, total: 3000, serviceFee: 0, status: 'confirmed', paymentStatus: 'paid' });
+      expect(data.payments).toMatchObject({ create: [expect.objectContaining({ amount: 3000 })] });
+      expect(data.bookingSlots).toEqual({
+        create: [
+          { slotId: 's-1', liveSlotId: 's-1', price: 1000 }, { slotId: 's-2', liveSlotId: 's-2', price: 1200 }, { slotId: 's-3', liveSlotId: 's-3', price: 800 },
+        ],
+      });
+    });
+
+    it('first frees stale live BookingSlot rows of cancelled bookings on these slots', async () => {
+      const { service, tx } = setup(bookingRow(), [slot, second], 2);
+      await service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }).catch(() => undefined);
+      expect(tx.bookingSlot.updateMany).toHaveBeenCalledWith(expect.objectContaining({
+        where: { slotId: { in: ['s-1', 's-2'] }, liveSlotId: { not: null }, booking: { status: 'cancelled' } },
+      }));
+    });
+
+    it('validates the advance against the combined total', async () => {
+      const ok = setup(bookingRow(), [slot, second], 2);
+      await ok.service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'partial', method: 'cash', amount: 1500 } }).catch(() => undefined);
+      expect(ok.tx.booking.create.mock.calls[0]![0].data).toMatchObject({ total: 2200, paymentStatus: 'partial' });
+      await expect(setup(bookingRow(), [slot, second], 2).service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'partial', method: 'cash', amount: 2200 } }))
+        .rejects.toMatchObject({ code: 'PAYMENT_EXCEEDS_DUE' });
+    });
+
+    it('409s when any slot was taken meanwhile (count short), so the transaction rolls back', async () => {
+      const { service, tx } = setup(bookingRow(), [slot, second], 1);
+      await expect(service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 409, code: 'SLOT_NOT_AVAILABLE' });
+      expect(tx.booking.create).not.toHaveBeenCalled();
+    });
+
+    it('refuses slots on different dates or grounds', async () => {
+      const otherDay = { ...second, date: new Date('2026-10-30T00:00:00Z') };
+      await expect(setup(bookingRow(), [slot, otherDay]).service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 400, code: 'SLOTS_MUST_SHARE_GROUND_DATE' });
+      const otherGround = { ...second, groundId: 'g-2' };
+      await expect(setup(bookingRow(), [slot, otherGround]).service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 400, code: 'SLOTS_MUST_SHARE_GROUND_DATE' });
+    });
+
+    it('refuses more than 4 slots before reading any', async () => {
+      const { service, tx } = setup();
+      await expect(service.create('u-1', { slotIds: ['a', 'b', 'c', 'd', 'e'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 400, code: 'TOO_MANY_SLOTS' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('404s when one of the slots does not exist, and refuses one already booked', async () => {
+      await expect(setup(bookingRow(), [slot]).service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 404, code: 'SLOT_NOT_FOUND' });
+      await expect(setup(bookingRow(), [slot, { ...second, status: 'booked' }]).service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 409, code: 'SLOT_NOT_AVAILABLE' });
+    });
   });
 
   it('resend confirmation without an email is 409 NO_EMAIL and sends nothing', async () => {

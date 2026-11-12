@@ -64,15 +64,33 @@ describe('BookingJobs', () => {
     expect(prisma.slot.updateMany).toHaveBeenCalledWith(expect.objectContaining({ data: expect.objectContaining({ status: 'available' }) }));
   });
 
+  it('does not free a slot another booking has taken a new hold on since the sweep read it (stale snapshot)', async () => {
+    const { jobs, prisma } = setup({ held: [{ id: 's-1', heldByBookingId: 'b-old' }], pending: null });
+    await jobs.releaseExpiredHolds();
+    // The conditional update only matches while the slot is still held by the booking that was read.
+    expect(prisma.slot.updateMany).toHaveBeenCalledWith({
+      where: { id: 's-1', status: 'held', heldByBookingId: 'b-old' },
+      data: { status: 'available', heldUntil: null, heldByBookingId: null },
+    });
+  });
+
   it('completes only bookings whose slot has ended', async () => {
     const { jobs, prisma } = setup({
       bookings: [
-        { id: 'ended', slot: { date: today, startHour: 8, durationMinutes: 120 } },
-        { id: 'running', slot: { date: today, startHour: 9, durationMinutes: 120 } },
+        { id: 'ended', slot: { date: today, startHour: 8, durationMinutes: 120 }, bookingSlots: [] },
+        { id: 'running', slot: { date: today, startHour: 9, durationMinutes: 120 }, bookingSlots: [] },
       ],
     });
     await expect(jobs.completeEnded()).resolves.toBe(1);
     expect(prisma.booking.updateMany.mock.calls[0]![0].where.id.in).toEqual(['ended']);
+  });
+
+  it('completes a multi-slot booking only when its LAST slot has ended', async () => {
+    const live = (startHour: number) => ({ price: 1500, cancelledAt: null, slot: { id: `s-${startHour}`, date: today, startHour, startMinute: 0, durationMinutes: 60 } });
+    const booking = (id: string, hours: number[]) => ({ id, slot: live(hours[0]!).slot, bookingSlots: hours.map(live) });
+    const { jobs, prisma } = setup({ bookings: [booking('all-over', [7, 8]), booking('last-still-running', [8, 10])] });
+    await expect(jobs.completeEnded()).resolves.toBe(1);
+    expect(prisma.booking.updateMany.mock.calls[0]![0].where.id.in).toEqual(['all-over']);
   });
 
   it('sends one due reminder per booking and remembers it', async () => {

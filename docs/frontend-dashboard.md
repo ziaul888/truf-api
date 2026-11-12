@@ -60,7 +60,7 @@ The row of action cards at the top. Refresh it every 60 seconds.
 | `toConfirm` | Pending bookings staff can confirm: unpaid staff bookings, pay-at-venue requests and bKash / Nagad payments to verify. **Not** portal card checkouts still in Stripe. `payAtVenue` is how many of them are pay-at-venue | Confirm Bookings (`GET /admin/bookings?status=pending`) |
 | `overdue` | Bookings with money overdue (§0). `amount` is the total still due | `GET /admin/bookings?due=overdue` |
 | `dueToday` | Bookings with money due and `dueDate` today | `GET /admin/bookings?due=today` |
-| `payingNow` | Slots on hold right now (a customer is in Stripe), any date | `GET /admin/slots?status=held` |
+| `payingNow` | Card checkouts on hold right now (a customer is in Stripe), any date: one per checkout, even when it holds several slots | `GET /admin/slots?status=held` |
 | `startingSoon` | Pending or confirmed bookings starting in the next 60 minutes. This works across midnight | The upcoming list on the same page |
 | `needsOutcome` | Bookings still `pending` after their slot **ended**: staff should record what happened. Card checkouts still in Stripe are left out; bKash / Nagad bookings under review are included (`walletPayment.status: "pending"`: verify or reject them first, `due` is 0 meanwhile). `bookings` lists at most 10, most recently ended first; `count` has them all. Each row offers **Mark no-show** (`POST /admin/bookings/:id/no-show`) and, for cash or unpaid bookings, **Collect** (recording a payment confirms the booking) | Each booking's detail page; Confirm Bookings for the ones to verify |
 
@@ -95,6 +95,7 @@ This replaces the "Active grounds" table with a strip of today's slots for each 
   - A closed ground has `slots.total: 0` and an empty `timeline`.
   - A booking a closure had to skip still shows.
 - **`current`** is the booking playing right now. A 17–18 slot is current at 17:59 but not at 18:00.
+- **`current` and `next` are per slot:** a booking with several slots appears on each of its slots on that ground (`startHour`/`endHour` are that slot's), with the same `bookingId`.
 - **`next`** is the next booking today. Use its `due` for a "Collect ৳…" button (`POST /admin/bookings/:id/payments`).
 - **`current` and `next`** are `null` when there's no such booking.
 - **`remainingFreeHours`:** available slots that haven't started yet, in hours.

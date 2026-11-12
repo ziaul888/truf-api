@@ -15,6 +15,8 @@ const payment = (overrides: object = {}) => ({
 const bookingRow = (overrides: object = {}) => ({
   id: 'b-1', status: 'confirmed', source: 'portal', total: 6000, liveSlotId: 's-1', deletedAt: null,
   slot: { id: 's-1', date: day('2026-10-29'), startHour: 18, durationMinutes: 60 },
+  // Empty: a booking made by an older release; its single slot stands in. Multi-slot cases set this.
+  bookingSlots: [],
   ground: { id: 'g-1' },
   payments: [payment()],
   ...overrides,
@@ -32,8 +34,9 @@ function setup(booking: object | null = bookingRow()) {
       updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 1 })),
       update: vi.fn(async (_args: { data: object }) => ({})),
     },
-    slot: { updateMany: vi.fn(async (_args: { data: object }) => ({ count: 1 })) },
-    slotEvent: { create: vi.fn(async () => ({})) },
+    slot: { updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 1 })) },
+    bookingSlot: { updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 1 })) },
+    slotEvent: { create: vi.fn(async (_args: { data: object }) => ({})) },
     bookingEvent: {
       createMany: vi.fn(async (_args: { data: { type: string }[] }) => ({ count: 1 })),
       create: vi.fn(async (_args: { data: { type: string; detail: string } }) => ({})),
@@ -230,6 +233,52 @@ describe('BookingCancellationService', () => {
     await service.cancel('b-1', { ...opts, blockSlot: { reason: 'maintenance', note: 'Pipe' } });
     expect(tx.slot.updateMany.mock.calls[0]![0].data).toMatchObject({ status: 'blocked', blockReason: 'maintenance', blockedById: 'u-1' });
     expect(tx.slotEvent.create).toHaveBeenCalled();
+  });
+
+  describe('a booking with several slots (cancelled whole)', () => {
+    const slotAt = (id: string, startHour: number) => ({ id, date: day('2026-10-29'), startHour, startMinute: 0, durationMinutes: 60 });
+    const multi = (overrides: object = {}) => bookingRow({
+      slot: slotAt('s-1', 18),
+      bookingSlots: [18, 19, 21].map((h, i) => ({ price: 1500, cancelledAt: null, slot: slotAt(`s-${i + 1}`, h) })),
+      ...overrides,
+    });
+
+    it('clears every BookingSlot live index and frees all the slots in one update', async () => {
+      const { service, tx } = setup(multi());
+      await service.cancel('b-1', opts);
+      expect(tx.bookingSlot.updateMany).toHaveBeenCalledWith({
+        where: { bookingId: 'b-1', cancelledAt: null }, data: { liveSlotId: null, cancelledAt: expect.any(Date) },
+      });
+      expect(tx.slot.updateMany).toHaveBeenCalledTimes(1);
+      expect(tx.slot.updateMany.mock.calls[0]![0]).toMatchObject({
+        where: { id: { in: ['s-1', 's-2', 's-3'] }, status: { in: ['held', 'booked'] } }, data: { status: 'available', heldByBookingId: null },
+      });
+    });
+
+    it('blocks only the slot being blocked; the others become available', async () => {
+      const { service, tx } = setup(multi());
+      await service.cancel('b-1', { ...opts, blockSlot: { reason: 'maintenance' }, blockSlotId: 's-2' });
+      const calls = tx.slot.updateMany.mock.calls.map(([args]) => args);
+      expect(calls[0]).toMatchObject({ where: { id: { in: ['s-1', 's-3'] } }, data: { status: 'available' } });
+      expect(calls[1]).toMatchObject({ where: { id: 's-2' }, data: { status: 'blocked', blockReason: 'maintenance', blockedById: 'u-1' } });
+      expect(tx.slotEvent.create).toHaveBeenCalledTimes(1);
+      expect(tx.slotEvent.create.mock.calls[0]![0]).toMatchObject({ data: { slotId: 's-2', action: 'block' } });
+    });
+
+    it('is over only when the LAST slot has ended', async () => {
+      // 10:00 now: slot 1 (08:00-09:00) is over, slot 2 (11:00-12:00) is not.
+      const rows = [8, 11].map((h, i) => ({ price: 1500, cancelledAt: null, slot: { ...slotAt(`s-${i + 1}`, h), date: day('2026-10-28') } }));
+      const running = multi({ slot: rows[0]!.slot, bookingSlots: rows });
+      await expect(setup(running).service.cancel('b-1', opts)).resolves.toBe(true);
+      const over = multi({ slot: rows[0]!.slot, bookingSlots: [rows[0]] });
+      await expect(setup(over).service.cancel('b-1', opts)).rejects.toMatchObject({ code: 'BOOKING_COMPLETED' });
+    });
+
+    it('applies the customer cutoff from the EARLIEST slot', async () => {
+      const rows = [11, 14].map((h, i) => ({ price: 1500, cancelledAt: null, slot: { ...slotAt(`s-${i + 1}`, h), date: day('2026-10-28') } }));
+      const booking = multi({ slot: rows[0]!.slot, bookingSlots: rows });
+      await expect(setup(booking).service.cancel('b-1', { ...opts, byCustomer: true })).rejects.toMatchObject({ code: 'CANCELLATION_WINDOW_PASSED' });
+    });
   });
 
   it.each([

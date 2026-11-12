@@ -10,6 +10,11 @@ import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { dueOf, paymentStatusOf } from './booking-rules.js';
 
+/** Thrown inside the confirm transaction when not every slot could be booked, so every write rolls back. */
+class SlotsLostError extends Error {}
+
+const LIVE_SLOT_INDEXES = ['Booking_liveSlotId_key', 'BookingSlot_liveSlotId_key'];
+
 const idOf = (value: string | { id: string } | null | undefined) => (typeof value === 'string' ? value : value?.id);
 
 /**
@@ -65,18 +70,29 @@ export class StripeWebhookService {
     }
   }
 
-  /** Books the slot if this booking still holds it, or it's free again after the hold lapsed. */
+  /**
+   * Books every slot of the booking if it still holds them, or they are free again after the hold
+   * lapsed: all or none. If any slot was taken meanwhile (or its live index clashes) nothing is written
+   * and this returns false, so the payment is refunded.
+   */
   private async confirm(booking: Booking, intentId: string, amount: number, cardLast4: string | null): Promise<boolean> {
+    const rows = await this.prisma.bookingSlot.findMany({ where: { bookingId: booking.id }, select: { id: true, slotId: true } });
+    // A booking made by an older release (during a deploy) has no rows: its single slot.
+    const slotIds = rows.length > 0 ? rows.map((r) => r.slotId) : [booking.slotId];
     try {
       return await this.prisma.$transaction(async (tx) => {
         const { count } = await tx.slot.updateMany({
-          where: { id: booking.slotId, OR: [{ status: 'held', heldByBookingId: booking.id }, { status: 'available' }] },
+          where: { id: { in: slotIds }, OR: [{ status: 'held', heldByBookingId: booking.id }, { status: 'available' }] },
           data: { status: 'booked', heldUntil: null, heldByBookingId: null },
         });
-        if (count === 0) return false;
+        // Throw, don't return: a return would commit the slots this update did book.
+        if (count !== slotIds.length) throw new SlotsLostError();
         await tx.payment.create({
           data: { bookingId: booking.id, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY, status: 'succeeded', receivedAt: new Date() },
         });
+        for (const row of rows) {
+          await tx.bookingSlot.update({ where: { id: row.id }, data: { liveSlotId: row.slotId, cancelledAt: null } });
+        }
         await tx.booking.update({
           where: { id: booking.id },
           data: {
@@ -93,12 +109,12 @@ export class StripeWebhookService {
         return true;
       });
     } catch (err) {
-      if (violatedUniqueIndex(err) === 'Booking_liveSlotId_key') return false;
+      if (err instanceof SlotsLostError || LIVE_SLOT_INDEXES.includes(violatedUniqueIndex(err) ?? '')) return false;
       throw err;
     }
   }
 
-  /** Paid, but someone else has the slot now: refund in full and tell the customer. */
+  /** Paid, but someone else has a slot now: refund in full and tell the customer. Slots still held by this booking go free. */
   private async refundLatePayment(booking: Booking, intentId: string, amount: number, cardLast4: string | null) {
     const stripeRefundId = await this.stripe.refund(intentId);
     await this.prisma.$transaction(async (tx) => {
@@ -109,6 +125,10 @@ export class StripeWebhookService {
         },
       });
       await tx.booking.update({ where: { id: booking.id }, data: { status: 'cancelled', paymentStatus: 'refunded', liveSlotId: null } });
+      await tx.bookingSlot.updateMany({ where: { bookingId: booking.id, cancelledAt: null }, data: { liveSlotId: null, cancelledAt: new Date() } });
+      await tx.slot.updateMany({
+        where: { status: 'held', heldByBookingId: booking.id }, data: { status: 'available', heldUntil: null, heldByBookingId: null },
+      });
       await tx.bookingEvent.createMany({
         data: [
           { bookingId: booking.id, type: 'payment_received', detail: `Paid ${amount} by card after the hold lapsed` },

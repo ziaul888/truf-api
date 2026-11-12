@@ -26,7 +26,7 @@ function setup(slots: Slot[], foundGround: Ground | null = ground, closures: obj
     ground: { findFirst: vi.fn(async () => foundGround), findUnique: vi.fn(async () => foundGround) },
     closure: { findMany: vi.fn(async () => closures) },
     slot: {
-      findMany: vi.fn(async (_args: { where: object }) => slots.map((s) => ({ ...s, ground: { name: 'Arena' }, blockedBy: null, bookings: [] }))),
+      findMany: vi.fn(async (_args: { where: object }) => slots.map((s) => ({ ...s, ground: { name: 'Arena' }, blockedBy: null, bookings: [], bookingSlots: [] }))),
       findUnique: vi.fn(async () => null),
       count: vi.fn(async () => slots.length),
       groupBy: vi.fn(async (_args: { where: object }) => [{ status: 'available', _count: { _all: 3 } }, { status: 'blocked', _count: { _all: 1 } }]),

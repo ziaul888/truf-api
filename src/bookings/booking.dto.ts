@@ -5,13 +5,17 @@ import { photoUrl } from '../grounds/photo-storage.js';
 import { slotHour, slotTimes, type SlotTimes } from '../slots/slot-time.js';
 import { fromDbDate, minutesUntil, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 import { dueOf, isUnderReview, isWalletMethod, paidOf, type WalletMethod } from './booking-rules.js';
+import { primaryOf, slotRowsOf, type BookingSlotRef } from './booking-slots.js';
 
 const STAFF = { select: { id: true, name: true } } as const;
+const SLOT_SELECT = { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } as const;
 
 /** Joins every booking response needs. */
 export const BOOKING_INCLUDE = {
   ground: { select: { id: true, name: true, sport: true, format: true, address: true, photos: true } },
-  slot: { select: { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } },
+  slot: { select: SLOT_SELECT },
+  /** Every slot of the booking (`slot` is the earliest). */
+  bookingSlots: { select: { price: true, cancelledAt: true, slot: { select: SLOT_SELECT } } },
   customer: { select: { id: true, name: true, phone: true, email: true } },
   payments: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' }, include: { recordedBy: STAFF } },
   createdBy: STAFF,
@@ -30,6 +34,13 @@ type Staff = { id: string; name: string } | null;
 export interface BookingSlotDto extends SlotTimes {
   id: string;
   date: IsoDate;
+}
+
+/** One slot of a booking: its price at booking time, and whether it is still in the booking. */
+export interface BookedSlotDto extends BookingSlotDto {
+  price: number;
+  status: 'active' | 'cancelled';
+  cancelledAt: Date | null;
 }
 
 /** A bKash / Nagad payment the customer sent from the portal checkout (it has the sender's number). */
@@ -59,7 +70,11 @@ export interface BookingDto {
   /** Made by a repeat booking (`/admin/booking-series/:id`); null otherwise. */
   seriesId: string | null;
   ground: { id: string; name: string; sport: Sport };
+  /** The earliest slot of the booking (the only one for a single-slot booking). */
   slot: BookingSlotDto;
+  /** Every slot, earliest first. */
+  slots: BookedSlotDto[];
+  slotCount: number;
   customer: { id: string; name: string; phone: string | null; email: string | null };
   /** The details given for this booking (may differ from the customer record). Email null: no customer emails. */
   contact: { name: string; email: string | null; phone: string };
@@ -121,6 +136,9 @@ export interface PublicBookingDto {
   walletPayment: Omit<WalletPaymentDto, 'payerNumber'> | null;
   ground: { id: string; name: string; sport: Sport; format: string | null; address: string | null; coverPhoto: string | null };
   slot: Omit<BookingSlotDto, 'id'>;
+  /** Every slot, earliest first. */
+  slots: Omit<BookedSlotDto, 'id'>[];
+  slotCount: number;
   amount: number;
   serviceFee: number;
   total: number;
@@ -144,6 +162,11 @@ const slotOf = (s: BookingRow['slot']): BookingSlotDto => ({
   id: s.id, date: fromDbDate(s.date), ...slotTimes(s),
 });
 
+/** A slot of a cancelled booking is cancelled, even if an older release left its row without `cancelledAt`. */
+const bookedSlotOf = (s: BookingSlotRef, bookingCancelled = false): BookedSlotDto => ({
+  ...slotOf(s.slot), price: s.price, status: s.cancelledAt || bookingCancelled ? 'cancelled' : 'active', cancelledAt: s.cancelledAt,
+});
+
 /** The latest wallet payment sent from the portal (staff-recorded ones have no sender number). */
 const walletPaymentOf = (b: BookingRow): WalletPaymentDto | null => {
   const p = b.payments.findLast((x) => isWalletMethod(x.method) && x.payerNumber !== null);
@@ -156,7 +179,9 @@ export const toBookingDto = (b: BookingRow): BookingDto => ({
   id: b.id, bookingNumber: b.bookingNumber, source: b.source, status: b.status, paymentStatus: b.paymentStatus,
   payAtVenue: b.payAtVenue, walletPayment: walletPaymentOf(b), cancelRequestedAt: b.cancelRequestedAt, seriesId: b.seriesId,
   ground: { id: b.ground.id, name: b.ground.name, sport: b.ground.sport },
-  slot: slotOf(b.slot),
+  slot: slotOf(primaryOf(b).slot),
+  slots: slotRowsOf(b).map((s) => bookedSlotOf(s, b.status === 'cancelled')),
+  slotCount: slotRowsOf(b).length,
   customer: b.customer,
   contact: { name: b.contactName, email: b.contactEmail, phone: b.contactPhone },
   amount: b.amount, serviceFee: b.serviceFee, total: b.total,
@@ -186,8 +211,11 @@ export const customerCanPay = (b: BookingRow) =>
   b.status !== 'cancelled' && dueOf(b, b.payments) > 0 && !isUnderReview(b, b.payments)
   && !(b.source === 'portal' && !b.payAtVenue && b.status === 'pending');
 
-const outsideCutoff = (b: BookingRow, now: VenueNow, cutoffHours: number) =>
-  minutesUntil(now, fromDbDate(b.slot.date), slotHour(b.slot)) > cutoffHours * 60;
+/** Outside the cutoff: the earliest live slot starts more than `cutoffHours` from now. */
+const outsideCutoff = (b: BookingRow, now: VenueNow, cutoffHours: number) => {
+  const { slot } = primaryOf(b);
+  return minutesUntil(now, fromDbDate(slot.date), slotHour(slot)) > cutoffHours * 60;
+};
 
 /** Whether a customer may cancel through the signed link right now (not while a wallet payment is under review). */
 export const customerCanCancel = (b: BookingRow, now: VenueNow, cutoffHours: number) =>
@@ -199,7 +227,8 @@ export const customerCanRequestCancel = (b: BookingRow, now: VenueNow, cutoffHou
   b.source === 'portal' && isUnderReview(b, b.payments) && b.cancelRequestedAt === null && outsideCutoff(b, now, cutoffHours);
 
 export const toPublicBookingDto = (b: BookingRow, canCancel: boolean, canPay: boolean, canRequestCancel = false): PublicBookingDto => {
-  const { id: _slotId, ...slot } = slotOf(b.slot);
+  const { id: _slotId, ...slot } = slotOf(primaryOf(b).slot);
+  const slots = slotRowsOf(b).map((s) => bookedSlotOf(s, b.status === 'cancelled')).map(({ id: _id, ...item }) => item);
   const cover = b.ground.photos[0];
   const wallet = walletPaymentOf(b);
   return {
@@ -210,6 +239,8 @@ export const toPublicBookingDto = (b: BookingRow, canCancel: boolean, canPay: bo
       coverPhoto: cover ? photoUrl(b.ground.id, cover) : null,
     },
     slot,
+    slots,
+    slotCount: slots.length,
     amount: b.amount, serviceFee: b.serviceFee, total: b.total, paid: paidOf(b.payments), due: dueOf(b, b.payments),
     createdAt: b.createdAt, cancelledAt: b.cancelledAt, canCancel, canPay,
     cancelRequested: b.cancelRequestedAt !== null, canRequestCancel, emailed: b.contactEmail !== null,

@@ -110,7 +110,7 @@ describe('SlotGeneratorService.retireClosedDays', () => {
       slot: {
         findMany: vi.fn(async ({ where }: { where: { groundId: string } }) => {
           if (failing.includes(where.groundId)) throw new Error(`boom ${where.groundId}`);
-          return [{ id: `free-${where.groundId}`, date: thursday, _count: { bookings: 0 } }];
+          return [{ id: `free-${where.groundId}`, date: thursday, _count: { bookings: 0, bookingSlots: 0 } }];
         }),
         deleteMany: vi.fn(async () => ({ count: 1 })),
         updateManyAndReturn: vi.fn(async () => []),

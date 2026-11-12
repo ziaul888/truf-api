@@ -64,7 +64,7 @@ const REFERENCE_INDEX = 'Payment_method_reference_key';
 
 /**
  * Runs a booking write, retrying with a fresh number if the random booking number clashed.
- * A clash on the live-slot index means the slot was taken: 409 SLOT_NOT_AVAILABLE; on a payment's
+ * A clash on a live-slot index (the booking's or a BookingSlot's) means a slot was taken: 409 SLOT_NOT_AVAILABLE; on a payment's
  * TrxID, 409 REFERENCE_ALREADY_USED.
  */
 export async function withBookingNumber<T>(write: (bookingNumber: string) => Promise<T>): Promise<T> {
@@ -73,7 +73,7 @@ export async function withBookingNumber<T>(write: (bookingNumber: string) => Pro
       return await write(newBookingNumber());
     } catch (err) {
       const index = violatedUniqueIndex(err);
-      if (index === 'Booking_liveSlotId_key') throw slotNotAvailable();
+      if (index === 'Booking_liveSlotId_key' || index === 'BookingSlot_liveSlotId_key') throw slotNotAvailable();
       if (index === REFERENCE_INDEX) throw referenceAlreadyUsed();
       if (index !== 'Booking_bookingNumber_key' || attempt >= 5) throw err;
     }

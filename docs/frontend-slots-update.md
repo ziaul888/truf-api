@@ -139,6 +139,7 @@ Close every ground, or some of them, for a date range, such as Eid or a power cu
 - `publicLabel` is optional, 1–100 characters. Customers see it.
 - `note` and `reason` are **staff only**.
 - Booked slots are **skipped** and counted in `skippedBooked`. Cancelling them arrives with the bookings module.
+- **Multi-slot bookings:** one booking can hold up to 4 slots. Blocking one of them with `cancelBooking: true` cancels the whole booking: only the slot you blocked ends `blocked`, the others become `available`. Every slot of the booking shows the same `booking` in `GET /admin/slots` and the calendar. In the calendar, `amount` and `advancePaid` are the **booking** totals, repeated on every slot of a multi-slot booking (don't sum them over slots); new `slotCount` is how many slots the booking holds and `price` is that slot's own price. Blocking a slot of a multi-slot booking that has already started (`cancelBooking: true`) is refused with `409 BOOKING_IN_PROGRESS`. Schedule edits never remove a slot that any booking (live or cancelled) refers to.
 
 **Lift:** `DELETE` keeps the closure for history and sets `liftedAt`. `unblocked` counts only upcoming slots.
 

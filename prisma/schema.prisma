@@ -241,11 +241,12 @@ model Slot {
   createdAt       DateTime     @default(now())
   updatedAt       DateTime     @updatedAt
 
-  ground    Ground      @relation(fields: [groundId], references: [id], onDelete: Restrict)
-  blockedBy User?       @relation(fields: [blockedById], references: [id], onDelete: SetNull)
-  closure   Closure?    @relation(fields: [closureId], references: [id], onDelete: SetNull)
-  bookings  Booking[]
-  events    SlotEvent[]
+  ground       Ground        @relation(fields: [groundId], references: [id], onDelete: Restrict)
+  blockedBy    User?         @relation(fields: [blockedById], references: [id], onDelete: SetNull)
+  closure      Closure?      @relation(fields: [closureId], references: [id], onDelete: SetNull)
+  bookings     Booking[]
+  bookingSlots BookingSlot[]
+  events       SlotEvent[]
 
   @@unique([groundId, date, startHour, startMinute])
   @@index([closureId])
@@ -361,7 +362,9 @@ model Booking {
   bookingNumber           String               @unique
   source                  BookingSource
   groundId                String
+  /// The earliest ("primary") slot of the booking. A multi-slot booking's other slots live in BookingSlot.
   slotId                  String
+  /// = slotId while the booking is live (pending, confirmed, completed), null once cancelled. With BookingSlot.liveSlotId it is the double-booking guard.
   liveSlotId              String?              @unique
   customerId              String
   /// Contact details given for this booking (portal checkout never overwrites the customer record).
@@ -371,7 +374,7 @@ model Booking {
   contactPhone            String
   status                  BookingStatus        @default(pending)
   paymentStatus           BookingPaymentStatus @default(unpaid)
-  /// Slot price at booking time, smallest currency unit.
+  /// Sum of the booked slots' prices at booking time, smallest currency unit.
   amount                  Int
   /// Portal service fee at booking time; 0 for staff bookings.
   serviceFee              Int                  @default(0)
@@ -399,14 +402,15 @@ model Booking {
   updatedAt               DateTime             @updatedAt
   deletedAt               DateTime?
 
-  ground      Ground         @relation(fields: [groundId], references: [id], onDelete: Restrict)
-  slot        Slot           @relation(fields: [slotId], references: [id], onDelete: Restrict)
-  customer    Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
-  createdBy   User?          @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
-  cancelledBy User?          @relation("BookingCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
-  series      BookingSeries? @relation(fields: [seriesId], references: [id], onDelete: Restrict)
-  payments    Payment[]
-  events      BookingEvent[]
+  ground       Ground         @relation(fields: [groundId], references: [id], onDelete: Restrict)
+  slot         Slot           @relation(fields: [slotId], references: [id], onDelete: Restrict)
+  customer     Customer       @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  createdBy    User?          @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  cancelledBy  User?          @relation("BookingCancelledBy", fields: [cancelledById], references: [id], onDelete: SetNull)
+  series       BookingSeries? @relation(fields: [seriesId], references: [id], onDelete: Restrict)
+  payments     Payment[]
+  events       BookingEvent[]
+  bookingSlots BookingSlot[]
 
   @@index([groundId])
   @@index([slotId])
@@ -414,6 +418,27 @@ model Booking {
   @@index([seriesId])
   @@index([status])
   @@index([createdAt])
+}
+
+/// One slot of a booking (a booking holds 1 to 4 slots of one ground and one date). Cancelling a
+/// booking releases every slot (all or nothing). `liveSlotId` = slotId while the booking is live, null
+/// once cancelled: its unique index is the per-slot double-booking guard. `price` is the slot price at
+/// booking time, smallest currency unit; Booking.amount is their sum.
+model BookingSlot {
+  id          String    @id @default(uuid())
+  bookingId   String
+  slotId      String
+  liveSlotId  String?   @unique
+  price       Int
+  cancelledAt DateTime?
+  createdAt   DateTime  @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  slot    Slot    @relation(fields: [slotId], references: [id], onDelete: Restrict)
+
+  @@unique([bookingId, slotId])
+  @@index([bookingId])
+  @@index([slotId])
 }
 
 /// A repeat booking made by staff: one ground, one start hour, chosen weekdays. Each matching

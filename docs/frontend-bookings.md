@@ -65,9 +65,10 @@ How they move together:
 ### `GET /api/v1/checkout/options`
 
 ```json
-{ "cardEnabled": true, "cashEnabled": true, "wallets": [{ "method": "bkash", "number": "+8801700000000" }], "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15 }
+{ "cardEnabled": true, "cashEnabled": true, "wallets": [{ "method": "bkash", "number": "+8801700000000" }], "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15, "maxSlotsPerBooking": 4 }
 ```
 - **Load this on the checkout page.**
+  - `maxSlotsPerBooking` is how many slots one booking can hold; cap the slot picker at it.
   - Show the card option only when `cardEnabled` is true: it needs both the Stripe key and the webhook secret. Otherwise `POST /checkout` with `card` returns `400 CARD_NOT_AVAILABLE`, and `canPay` is false on every booking.
   - Show the "Pay at venue (cash)" option only when `cashEnabled` is true.
   - Show a bKash / Nagad option for each entry in `wallets` (only the ones the admin has set a number for). Choosing one shows "Send ৳{total} to {number}", where the total includes the service fee, plus two required fields: the TrxID and the number the money was sent from.
@@ -100,11 +101,12 @@ How they move together:
   - `400 WALLET_NOT_AVAILABLE` when that wallet's number isn't set.
   - `409 REFERENCE_ALREADY_USED` when the TrxID is already on a pending or verified payment of that method (nothing is booked). A TrxID from a rejected payment can be used again.
 
-- **`hour`:** the existing form posts `hour`, and `startHour` is accepted too.
+- **`hour`:** the existing form posts `hour`, and `startHour` is accepted too. To book several slots at once send `slots` instead (see "Several slots in one booking" below).
 - **Phone:** any common format; the API normalises it.
 - **`201 { bookingId, checkoutUrl }`:** do `window.location.href = checkoutUrl`. The slot is held for 15 minutes.
 - **Errors:**
-  - `409 SLOT_NOT_AVAILABLE`: just taken. Refresh the picker.
+  - `409 SLOT_NOT_AVAILABLE`: just taken (with several slots: any one of them). Refresh the picker.
+  - `400 TOO_MANY_SLOTS`: more than `maxSlotsPerBooking` slots.
   - `400 OUTSIDE_BOOKING_WINDOW`: beyond the booking window, or within 2 hours of the start.
   - `400 SLOT_IN_PAST`.
   - `400 GROUND_CLOSED`: the ground doesn't open that day.
@@ -117,6 +119,19 @@ How they move together:
   - On payment success, Stripe sends the customer to `{PUBLIC_APP_URL}/confirmation/{bookingId}?token=…`.
   - Cancelling at Stripe returns them to `/grounds/{groundId}`.
 
+### Several slots in one booking
+
+One booking can hold **up to `maxSlotsPerBooking` (4) slots of one ground and one date**, consecutive or not. One booking number, one payment, one booking link.
+- **Request:** `POST /checkout` takes either the single `hour` (or `startHour`, plus `startMinute`) as before, **or** `slots: [{ "hour": 18 }, { "hour": 19, "minute": 30 }]` (`startHour` / `startMinute` also work per item, no repeats). Send exactly one of the two. `groundId` and `date` stay at the top level, so every slot is on that ground and date (an item carrying `groundId` or `date` is `400 VALIDATION_FAILED`). Staff `POST /admin/bookings` takes `slotId` (one) or `slotIds: ["uuid", …]` (1 to 4, no repeats), exactly one of the two.
+- **Price:** `amount` is the sum of the slots' prices, the **service fee is charged once** per booking, `total = amount + serviceFee`. A bKash / Nagad payment, the Stripe session and the staff payment (`full`, or an advance, which must stay below the combined total) are all against that one total.
+- **All or none:** every slot is taken in the same step. If any one was just taken, the whole request is `409 SLOT_NOT_AVAILABLE` and nothing is reserved. A card checkout holds every slot for `holdMinutes`; the payment confirms all of them or none (a payment that arrives when any slot has been taken meanwhile is refunded in full).
+- **Cancelling is all or nothing:** cancelling a booking (staff, customer or the hold sweep) releases every slot and refunds exactly as for one slot. There is no per-slot cancel and no partial refund. Staff blocking one slot of a multi-slot booking (`cancelBooking: true`) cancels the whole booking: that slot ends `blocked`, the others `available`.
+- **Time rules use the span:** the customer cancellation cutoff counts from the **first** slot's start; "has taken place" (completed, can no longer be cancelled) is when the **last** slot has ended. Mark no-show opens when the first slot has started.
+- **Response:** `slot` is still there and is the **first (earliest)** slot. New: `slots` (every slot, earliest first, each `{ id?, date, startHour, startMinute, endHour, endMinute, startTime, endTime, price, status: "active" | "cancelled", cancelledAt }`; the public booking leaves out `id`) and `slotCount`. Show a time range or one line per slot from `slots`. A single-slot booking has `slotCount: 1` and one entry.
+- **New errors:** `400 TOO_MANY_SLOTS` (more than `maxSlotsPerBooking`), `400 SLOTS_MUST_SHARE_GROUND_DATE` (staff `slotIds` of different grounds or dates).
+- **Emails** list every slot's time. The CSV export's Start is the first slot's start and End the last slot's end, with a new last column `Slots` (the count).
+- Repeat bookings stay one slot per booking.
+
 ### `GET /api/v1/bookings/:id?token=…`: the confirmation page
 
 Returns the public booking. `404 BOOKING_NOT_FOUND` without a valid token.
@@ -126,6 +141,8 @@ Returns the public booking. `404 BOOKING_NOT_FOUND` without a valid token.
   "id": "uuid", "bookingNumber": "CT-24A7F", "status": "confirmed", "paymentStatus": "paid",
   "ground": { "id": "uuid", "name": "Green Arena", "sport": "football", "format": "5x5", "address": "…", "coverPhoto": "/api/v1/uploads/…" },
   "slot": { "date": "2026-11-02", "startHour": 18, "endHour": 19 },
+  "slots": [{ "date": "2026-11-02", "startHour": 18, "endHour": 19, "price": 150000, "status": "active", "cancelledAt": null }],
+  "slotCount": 1,
   "payAtVenue": false,
   "walletPayment": null,
   "amount": 150000, "serviceFee": 5000, "total": 155000, "paid": 155000, "due": 0,
@@ -242,6 +259,8 @@ Optional. Guests can still book, and signed links keep working. The session is a
   "status": "confirmed", "paymentStatus": "partial",
   "ground": { "id": "uuid", "name": "Green Arena", "sport": "football" },
   "slot": { "id": "uuid", "date": "2026-11-02", "startHour": 18, "endHour": 19 },
+  "slots": [{ "id": "uuid", "date": "2026-11-02", "startHour": 18, "endHour": 19, "price": 150000, "status": "active", "cancelledAt": null }],
+  "slotCount": 1,
   "customer": { "id": "uuid", "name": "Rakib Hasan", "phone": "+8801711000000", "email": "rakib@example.com" },
   "contact": { "name": "Rakib Hasan", "email": "rakib@example.com", "phone": "+8801711000000" },
   "amount": 150000, "serviceFee": 0, "total": 150000, "paid": 50000, "due": 100000,
@@ -296,6 +315,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
   - `none`: pending and unpaid.
 - **`method`** is required unless `type` is `none`: `cash`, `bank_transfer`, `bkash` or `nagad`. `payment.reference` is an optional TrxID for `bkash` / `nagad`, refused with `type: "none"` (nothing is paid).
 - **Pick the slot** from `GET /admin/slots?groundId&date&status=available&openDaysOnly=true`. The price is the slot's `price`, with no service fee.
+- **Several slots:** send `slotIds` (1 to 4 slots of one ground and date) **instead of** `slotId`. The price is the sum of their prices and the payment is against that total. `400 TOO_MANY_SLOTS`, `400 SLOTS_MUST_SHARE_GROUND_DATE`.
 - **The customer** is found or created by phone, and staff edits update the name and email. Send `customer.id` to book for a known customer.
 - **`customer.email` is optional** (`""`, `null` or left out). Left blank, the booking uses the customer's stored email if they have one (it is never cleared this way); otherwise the booking has `contact.email: null` and the customer gets no emails.
 - **Errors:** `409 SLOT_NOT_AVAILABLE`, `400 SLOT_IN_PAST`, `400 GROUND_CLOSED` (a day the ground doesn't open, with no staff override), `400 PAYMENT_EXCEEDS_DUE`, `404 CUSTOMER_NOT_FOUND`, `409 REFERENCE_ALREADY_USED` (that TrxID is already recorded for that method).
@@ -377,7 +397,10 @@ Optional. Guests can still book, and signed links keep working. The session is a
 |---|---|---|
 | 404 | `BOOKING_NOT_FOUND` | Unknown id, or a public request with a bad token |
 | 404 | `CUSTOMER_NOT_FOUND` | Unknown customer |
-| 409 | `SLOT_NOT_AVAILABLE` | Slot held, booked or blocked, or just taken |
+| 409 | `SLOT_NOT_AVAILABLE` | Slot held, booked or blocked, or just taken (any one slot of a multi-slot booking) |
+| 400 | `TOO_MANY_SLOTS` | More than `maxSlotsPerBooking` (4) slots in one booking |
+| 409 | `BOOKING_IN_PROGRESS` | Blocking one slot of a multi-slot booking that has already started (`cancelBooking: true`) |
+| 400 | `SLOTS_MUST_SHARE_GROUND_DATE` | Staff `slotIds` of different grounds or dates |
 | 400 | `OUTSIDE_BOOKING_WINDOW` | Portal: beyond `advanceBookingDays`, or inside the cutoff |
 | 400 | `GROUND_CLOSED` | Portal and staff: a new booking on a day the ground doesn't open |
 | 409 | `BOOKING_NOT_PENDING` | Confirming a booking that isn't pending, a portal booking, or resuming payment after the hold |
