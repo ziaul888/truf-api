@@ -26,6 +26,7 @@ describe('Reports (e2e)', () => {
     const grounds = await prisma.ground.findMany({ where: { name: { startsWith: PREFIX } }, select: { id: true } });
     const ids = grounds.map((g) => g.id);
     await prisma.payment.deleteMany({ where: { booking: { groundId: { in: ids } } } });
+    await prisma.bookingSlot.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.booking.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });
     await prisma.slot.deleteMany({ where: { groundId: { in: ids } } });

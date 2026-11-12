@@ -3,6 +3,7 @@ import { AppError } from '../common/app-error.js';
 import type { Prisma, Slot, SlotEventAction } from '../generated/prisma/client.js';
 import { isOpenOn } from '../grounds/ground-schedule.js';
 import { BookingCancellationService } from '../bookings/booking-cancellation.service.js';
+import { liveSlots, windowHasStarted, windowOf } from '../bookings/booking-slots.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from './slot-settings.service.js';
 import { SLOT_INCLUDE, toSlotDto, type SlotDto } from './slot.dto.js';
@@ -37,6 +38,9 @@ export interface BulkBlockResult {
 
 const hasBooking = () =>
   new AppError('This slot is booked. Send cancelBooking: true to cancel and refund the booking', 409, 'SLOT_HAS_BOOKING');
+const bookingInProgress = () =>
+  new AppError('This booking has several slots and has already started. Blocking one slot would cancel and refund the whole booking', 409, 'BOOKING_IN_PROGRESS');
+const SLOT_CLOCK = { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } as const;
 const slotHeld = () => new AppError('A customer is paying for this slot right now. Try again in a few minutes', 409, 'SLOT_NOT_AVAILABLE');
 
 /** Reason and note of a block (the cancelBooking flag only applies to blocking one slot). */
@@ -67,16 +71,36 @@ export class SlotBlocksService {
     return { slot: await this.dto(id), cancelledBooking: false };
   }
 
-  /** Cancels the live booking with a full refund (emailing the customer if notifyCustomerOnBlock), and blocks the slot. */
+  /**
+   * Cancels the live booking with a full refund (emailing the customer if notifyCustomerOnBlock), and blocks the slot.
+   * A booking is cancelled whole: if it holds other slots too, they are released (available), only this one is blocked.
+   */
   private async blockOverBooking(actorId: string, slot: Slot, input: BlockFields): Promise<BlockResult> {
-    const booking = await this.prisma.booking.findFirst({ where: { liveSlotId: slot.id }, select: { id: true } });
-    if (!booking) throw hasBooking();
+    const bookingId = await this.liveBookingIdOf(slot.id);
+    if (!bookingId) throw hasBooking();
+    await this.assertNotInProgress(bookingId);
     const { notifyCustomerOnBlock } = await this.settings.get();
-    await this.cancellation.cancel(booking.id, {
+    await this.cancellation.cancel(bookingId, {
       actorId, reason: `Slot blocked (${input.reason})`, refund: true, notify: notifyCustomerOnBlock,
-      blockSlot: { reason: input.reason, note: input.note },
+      blockSlot: { reason: input.reason, note: input.note }, blockSlotId: slot.id,
     });
     return { slot: await this.dto(slot.id), cancelledBooking: true };
+  }
+
+  /** A multi-slot booking that has started is not cancelled whole by a block over one of its slots. */
+  private async assertNotInProgress(bookingId: string) {
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      select: { slot: { select: SLOT_CLOCK }, amount: true, cancelledAt: true, bookingSlots: { select: { price: true, cancelledAt: true, slot: { select: SLOT_CLOCK } } } },
+    });
+    if (booking && liveSlots(booking).length > 1 && windowHasStarted(venueNow(), windowOf(booking))) throw bookingInProgress();
+  }
+
+  /** The live booking holding the slot: through its BookingSlot, or (made by an older release without one) its primary slot. */
+  private async liveBookingIdOf(slotId: string): Promise<string | null> {
+    const link = await this.prisma.bookingSlot.findFirst({ where: { liveSlotId: slotId, booking: { status: { not: 'cancelled' } } }, select: { bookingId: true } });
+    if (link) return link.bookingId;
+    return (await this.prisma.booking.findFirst({ where: { liveSlotId: slotId }, select: { id: true } }))?.id ?? null;
   }
 
   /** Back to `available`. A booking cancelled by the block is not restored. */

@@ -1,9 +1,9 @@
 import { AppError } from '../common/app-error.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { upcomingWhere } from '../slots/slot-rules.js';
 import { venueNow } from '../slots/venue-time.js';
 import { WALLET_UNDER_REVIEW } from './booking-rules.js';
+import { hasUpcomingSlot } from './booking-slots.js';
 import type { CheckoutInput } from './bookings.schemas.js';
 
 /** Open unpaid portal bookings (cash, or bKash / Nagad under review) one phone may hold at once. */
@@ -19,8 +19,8 @@ export const tooManyOpenBookings = () =>
 
 /** Pending portal bookings on `phone` that hold a slot without money taken: cash, or a wallet payment under review. */
 const openUnpaidWhere = (phone: string): Prisma.BookingWhereInput => ({
-  deletedAt: null, status: 'pending', source: 'portal', contactPhone: phone, slot: upcomingWhere(venueNow()),
-  OR: [{ payAtVenue: true }, WALLET_UNDER_REVIEW],
+  deletedAt: null, status: 'pending', source: 'portal', contactPhone: phone,
+  AND: [hasUpcomingSlot(venueNow()), { OR: [{ payAtVenue: true }, WALLET_UNDER_REVIEW] }],
 });
 
 /**

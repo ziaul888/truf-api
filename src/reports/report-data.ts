@@ -1,8 +1,8 @@
 import { ABANDONED_CHECKOUT } from '../bookings/booking-rules.js';
+import { hoursOf, windowHasEnded, windowOf } from '../bookings/booking-slots.js';
 import type { BookingStatus, PaymentMethod, Prisma } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { slotHour } from '../slots/slot-time.js';
-import { fromDbDate, hasEnded, toDbDate, venueNow, type IsoDate } from '../slots/venue-time.js';
+import { toDbDate, venueNow, type IsoDate } from '../slots/venue-time.js';
 import { instantsOf, percent, venueDateOf } from './report-periods.js';
 import type { ReportRange } from './reports.schemas.js';
 
@@ -15,13 +15,15 @@ export interface MoneyEvent {
   groundId: string;
 }
 
+const SLOT_CLOCK = { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } as const;
+
 export interface ReportBooking {
   date: IsoDate;
   status: BookingStatus;
   total: number;
   groundId: string;
   hours: number;
-  /** The slot has finished. */
+  /** The last slot has finished. */
   ended: boolean;
 }
 
@@ -65,14 +67,16 @@ export async function loadMoney(prisma: PrismaService, r: ReportRange): Promise<
 export async function loadBookings(prisma: PrismaService, r: ReportRange): Promise<ReportBooking[]> {
   const rows = await prisma.booking.findMany({
     where: reportBookingsWhere(r),
-    select: { status: true, total: true, groundId: true, slot: { select: { date: true, startHour: true, startMinute: true, durationMinutes: true } } },
+    select: {
+      status: true, total: true, groundId: true, slot: { select: SLOT_CLOCK },
+      bookingSlots: { select: { price: true, cancelledAt: true, slot: { select: SLOT_CLOCK } } },
+    },
   });
   const now = venueNow();
-  return rows.map((b) => {
-    const date = fromDbDate(b.slot.date);
-    const hours = b.slot.durationMinutes / 60;
-    return { date, status: b.status, total: b.total, groundId: b.groundId, hours, ended: hasEnded(now, date, slotHour(b.slot), b.slot.durationMinutes) };
-  });
+  // Hours are the sum of the booking's slots; all share one date.
+  return rows.map((b) => ({
+    date: windowOf(b).date, status: b.status, total: b.total, groundId: b.groundId, hours: hoursOf(b), ended: windowHasEnded(now, windowOf(b)),
+  }));
 }
 
 export interface MoneyTotals {

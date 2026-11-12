@@ -33,7 +33,8 @@ export class DashboardAttentionService {
       // Unpaid staff bookings and pay-at-venue requests; card checkouts confirm themselves.
       this.prisma.booking.findMany({ where: { deletedAt: null, status: 'pending', NOT: CARD_CHECKOUT_IN_PROGRESS }, select: { payAtVenue: true } }),
       loadOwing(this.prisma),
-      this.prisma.slot.count({ where: { status: 'held' } }),
+      // One card checkout holds up to 4 slots: count the checkouts, not the slots.
+      this.prisma.slot.findMany({ where: { status: 'held' }, select: { heldByBookingId: true }, distinct: ['heldByBookingId'] }),
       // Today and tomorrow, so "within the hour" works across midnight.
       this.prisma.booking.findMany({
         where: {
@@ -54,7 +55,7 @@ export class DashboardAttentionService {
       toVerify: { count: toVerify },
       overdue: sumDue(owing.filter((b) => isOverdue(b, now))),
       dueToday: sumDue(owing.filter((b) => isDueToday(b, now))),
-      payingNow: { count: held },
+      payingNow: { count: held.length },
       startingSoon: { count: soon.length, withinMinutes: SOON_MINUTES },
       needsOutcome,
     };

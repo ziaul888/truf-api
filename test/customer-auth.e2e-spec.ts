@@ -41,6 +41,7 @@ describe('Customer sign-in (e2e)', () => {
     const ids = grounds.map((g) => g.id);
     await prisma.bookingEvent.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.payment.deleteMany({ where: { booking: { groundId: { in: ids } } } });
+    await prisma.bookingSlot.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.booking.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });
     await prisma.slot.deleteMany({ where: { groundId: { in: ids } } });

@@ -52,6 +52,7 @@ describe('Bookings (e2e)', () => {
     const ids = grounds.map((g) => g.id);
     await prisma.bookingEvent.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.payment.deleteMany({ where: { booking: { groundId: { in: ids } } } });
+    await prisma.bookingSlot.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.booking.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });
     await prisma.slotEvent.deleteMany({ where: { groundId: { in: ids } } });
@@ -189,7 +190,7 @@ describe('Bookings (e2e)', () => {
     it('tells the portal that cash is offered, with the fee', async () => {
       const res = await http().get(`${API}/checkout/options`).expect(200);
       // `wallets` follows the bKash / Nagad numbers, which wallet-payments.e2e-spec sets meanwhile.
-      expect(res.body.data).toEqual({ cardEnabled: true, cashEnabled: true, wallets: expect.any(Array), serviceFee: 5000, currency: 'bdt', holdMinutes: 15 });
+      expect(res.body.data).toEqual({ cardEnabled: true, cashEnabled: true, wallets: expect.any(Array), serviceFee: 5000, currency: 'bdt', holdMinutes: 15, maxSlotsPerBooking: 4 });
     });
 
     it('books the slot with no Stripe step, pending until staff confirm', async () => {

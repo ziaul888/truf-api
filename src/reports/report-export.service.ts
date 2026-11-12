@@ -1,10 +1,10 @@
 import { Injectable } from '@nestjs/common';
 import { BOOKING_INCLUDE } from '../bookings/booking.dto.js';
 import { owedOf, paidOf } from '../bookings/booking-rules.js';
+import { currentSlots, windowOf, windowTimes } from '../bookings/booking-slots.js';
 import { CUSTOMER_SUMMARY_INCLUDE, toCustomerDto } from '../customers/customer.dto.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { slotTimes } from '../slots/slot-time.js';
-import { fromDbDate, venueNow } from '../slots/venue-time.js';
+import { venueNow } from '../slots/venue-time.js';
 import { csvLine, csvMoney } from './csv.js';
 import { reportBookingsWhere } from './report-data.js';
 import { assertReportRange, instantsOf } from './report-periods.js';
@@ -57,7 +57,7 @@ export class ReportExportService {
   private async *bookings(r: ReportRange): AsyncGenerator<string> {
     yield csvLine([
       'Booking #', 'Customer', 'Phone', 'Ground', 'Date', 'Start', 'End', 'Amount', 'Service fee', 'Total', 'Paid', 'Due',
-      'Status', 'Payment status', 'Source', 'Created',
+      'Status', 'Payment status', 'Source', 'Created', 'Slots',
     ]);
     for (let cursor: string | undefined; ;) {
       const rows = await this.prisma.booking.findMany({
@@ -66,11 +66,13 @@ export class ReportExportService {
         ...(cursor && { cursor: { id: cursor }, skip: 1 }),
       });
       for (const b of rows) {
-        const { startTime, endTime } = slotTimes(b.slot);
+        // Start is the first slot's start and End the last slot's end; Slots is how many (appended, so columns don't move).
+        const window = windowOf(b);
+        const { startTime, endTime } = windowTimes(window);
         yield csvLine([
-          b.bookingNumber, b.contactName, b.contactPhone, b.ground.name, fromDbDate(b.slot.date), startTime, endTime,
+          b.bookingNumber, b.contactName, b.contactPhone, b.ground.name, window.date, startTime, endTime,
           csvMoney(b.amount), csvMoney(b.serviceFee), csvMoney(b.total), csvMoney(paidOf(b.payments)), csvMoney(owedOf(b, b.payments)),
-          b.status, b.paymentStatus, b.source, localTime(b.createdAt),
+          b.status, b.paymentStatus, b.source, localTime(b.createdAt), currentSlots(b).length,
         ]);
       }
       if (rows.length < BATCH) return;

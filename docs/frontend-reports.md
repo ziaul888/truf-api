@@ -51,7 +51,7 @@ Conventions are unchanged:
 | Avg booking value | Mean `total` of bookings that weren't cancelled; 0 when there are none | Slot date |
 | Completion rate | Of bookings whose slot has ended, the % that are `completed`; `null` when none has ended | Slot date |
 | Cancellation rate | Cancelled ÷ all bookings, as a % | Slot date |
-| Utilization | Hours booked (bookings not cancelled) ÷ hours open, leaving out blocked slots and closures | Slot date |
+| Utilization | Hours booked (the sum of the durations of every slot of each booking not cancelled) ÷ hours open, leaving out blocked slots and closures | Slot date |
 
 Revenue and bookings are dated differently on purpose. A booking paid in October for a slot in November counts in October's revenue and November's bookings. That way revenue matches the bank and the dashboard.
 
@@ -134,7 +134,7 @@ Each status is the booking's status now.
 | `type` | Needs | Columns |
 |---|---|---|
 | `revenue` | `from`, `to`, `groupBy` = `day` or `week` | Period start, Period end, Received, Refunds, Net revenue, Card, Cash, Bank transfer, Bookings, bKash, Nagad (the last two were added at the end, so earlier columns keep their positions) |
-| `bookings` | `from`, `to` (slot date) | Booking #, Customer, Phone, Ground, Date, Start, End, Amount, Service fee, Total, Paid, Due, Status, Payment status, Source, Created |
+| `bookings` | `from`, `to` (slot date) | Booking #, Customer, Phone, Ground, Date, Start, End, Amount, Service fee, Total, Paid, Due, Status, Payment status, Source, Created, Slots. For a multi-slot booking Start is the first slot's start, End the last slot's end, and Slots (new, last column) is how many slots it holds |
 | `customers` | `from`/`to` optional: customers who joined in the range | Name, Phone, Email (empty when the customer has none), Customer since, Bookings, Total spent, Last booking, Due amount, Tag |
 
 **Download example:**

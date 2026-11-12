@@ -120,7 +120,9 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 
 - Every block/unblock is logged in `SlotEvent`; slot status is only `available` | `held` | `booked` | `blocked` (payment state lives on the booking)
 
-- No double-booking: take a slot with a conditional update (`where status = 'available'`) inside a transaction; `Booking.liveSlotId` (unique, cleared on cancel) is the database-level guard
+- No double-booking: take a slot with a conditional update (`where status = 'available'`) inside a transaction; `Booking.liveSlotId` (unique, cleared on cancel) is the database-level guard; `BookingSlot.liveSlotId` (unique, `BookingSlot_liveSlotId_key`) is the same guard for each slot of a multi-slot booking
+
+- One booking can hold up to 4 slots (`MAX_SLOTS_PER_BOOKING`, `bookings/booking-limits.ts`, sent as `maxSlotsPerBooking` in `GET /checkout/options`) of ONE ground and ONE date, consecutive or not, in `BookingSlot` rows; `Booking.slotId` / `liveSlotId` are the earliest ("primary") one. One booking number and one payment; `Booking.amount` is the sum of the slots' prices and the service fee is charged once (`total = amount + serviceFee`). Portal checkout takes `slots: [{ hour, minute? }]` (or the old single `hour`), staff booking `slotIds` (or the old `slotId`); `400 TOO_MANY_SLOTS`, `400 SLOTS_MUST_SHARE_GROUND_DATE`. All the slots are taken with ONE conditional update and the count must match, else the whole transaction rolls back (`409 SLOT_NOT_AVAILABLE`); a card payment confirms all of them or none (a late payment with any slot gone is refunded). Cancelling is all or nothing: it releases every slot and refunds as for one slot (no per-slot cancel, no partial refund); staff blocking one slot of a multi-slot booking cancels the whole booking and only that slot ends blocked. Time rules: the customer cutoff counts from the first live slot's start, "ended" is the last live slot's end (`bookings/booking-slots.ts`). Repeat bookings stay single-slot but still write one `BookingSlot` row per booking. Open-unpaid limit counts a booking as 1
 
 - Admin-blocked slots are never bookable by customers
 
@@ -155,6 +157,12 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 - Reports (`/admin/reports`, admin + manager): revenue is dated by when money moved (payments received, by `Payment.receivedAt` with `createdAt` for older rows, minus refunds by `refundedAt`, as the dashboard does; a bKash / Nagad payment is received when staff verify it), bookings by slot date; abandoned card checkouts never count; weeks start on Saturday; exports are CSV only
 
 - No other dynamic pricing, coupons, SMS (beyond sign-in codes), wallets (beyond manual bKash / Nagad), reviews or multi-branch
+
+## Deploy notes (multi-slot bookings)
+- Roll out backend + migration `20261112090000_booking_slots` FIRST. Do NOT deploy/enable the multi-slot frontend until the old backend container has stopped serving: it knows nothing of `BookingSlot`, so it would confirm, cancel or release only the primary slot of a multi-slot booking.
+- After cut-over (no old instance running), run once, by hand: the missing-row `INSERT INTO "BookingSlot" ...` at the bottom of the migration (bookings created during the overlap), then
+  `UPDATE "BookingSlot" s SET "liveSlotId" = NULL, "cancelledAt" = COALESCE(b."cancelledAt", now()) FROM "Booking" b WHERE s."bookingId" = b."id" AND b."status" = 'cancelled' AND s."liveSlotId" IS NOT NULL;`
+  (bookings the old container cancelled left their live index set). Until then the code self-heals: booking a slot first clears such stale rows (`releaseStaleBookingSlots`), and readers ignore a live BookingSlot whose booking is cancelled.
 
 ## Testing
 - Unit test every service (70% coverage target); e2e every endpoint with Supertest

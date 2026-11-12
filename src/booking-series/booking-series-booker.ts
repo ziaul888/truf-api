@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { newBookingNumber, withBookingNumber } from '../bookings/booking-rules.js';
+import { releaseStaleBookingSlots } from '../bookings/booking-slots.js';
 import type { AvailableDays, BookingSeries, Prisma, Slot, Weekday } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import type { SlotStart } from '../slots/slot-time.js';
@@ -62,6 +63,7 @@ export class BookingSeriesBooker {
   ): Promise<BookedDate[]> {
     const plans = await this.survey(tx, series.groundId, ground, series, dates, now);
     const free = plans.filter((p) => p.reason === null).map((p) => p.slot!);
+    if (free.length > 0) await releaseStaleBookingSlots(tx, free.map((s) => s.id));
     const taken = free.length === 0 ? [] : await tx.slot.updateManyAndReturn({
       where: { id: { in: free.map((s) => s.id) }, status: 'available' }, data: { status: 'booked' },
     });
@@ -72,6 +74,10 @@ export class BookingSeriesBooker {
       .map((p) => ({ seriesId: series.id, date: toDbDate(p.date), reason: p.reason ?? 'booked' }));
 
     await tx.booking.createMany({ data: booked.map(({ id, slot }) => newSeriesBooking(id, series, slot, actorId)) });
+    // Repeat bookings stay single-slot, but every booking has its BookingSlot row.
+    await tx.bookingSlot.createMany({
+      data: booked.map(({ id, slot }) => ({ bookingId: id, slotId: slot.id, liveSlotId: slot.id, price: slot.price })),
+    });
     await tx.bookingEvent.createMany({
       data: booked.flatMap(({ id }) => [
         { bookingId: id, type: 'created' as const, userId: actorId, detail: 'Booked as part of a repeat booking' },

@@ -9,11 +9,12 @@ const row = (contactEmail: string | null) => ({
   paymentStatus: 'unpaid', dueNote: null, payments: [],
   ground: { id: 'g-1', name: 'Arena', address: null },
   slot: { date: new Date('2026-10-29T00:00:00Z'), startHour: 18, durationMinutes: 60 },
+  bookingSlots: [] as object[],
 });
 
-function setup(contactEmail: string | null) {
+function setup(contactEmail: string | null, bookingSlots: object[] = []) {
   const prisma = {
-    booking: { findUniqueOrThrow: vi.fn(async () => row(contactEmail)) },
+    booking: { findUniqueOrThrow: vi.fn(async () => ({ ...row(contactEmail), bookingSlots })) },
     bookingEvent: { create: vi.fn(async () => ({})) },
     user: { findMany: vi.fn(async () => []) },
   };
@@ -33,6 +34,13 @@ describe('BookingNotifier', () => {
     await expect(notifier.confirmed('b-1')).resolves.toBe(true);
     expect(email.send).toHaveBeenCalledWith(expect.objectContaining({ to: 'r@x.test', kind: 'booking_confirmed' }));
     expect(prisma.bookingEvent.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('lists every slot of a multi-slot booking in the email', async () => {
+    const slotAt = (id: string, startHour: number) => ({ price: 1500, cancelledAt: null, slot: { id, date: new Date('2026-10-29T00:00:00Z'), startHour, startMinute: 0, durationMinutes: 60 } });
+    const { notifier, email } = setup('r@x.test', [slotAt('s-2', 21), slotAt('s-1', 18)]);
+    await notifier.confirmed('b-1');
+    expect(email.send).toHaveBeenCalledWith(expect.objectContaining({ text: expect.stringContaining('When: 2026-10-29, 18:00–19:00, 21:00–22:00') }));
   });
 
   it('with no contact email sends and logs nothing to the customer', async () => {

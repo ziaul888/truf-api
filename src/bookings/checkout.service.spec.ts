@@ -11,7 +11,9 @@ import { CheckoutService } from './checkout.service.js';
 // 04:00 UTC = 10:00 in Dhaka, Wed 28 Oct 2026.
 const NOW = new Date('2026-10-28T04:00:00Z');
 
-const slotRow = (overrides: object = {}) => ({ id: 's-1', groundId: 'g-1', startHour: 18, startMinute: 0, price: 1500, status: 'available', ...overrides });
+const slotRow = (overrides: object = {}) => ({
+  id: 's-1', groundId: 'g-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18, startMinute: 0, durationMinutes: 60, price: 1500, status: 'available', ...overrides,
+});
 const input = {
   groundId: 'g-1', date: '2026-10-29', startHour: 18, startMinute: 0 as 0 | 30, customerName: 'Rakib', customerEmail: 'r@x.test', customerPhone: '+8801711000000',
   paymentMethod: 'card' as 'card' | 'cash' | 'bkash' | 'nagad',
@@ -20,7 +22,7 @@ const input = {
 const SIGNED_IN = input.customerPhone;
 
 function setup({
-  slot = slotRow() as object | null, ground = { id: 'g-1', name: 'Arena', availableDays: 'everyday', customDays: [] } as object | null,
+  slot = slotRow() as object | null, slots = null as object[] | null, ground = { id: 'g-1', name: 'Arena', availableDays: 'everyday', customDays: [] } as object | null,
   held = 1, cash = true, existing = null as object | null, bkashNumber = null as string | null, openUnpaid = 0, switches = {},
 } = {}) {
   const tx = {
@@ -29,10 +31,11 @@ function setup({
       findUnique: vi.fn(async (): Promise<object | null> => null), create: vi.fn(async () => ({ id: 'c-1' })), update: vi.fn(async () => ({})),
     },
     booking: { create: vi.fn(async (_args: { data: Record<string, unknown> }) => ({})) },
+    bookingSlot: { updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: 0 })) },
   };
   const prisma = {
     ground: { findFirst: vi.fn(async () => ground) },
-    slot: { findUnique: vi.fn(async () => slot) },
+    slot: { findMany: vi.fn(async (_args: object) => slots ?? (slot ? [slot] : [])) },
     booking: {
       update: vi.fn(async () => ({})), findFirst: vi.fn(async () => existing), findUnique: vi.fn(async () => existing),
       count: vi.fn(async () => openUnpaid),
@@ -51,7 +54,7 @@ function setup({
     settings as unknown as SlotSettingsService, cancellation as unknown as BookingCancellationService,
     notifier as unknown as BookingNotifier,
   );
-  return { service, tx, stripe, cancellation, notifier };
+  return { service, tx, stripe, cancellation, notifier, prisma };
 }
 
 beforeEach(() => vi.useFakeTimers({ now: NOW, toFake: ['Date'] }));
@@ -94,7 +97,7 @@ describe('CheckoutService', () => {
 
     expect(result.checkoutUrl).toBe('https://stripe.test/cs_1');
     const hold = tx.slot.updateMany.mock.calls[0]![0];
-    expect(hold).toMatchObject({ where: { id: 's-1', status: 'available' }, data: { status: 'held', heldByBookingId: result.bookingId } });
+    expect(hold).toMatchObject({ where: { id: { in: ['s-1'] }, status: 'available' }, data: { status: 'held', heldByBookingId: result.bookingId } });
     expect((hold.data as { heldUntil: Date }).heldUntil).toEqual(new Date(NOW.getTime() + 15 * 60_000));
     expect(tx.booking.create.mock.calls[0]![0].data).toMatchObject({ source: 'portal', amount: 1500, serviceFee: 5000, total: 6500, liveSlotId: 's-1' });
     expect(stripe.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ total: 6500, bookingId: result.bookingId }));
@@ -122,7 +125,7 @@ describe('CheckoutService', () => {
       .rejects.toMatchObject({ code: 'OUTSIDE_BOOKING_WINDOW' });
     const { service, stripe } = setup({ slot: slotRow({ startHour: 12, startMinute: 30, durationMinutes: 90 }) });
     await expect(service.start({ ...today, startHour: 12 })).resolves.toMatchObject({ paymentMethod: 'card' });
-    expect(stripe.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ description: 'Arena, 2026-10-28 12:30' }));
+    expect(stripe.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ description: 'Arena, 2026-10-28 12:30–14:00' }));
   });
 
   it.each(['card', 'cash'] as const)('takes nothing for a %s checkout on a closed day', async (paymentMethod) => {
@@ -196,7 +199,9 @@ describe('CheckoutService', () => {
   });
 
   it('tells the portal which payment methods are offered and the fee', async () => {
-    await expect(setup({ cash: false }).service.options()).resolves.toEqual({ cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15 });
+    await expect(setup({ cash: false }).service.options()).resolves.toEqual({
+      cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15, maxSlotsPerBooking: 4,
+    });
   });
 
   describe('card switched off by the admin (Stripe keys set)', () => {
@@ -317,6 +322,96 @@ describe('CheckoutService', () => {
 
     it('404s without a valid token', async () => {
       await expect(setup({ existing: owed() }).service.payDue('b-1', 'nope')).rejects.toMatchObject({ status: 404 });
+    });
+  });
+
+  describe('several slots in one booking', () => {
+    const at = (startHour: number, price = 1500) => slotRow({ id: `s-${startHour}`, startHour, price });
+    const { startHour: _single, ...multi } = input;
+    const two = { ...multi, slots: [{ startHour: 19, startMinute: 0 as const }, { startHour: 18, startMinute: 0 as const }] };
+    const four = { ...multi, slots: [18, 19, 20, 21].map((startHour) => ({ startHour, startMinute: 0 as const })) };
+
+    it('holds all of them with ONE conditional update, charges the fee once and sends the combined total to Stripe', async () => {
+      const { service, tx, stripe } = setup({ slots: [at(19, 1500), at(18, 1000)], held: 2 });
+      const result = await service.start(two);
+
+      expect(tx.slot.updateMany).toHaveBeenCalledTimes(1);
+      const hold = tx.slot.updateMany.mock.calls[0]![0];
+      expect(hold).toMatchObject({
+        where: { id: { in: ['s-18', 's-19'] }, status: 'available' }, data: { status: 'held', heldByBookingId: result.bookingId },
+      });
+      const data = tx.booking.create.mock.calls[0]![0].data;
+      expect(data).toMatchObject({ slotId: 's-18', liveSlotId: 's-18', amount: 2500, serviceFee: 5000, total: 7500 });
+      expect(data.bookingSlots).toEqual({
+        create: [{ slotId: 's-18', liveSlotId: 's-18', price: 1000 }, { slotId: 's-19', liveSlotId: 's-19', price: 1500 }],
+      });
+      expect(stripe.createCheckoutSession).toHaveBeenCalledWith(expect.objectContaining({ total: 7500, description: 'Arena, 2026-10-29 18:00–20:00' }));
+    });
+
+    it('books four slots at once for cash, with one wallet-sized payment for wallets', async () => {
+      const slots = [18, 19, 20, 21].map((h) => at(h));
+      const cash = setup({ slots, held: 4 });
+      await cash.service.start({ ...four, paymentMethod: 'cash' }, SIGNED_IN);
+      expect(cash.tx.slot.updateMany.mock.calls[0]![0]).toMatchObject({ where: { id: { in: ['s-18', 's-19', 's-20', 's-21'] } }, data: { status: 'booked' } });
+      expect(cash.tx.booking.create.mock.calls[0]![0].data).toMatchObject({ amount: 6000, total: 11000, payAtVenue: true });
+
+      const wallet = setup({ slots, held: 4, bkashNumber: '+8801700000000' });
+      await wallet.service.start({ ...four, paymentMethod: 'bkash', reference: 'ABC123XYZ', payerNumber: '+8801811000000' }, SIGNED_IN);
+      expect(wallet.tx.booking.create.mock.calls[0]![0].data.payments).toMatchObject({ create: { amount: 11000, status: 'pending' } });
+    });
+
+    it('first frees stale live BookingSlot rows of cancelled bookings (left by an older release) on these slots', async () => {
+      const { service, tx } = setup({ slots: [at(18), at(19)], held: 2 });
+      await service.start(two);
+      expect(tx.bookingSlot.updateMany).toHaveBeenCalledWith({
+        where: { slotId: { in: ['s-18', 's-19'] }, liveSlotId: { not: null }, booking: { status: 'cancelled' } },
+        data: { liveSlotId: null, cancelledAt: expect.any(Date) },
+      });
+      expect(tx.bookingSlot.updateMany.mock.invocationCallOrder[0]!).toBeLessThan(tx.booking.create.mock.invocationCallOrder[0]!);
+    });
+
+    it('refuses more than 4 slots before reading any', async () => {
+      const { service, prisma, tx } = setup();
+      const five = { ...multi, slots: [17, 18, 19, 20, 21].map((startHour) => ({ startHour, startMinute: 0 as const })) };
+      await expect(service.start(five)).rejects.toMatchObject({ status: 400, code: 'TOO_MANY_SLOTS' });
+      expect(prisma.slot.findMany).not.toHaveBeenCalled();
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('is SLOT_NOT_AVAILABLE, claiming nothing, when one of the slots does not exist', async () => {
+      const { service, tx } = setup({ slots: [at(18)] });
+      await expect(service.start(two)).rejects.toMatchObject({ status: 409, code: 'SLOT_NOT_AVAILABLE' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+      expect(tx.booking.create).not.toHaveBeenCalled();
+    });
+
+    it('is SLOT_NOT_AVAILABLE and creates no booking when only some were claimed (the transaction rolls back)', async () => {
+      const { service, tx, stripe } = setup({ slots: [at(18), at(19)], held: 1 });
+      await expect(service.start(two)).rejects.toMatchObject({ status: 409, code: 'SLOT_NOT_AVAILABLE' });
+      expect(tx.booking.create).not.toHaveBeenCalled();
+      expect(stripe.createCheckoutSession).not.toHaveBeenCalled();
+    });
+
+    it('maps a clash on a BookingSlot live index to SLOT_NOT_AVAILABLE', async () => {
+      const { service, tx } = setup({ slots: [at(18), at(19)], held: 2 });
+      tx.booking.create.mockRejectedValueOnce(Object.assign(new Error('unique'), {
+        code: 'P2002', meta: { driverAdapterError: { cause: { constraint: { index: 'BookingSlot_liveSlotId_key' } } } },
+      }));
+      await expect(service.start(two)).rejects.toMatchObject({ status: 409, code: 'SLOT_NOT_AVAILABLE' });
+    });
+
+    it('refuses if any one slot is blocked or inside the cutoff', async () => {
+      await expect(setup({ slots: [at(18), slotRow({ id: 's-19', startHour: 19, status: 'blocked' })] }).service.start(two))
+        .rejects.toMatchObject({ code: 'SLOT_NOT_AVAILABLE' });
+      const today = { ...two, date: '2026-10-28', slots: [{ startHour: 11, startMinute: 0 as const }, { startHour: 18, startMinute: 0 as const }] };
+      await expect(setup({ slots: [at(11), at(18)] }).service.start(today)).rejects.toMatchObject({ code: 'OUTSIDE_BOOKING_WINDOW' });
+    });
+
+    it('gives every slot back if Stripe fails (the cancellation releases the whole booking)', async () => {
+      const { service, stripe, cancellation } = setup({ slots: [at(18), at(19)], held: 2 });
+      stripe.createCheckoutSession.mockRejectedValueOnce(new Error('down'));
+      await expect(service.start(two)).rejects.toThrow('down');
+      expect(cancellation.cancel).toHaveBeenCalledTimes(1);
     });
   });
 

@@ -17,7 +17,7 @@ const LATER = { ...ENDED, startHour: 18 };
 const row = (overrides: object = {}) => ({
   id: 'b-1', bookingNumber: 'CT-AAAAA', status: 'confirmed', source: 'staff', payAtVenue: false, total: 1000, amount: 1000, serviceFee: 0,
   payments: [{ id: 'p-1', amount: 400, status: 'succeeded', method: 'cash', payerNumber: null }],
-  slot: ENDED, confirmedAt: new Date('2026-10-27T10:00:00Z'), cancelRequestedAt: null,
+  slot: ENDED, bookingSlots: [], confirmedAt: new Date('2026-10-27T10:00:00Z'), cancelRequestedAt: null,
   ground: { id: 'g-1', name: 'Main', sport: 'football' }, customer: { id: 'c-1', name: 'A', phone: null, email: 'a@x.test' },
   contactName: 'A', contactEmail: 'a@x.test', contactPhone: '+8801711000000', dueDate: null, dueNote: null, notes: null, createdBy: null,
   cancelledAt: null, cancelReason: null, createdAt: NOW, updatedAt: NOW,

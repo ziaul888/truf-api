@@ -83,8 +83,8 @@ describe('booking rules', () => {
 
     it('is not money owed, and can only be asked to cancel (once, outside the cutoff)', () => {
       const now = { date: '2026-10-28', minutes: 600 } as never;
-      const slot = { date: new Date('2026-10-29T00:00:00Z'), startHour: 18 };
-      const review = row({ payments: [wallet('pending')], slot, cancelRequestedAt: null });
+      const slot = { id: 's-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18 };
+      const review = row({ payments: [wallet('pending')], slot, bookingSlots: [], cancelRequestedAt: null });
       expect(owedOf(review, review.payments)).toBe(0);
       expect(owedOf(row({ payments: [] }), [])).toBe(6000);
       expect(customerCanCancel(review, now, 2)).toBe(false);

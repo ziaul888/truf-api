@@ -27,8 +27,13 @@ function setup(slots: Slot[] = [slot()], ground: Partial<Ground> | null = { id: 
   const prisma = {
     ...tx,
     ground: { findUnique: vi.fn(async () => ground) },
-    slot: { ...tx.slot, findUniqueOrThrow: vi.fn(async () => ({ ...slots[0], ground: { name: 'Arena' }, blockedBy: null, bookings: [] })) },
-    booking: { findFirst: vi.fn(async () => ({ id: 'b-1' })) },
+    slot: { ...tx.slot, findUniqueOrThrow: vi.fn(async () => ({ ...slots[0], ground: { name: 'Arena' }, blockedBy: null, bookings: [], bookingSlots: [] })) },
+    bookingSlot: { findFirst: vi.fn(async (_args: object): Promise<{ bookingId: string } | null> => ({ bookingId: 'b-1' })) },
+    booking: {
+      findFirst: vi.fn(async (_args: object): Promise<{ id: string } | null> => ({ id: 'b-1' })),
+      // The booking behind the slot: one live slot unless a test changes it.
+      findUnique: vi.fn(async (_args: object): Promise<object | null> => ({ slot: slots[0], amount: 1500, cancelledAt: null, bookingSlots: [] })),
+    },
     $transaction: vi.fn(async (fn: (t: typeof tx) => unknown) => fn(tx)),
   };
   const generator = { fillDates: vi.fn(async (_tx: unknown, _groundId: string, _dates: string[]) => undefined) };
@@ -38,7 +43,7 @@ function setup(slots: Slot[] = [slot()], ground: Partial<Ground> | null = { id: 
     prisma as unknown as PrismaService, generator as unknown as SlotGeneratorService,
     cancellation as unknown as BookingCancellationService, settings as unknown as SlotSettingsService,
   );
-  return { service, tx, generator, cancellation };
+  return { service, tx, generator, cancellation, prisma };
 }
 
 async function expectAppError(promise: Promise<unknown>, status: number, code: string) {
@@ -78,8 +83,49 @@ describe('SlotBlocksService — one slot', () => {
     const result = await service.block('u-1', 's-1', { reason: 'maintenance', note: 'Pipe burst', cancelBooking: true });
     expect(result.cancelledBooking).toBe(true);
     expect(cancellation.cancel).toHaveBeenCalledWith('b-1', expect.objectContaining({
-      actorId: 'u-1', refund: true, notify: true, blockSlot: { reason: 'maintenance', note: 'Pipe burst' },
+      actorId: 'u-1', refund: true, notify: true, blockSlot: { reason: 'maintenance', note: 'Pipe burst' }, blockSlotId: 's-1',
     }));
+  });
+
+  it('finds the booking through the BookingSlot, so blocking any slot of a multi-slot booking cancels the whole booking', async () => {
+    const { service, cancellation, prisma } = setup([slot({ id: 's-2', status: 'booked' })]);
+    prisma.bookingSlot.findFirst.mockResolvedValueOnce({ bookingId: 'b-multi' });
+    await service.block('u-1', 's-2', { reason: 'maintenance', cancelBooking: true });
+    expect(prisma.bookingSlot.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { liveSlotId: 's-2', booking: { status: { not: 'cancelled' } } } }));
+    expect(cancellation.cancel).toHaveBeenCalledWith('b-multi', expect.objectContaining({ blockSlotId: 's-2' }));
+  });
+
+  it('falls back to Booking.liveSlotId for a booking made without BookingSlot rows (older release)', async () => {
+    const { service, cancellation, prisma } = setup([slot({ status: 'booked' })]);
+    prisma.bookingSlot.findFirst.mockResolvedValueOnce(null);
+    await service.block('u-1', 's-1', { reason: 'maintenance', cancelBooking: true });
+    expect(prisma.booking.findFirst).toHaveBeenCalledWith(expect.objectContaining({ where: { liveSlotId: 's-1' } }));
+    expect(cancellation.cancel).toHaveBeenCalledWith('b-1', expect.anything());
+  });
+
+  it('refuses (409 BOOKING_IN_PROGRESS) to cancel a started multi-slot booking by blocking one of its slots', async () => {
+    const started = slot({ status: 'booked', date: new Date('2026-10-28T00:00:00Z'), startHour: 9, durationMinutes: 120 });
+    const { service, cancellation, prisma } = setup([slot({ id: 's-9', status: 'booked' })]);
+    const live = (s: Slot) => ({ price: 1500, cancelledAt: null, slot: s });
+    const later = slot({ id: 's-2', date: new Date('2026-10-28T00:00:00Z'), startHour: 12 });
+    prisma.booking.findUnique.mockResolvedValueOnce({ slot: started, amount: 3000, cancelledAt: null, bookingSlots: [live(started), live(later)] });
+    await expectAppError(service.block('u-1', 's-9', { reason: 'maintenance', cancelBooking: true }), 409, 'BOOKING_IN_PROGRESS');
+    expect(cancellation.cancel).not.toHaveBeenCalled();
+  });
+
+  it('still cancels a multi-slot booking that has not started yet', async () => {
+    const { service, cancellation, prisma } = setup([slot({ status: 'booked' })]);
+    const live = (s: Slot) => ({ price: 1500, cancelledAt: null, slot: s });
+    prisma.booking.findUnique.mockResolvedValueOnce({ slot: slot(), amount: 3000, cancelledAt: null, bookingSlots: [live(slot()), live(slot({ id: 's-2', startHour: 19 }))] });
+    await service.block('u-1', 's-1', { reason: 'maintenance', cancelBooking: true });
+    expect(cancellation.cancel).toHaveBeenCalled();
+  });
+
+  it('409s SLOT_HAS_BOOKING when no live booking holds the booked slot', async () => {
+    const { service, prisma } = setup([slot({ status: 'booked' })]);
+    prisma.bookingSlot.findFirst.mockResolvedValueOnce(null);
+    prisma.booking.findFirst.mockResolvedValueOnce(null);
+    await expectAppError(service.block('u-1', 's-1', { reason: 'other', cancelBooking: true }), 409, 'SLOT_HAS_BOOKING');
   });
 
   it('passes on VERIFY_OR_REJECT for a booking whose bKash payment is unverified, and blocks nothing', async () => {

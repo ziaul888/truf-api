@@ -6,7 +6,7 @@ import { VISIBLE_GROUND } from '../grounds/ground-rules.js';
 import { isOpenOn, isPeakSlot } from '../grounds/ground-schedule.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { paidOf } from '../bookings/booking-rules.js';
-import { SLOT_INCLUDE, toSlotDto, type PublicSlotDto, type SlotDto, type SlotRow } from './slot.dto.js';
+import { liveBookingOf, SLOT_INCLUDE, toSlotDto, type PublicSlotDto, type SlotDto, type SlotRow } from './slot.dto.js';
 import { SlotSettingsService } from './slot-settings.service.js';
 import { activeClosuresWhere, assertRange, closureOn, dateWhere, groundNotFound, isOpenDay, slotNotFound } from './slot-rules.js';
 import type { CalendarQuery, ListSlotsQuery, PublicSlotsQuery } from './slots.schemas.js';
@@ -31,8 +31,13 @@ export interface CalendarSlot extends SlotTimes {
   bookingId?: string;
   customerName?: string;
   customerPhone?: string;
+  /** The BOOKING total, repeated on every slot of a multi-slot booking (don't sum it over slots). */
   amount?: number;
   advancePaid?: number;
+  /** How many slots the booking holds. */
+  slotCount?: number;
+  /** This slot's own price. */
+  price?: number;
 }
 
 export interface Calendar {
@@ -41,14 +46,14 @@ export interface Calendar {
 }
 
 function toCalendarSlot(s: SlotRow): CalendarSlot {
-  const booking = s.bookings[0];
+  const booking = liveBookingOf(s);
   return {
     id: s.id, groundId: s.groundId, groundName: s.ground.name, date: fromDbDate(s.date),
     ...slotTimes(s), status: s.status,
     ...(s.status === 'blocked' && s.blockReason && { note: s.blockNote ? `${s.blockReason}: ${s.blockNote}` : s.blockReason }),
     ...(booking && {
       bookingId: booking.id, customerName: booking.contactName, customerPhone: booking.contactPhone,
-      amount: booking.total, advancePaid: paidOf(booking.payments),
+      amount: booking.total, advancePaid: paidOf(booking.payments), slotCount: booking._count.bookingSlots || 1, price: s.price,
     }),
   };
 }

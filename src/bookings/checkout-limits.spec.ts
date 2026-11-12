@@ -1,7 +1,7 @@
 import type { PrismaService } from '../prisma/prisma.service.js';
-import { upcomingWhere } from '../slots/slot-rules.js';
 import { venueNow } from '../slots/venue-time.js';
 import { WALLET_UNDER_REVIEW } from './booking-rules.js';
+import { hasUpcomingSlot } from './booking-slots.js';
 import { assertCanBookUnpaid, MAX_OPEN_UNPAID } from './checkout-limits.js';
 
 // 04:00 UTC = 10:00 in Dhaka, Wed 28 Oct 2026.
@@ -42,8 +42,9 @@ describe('assertCanBookUnpaid', () => {
     // Card checkouts (payAtVenue false, no wallet payment) and slots already started are left out.
     expect(count).toHaveBeenCalledWith({
       where: {
-        deletedAt: null, status: 'pending', source: 'portal', contactPhone: PHONE, slot: upcomingWhere(venueNow()),
-        OR: [{ payAtVenue: true }, WALLET_UNDER_REVIEW],
+        deletedAt: null, status: 'pending', source: 'portal', contactPhone: PHONE,
+        // Any live slot still ahead counts (a multi-slot booking), not only the primary.
+        AND: [hasUpcomingSlot(venueNow()), { OR: [{ payAtVenue: true }, WALLET_UNDER_REVIEW] }],
       },
     });
   });

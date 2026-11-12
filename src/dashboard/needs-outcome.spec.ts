@@ -7,7 +7,7 @@ const day = (date: string) => new Date(`${date}T00:00:00Z`);
 
 const row = (id: string, date: string, startHour: number, overrides: object = {}) => ({
   id, bookingNumber: `CT-${id}`, contactName: 'Rakib', status: 'pending', total: 1000, payAtVenue: true,
-  ground: { name: 'Main' }, slot: { date: day(date), startHour, startMinute: 0, durationMinutes: 60 }, payments: [], ...overrides,
+  ground: { name: 'Main' }, slot: { date: day(date), startHour, startMinute: 0, durationMinutes: 60 }, payments: [], bookingSlots: [], ...overrides,
 });
 
 function setup(rows: object[]) {
@@ -40,6 +40,17 @@ describe('loadNeedsOutcome', () => {
     });
     // Under review: not money owed; the card says Verify.
     expect(result.bookings[1]).toMatchObject({ id: 'C', due: 0, walletPayment: { method: 'bkash', status: 'pending' } });
+  });
+
+  it('is over only once the last slot has ended, and shows the whole booked span', async () => {
+    const live = (startHour: number) => ({ price: 1500, cancelledAt: null, slot: { id: `s-${startHour}`, date: day('2026-10-28'), startHour, startMinute: 0, durationMinutes: 60 } });
+    const { prisma } = setup([
+      row('D', '2026-10-28', 7, { bookingSlots: [live(7), live(8)] }), // 07:00–09:00: over
+      row('E', '2026-10-28', 8, { bookingSlots: [live(8), live(10)] }), // last slot runs until 11:00
+    ]);
+    const result = await loadNeedsOutcome(prisma, now);
+    expect(result.count).toBe(1);
+    expect(result.bookings[0]).toMatchObject({ id: 'D', slot: { date: '2026-10-28', startTime: '07:00', endTime: '09:00' } });
   });
 
   it('lists at most the limit but counts them all', async () => {

@@ -7,13 +7,15 @@ import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { slotTimes } from '../slots/slot-time.js';
 import { fromDbDate } from '../slots/venue-time.js';
 import { confirmationUrl, methodName, pendingWalletPayment } from './booking-rules.js';
+import { currentSlots, primaryOf } from './booking-slots.js';
 import { BOOKING_INCLUDE, type BookingRow } from './booking.dto.js';
 
 const money = (amount: number) => `${(amount / 100).toFixed(2)} ${env.CURRENCY.toUpperCase()}`;
 const section = (title: string, lines: string[]) => (lines.length > 0 ? [`${title}:\n${lines.join('\n')}`] : []);
+/** "2026-11-12, 18:00–19:00, 20:00–21:00": the date, then every slot's time. */
 const when = (b: BookingRow) => {
-  const { startTime, endTime } = slotTimes(b.slot);
-  return `${fromDbDate(b.slot.date)}, ${startTime}–${endTime}`;
+  const times = currentSlots(b).map(({ slot }) => slotTimes(slot)).map(({ startTime, endTime }) => `${startTime}–${endTime}`);
+  return `${fromDbDate(primaryOf(b).slot.date)}, ${times.join(', ')}`;
 };
 
 export interface CancelledNotice {

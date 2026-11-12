@@ -4,17 +4,18 @@ import { env } from '../config/env.js';
 import { contactEmailOf, upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import type { PaymentStatus, Prisma, Slot } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { assertDayOpen, slotEnded, slotNotFound } from '../slots/slot-rules.js';
-import { slotHour } from '../slots/slot-time.js';
-import { fromDbDate, hasEnded, toDbDate, venueNow } from '../slots/venue-time.js';
+import { toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
   bookingChanged, bookingNotFound, bookingNotPending, dueOf, noShowDetail, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
-  receivedDetail, slotNotAvailable, withBookingNumber, withUniqueReference,
+  receivedDetail, withBookingNumber, withUniqueReference,
 } from './booking-rules.js';
+import { sumPrice } from './booking-slots.js';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from './booking.dto.js';
 import { assertCanMarkNoShow, bookingNoShow, undoneStatusOf } from './no-show-rules.js';
+import { claimSlots } from './checkout-slots.js';
+import { loadStaffSlots, staffSlotIds } from './staff-booking-slots.js';
 import { verifyWalletPayment } from './wallet-verification.js';
 import type {
   CancelBookingInput, ConfirmBookingInput, CreateStaffBookingInput, NoShowInput, RecordPaymentInput, UpdateBookingInput,
@@ -37,29 +38,25 @@ export class StaffBookingsService {
   /**
    * Paid in full or in part → confirmed; not paid → pending (the review queue). The slot is booked
    * either way. Open until the slot ends, so a team walking in just after the start can still play.
+   * One booking can hold up to MAX_SLOTS_PER_BOOKING slots (`slotIds`) of one ground and date; the
+   * payment is against their combined total.
    * Email optional: left blank, the customer's stored one is used, else no customer emails are sent.
    */
   async create(actorId: string, input: CreateStaffBookingInput): Promise<BookingDto> {
-    const slot = await this.prisma.slot.findUnique({
-      where: { id: input.slotId }, include: { ground: { select: { availableDays: true, customDays: true } } },
-    });
-    if (!slot) throw slotNotFound();
-    if (hasEnded(venueNow(), fromDbDate(slot.date), slotHour(slot), slot.durationMinutes)) throw slotEnded();
-    if (slot.status !== 'available') throw slotNotAvailable();
-    assertDayOpen(slot.ground, fromDbDate(slot.date));
-    const paid = paymentAmount(input.payment, slot.price);
+    const slots = await loadStaffSlots(this.prisma, staffSlotIds(input));
+    const total = sumPrice(slots);
+    const paid = paymentAmount(input.payment, total);
     if (input.customer.id && !(await this.prisma.customer.findFirst({ where: { id: input.customer.id, deletedAt: null } }))) {
       throw new AppError('Customer not found', 404, 'CUSTOMER_NOT_FOUND');
     }
 
     const id = await withBookingNumber((bookingNumber) => this.prisma.$transaction(async (tx) => {
-      const { count } = await tx.slot.updateMany({ where: { id: slot.id, status: 'available' }, data: { status: 'booked' } });
-      if (count === 0) throw slotNotAvailable();
+      await claimSlots(tx, slots, { status: 'booked' });
       const { id, ...contact } = input.customer;
       const customerId = id ?? await upsertCustomerByPhone(tx, contact, true);
       const contactEmail = await contactEmailOf(tx, customerId, contact.email);
       const booking = await tx.booking.create({
-        data: { ...newStaffBooking(actorId, input, slot, paid, bookingNumber), customerId, contactEmail },
+        data: { ...newStaffBooking(actorId, input, slots, paid, bookingNumber), customerId, contactEmail },
       });
       return booking.id;
     }));
@@ -212,7 +209,9 @@ function paymentAmount(payment: CreateStaffBookingInput['payment'], total: numbe
   return payment.amount!;
 }
 
-function newStaffBooking(actorId: string, input: CreateStaffBookingInput, slot: Slot, paid: number, bookingNumber: string) {
+function newStaffBooking(actorId: string, input: CreateStaffBookingInput, slots: Slot[], paid: number, bookingNumber: string) {
+  const primary = slots[0]!;
+  const total = sumPrice(slots);
   const { payment, customer } = input;
   const events: Prisma.BookingEventCreateWithoutBookingInput[] = [{ type: 'created', detail: 'Booked by staff', user: { connect: { id: actorId } } }];
   if (paid > 0) {
@@ -222,12 +221,13 @@ function newStaffBooking(actorId: string, input: CreateStaffBookingInput, slot: 
     );
   }
   return {
-    bookingNumber, source: 'staff' as const, groundId: slot.groundId, slotId: slot.id, liveSlotId: slot.id,
+    bookingNumber, source: 'staff' as const, groundId: primary.groundId, slotId: primary.id, liveSlotId: primary.id,
     contactName: customer.name, contactPhone: customer.phone,
     status: paid > 0 ? 'confirmed' as const : 'pending' as const,
-    paymentStatus: paid === 0 ? 'unpaid' as const : paid >= slot.price ? 'paid' as const : 'partial' as const,
+    paymentStatus: paid === 0 ? 'unpaid' as const : paid >= total ? 'paid' as const : 'partial' as const,
     confirmedAt: paid > 0 ? new Date() : null,
-    amount: slot.price, serviceFee: 0, total: slot.price,
+    amount: total, serviceFee: 0, total,
+    bookingSlots: { create: slots.map((s) => ({ slotId: s.id, liveSlotId: s.id, price: s.price })) },
     dueDate: payment.type === 'partial' && payment.dueDate ? toDbDate(payment.dueDate) : null,
     dueNote: payment.type === 'partial' ? (payment.note ?? null) : null,
     notes: input.notes ?? null, createdById: actorId,

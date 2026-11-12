@@ -31,8 +31,26 @@ function aliasTimeFields(v: unknown) {
   const body = { ...(v as Record<string, unknown>) };
   if (!('startHour' in body) && 'hour' in body) body.startHour = body.hour;
   if (!('startMinute' in body) && 'minute' in body) body.startMinute = body.minute;
+  // Each item of `slots` takes the same short names (the item schema is strict, so the short names are dropped once mapped).
+  if (Array.isArray(body.slots)) body.slots = body.slots.map(aliasSlotItem);
   return body;
 }
+
+function aliasSlotItem(item: unknown) {
+  const aliased = aliasTimeFields(item);
+  if (!aliased || typeof aliased !== 'object') return aliased;
+  const { hour: _hour, minute: _minute, ...rest } = aliased as Record<string, unknown>;
+  return rest;
+}
+
+/**
+ * Sanity bound on a list of slots so a huge array is refused up front. The real limit is
+ * MAX_SLOTS_PER_BOOKING, checked by the service (`400 TOO_MANY_SLOTS`).
+ */
+const SLOTS_INPUT_CAP = 20;
+
+/** One slot of a multi-slot checkout: the start time on the checkout's ground and date. */
+const CheckoutSlotSchema = z.strictObject({ startHour, startMinute: startMinute.default(0) });
 
 /** The portal form posts the hour as `hour` (and the minute as `minute`); `startHour` / `startMinute` are accepted too. */
 export const CheckoutSchema = z.preprocess(
@@ -40,9 +58,12 @@ export const CheckoutSchema = z.preprocess(
   z.object({
     groundId: z.uuid('Invalid ground id'),
     date: isoDate,
-    startHour,
+    /** One slot: `startHour` (`hour`) and `startMinute`. Or send `slots`; exactly one of the two. */
+    startHour: startHour.optional(),
     /** 0 or 30 (90-minute slots start on the half hour); default 0. */
     startMinute: startMinute.default(0),
+    /** 1 to 4 slots on this ground and date, each by start time (checked by the service: `400 TOO_MANY_SLOTS`). */
+    slots: z.array(CheckoutSlotSchema).min(1).max(SLOTS_INPUT_CAP).optional(),
     customerName: CustomerNameSchema,
     /** Optional only for a signed-in customer (`400 EMAIL_REQUIRED` for a guest, checked in the service). */
     customerEmail: OptionalEmailSchema,
@@ -57,6 +78,14 @@ export const CheckoutSchema = z.preprocess(
     /** bKash / Nagad only: the number the money was sent from. */
     payerNumber: PhoneSchema.optional(),
   }).superRefine((v, ctx) => {
+    if (v.slots !== undefined && v.startHour !== undefined) {
+      ctx.addIssue({ code: 'custom', path: ['slots'], message: 'Send either the hour or slots, not both' });
+    } else if (v.slots === undefined && v.startHour === undefined) {
+      ctx.addIssue({ code: 'custom', path: ['startHour'], message: 'This field is required' });
+    }
+    if (v.slots && new Set(v.slots.map((s) => `${s.startHour}:${s.startMinute}`)).size !== v.slots.length) {
+      ctx.addIssue({ code: 'custom', path: ['slots'], message: 'The same slot is listed twice' });
+    }
     if (!isWalletMethod(v.paymentMethod)) {
       // Refused rather than silently dropped.
       for (const field of ['reference', 'payerNumber'] as const) {
@@ -109,7 +138,10 @@ export const UpcomingQuerySchema = z.object({ limit: z.coerce.number().int().min
 export type UpcomingQuery = z.infer<typeof UpcomingQuerySchema>;
 
 export const CreateStaffBookingSchema = z.object({
-  slotId: z.uuid('Invalid slot id'),
+  /** One slot. Or send `slotIds`; exactly one of the two. */
+  slotId: z.uuid('Invalid slot id').optional(),
+  /** 1 to 4 slots of one ground and date (`400 TOO_MANY_SLOTS`, `400 SLOTS_MUST_SHARE_GROUND_DATE`, checked by the service). */
+  slotIds: z.array(z.uuid('Invalid slot id')).min(1).max(SLOTS_INPUT_CAP).optional(),
   /** `id` books for an existing customer; otherwise the customer is found or created by phone. */
   /** `email` optional: left blank, the customer's stored one is used, else no customer emails. */
   customer: z.object({ id: z.uuid('Invalid customer id').optional(), name: CustomerNameSchema, phone: PhoneSchema, email: OptionalEmailSchema }),
@@ -128,7 +160,8 @@ export const CreateStaffBookingSchema = z.object({
     .refine((p) => p.type !== 'none' || p.reference === undefined, { path: ['reference'], message: 'Nothing is paid now, so there is no TrxID' })
     .refine((p) => p.type !== 'partial' || p.amount !== undefined, { path: ['amount'], message: 'This field is required' }),
   notes: note(2000),
-});
+}).refine((v) => (v.slotId === undefined) !== (v.slotIds === undefined), { path: ['slotIds'], message: 'Send either slotId or slotIds' })
+  .refine((v) => v.slotIds === undefined || new Set(v.slotIds).size === v.slotIds.length, { path: ['slotIds'], message: 'The same slot is listed twice' });
 export type CreateStaffBookingInput = z.infer<typeof CreateStaffBookingSchema>;
 
 export const ConfirmBookingSchema = z.object({

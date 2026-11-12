@@ -105,7 +105,7 @@ export class SlotGeneratorService {
   async resync(tx: Prisma.TransactionClient, groundId: string): Promise<SlotSync> {
     const now = venueNow();
     const { autoGenerate, advanceBookingDays } = await this.settings.get(tx);
-    const free: Prisma.SlotWhereInput = { groundId, status: 'available', bookings: { none: {} }, ...upcomingWhere(now) };
+    const free: Prisma.SlotWhereInput = { groundId, status: 'available', bookings: { none: {} }, bookingSlots: { none: {} }, ...upcomingWhere(now) };
 
     const cleared = await tx.slot.findMany({ where: free, select: { date: true }, distinct: ['date'] });
     const { count: removed } = await tx.slot.deleteMany({ where: free });
@@ -192,12 +192,14 @@ async function retireGround(tx: Prisma.TransactionClient, ground: Ground, now: V
   const days = { ...ground, isActive: true };
   const rows = await tx.slot.findMany({
     where: { groundId: ground.id, status: 'available', ...upcomingWhere(now) },
-    select: { id: true, date: true, _count: { select: { bookings: true } } },
+    select: { id: true, date: true, _count: { select: { bookings: true, bookingSlots: true } } },
   });
   const closed = rows.filter((s) => !isOpenOn(days, weekdayOf(fromDbDate(s.date))));
-  const idsWhere = (hasBooking: boolean) => ({ in: closed.filter((s) => s._count.bookings > 0 === hasBooking).map((s) => s.id) });
+  const idsWhere = (hasBooking: boolean) => ({
+    in: closed.filter((s) => (s._count.bookings > 0 || s._count.bookingSlots > 0) === hasBooking).map((s) => s.id),
+  });
 
-  const { count: removed } = await tx.slot.deleteMany({ where: { id: idsWhere(false), status: 'available', bookings: { none: {} } } });
+  const { count: removed } = await tx.slot.deleteMany({ where: { id: idsWhere(false), status: 'available', bookings: { none: {} }, bookingSlots: { none: {} } } });
   const retired = await tx.slot.updateManyAndReturn({
     where: { id: idsWhere(true), status: 'available' },
     data: { status: 'blocked', blockReason: CLOSED_DAY_BLOCK.reason, blockNote: CLOSED_DAY_BLOCK.note, blockedAt: new Date() },

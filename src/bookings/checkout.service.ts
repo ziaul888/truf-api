@@ -10,17 +10,20 @@ import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { assertDayOpen, groundNotFound, slotInPast } from '../slots/slot-rules.js';
 import type { SlotSettings } from '../slots/slots.schemas.js';
-import { slotHour, slotTimes } from '../slots/slot-time.js';
-import { addDays, hasStarted, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
+import { slotHour } from '../slots/slot-time.js';
+import { addDays, hasStarted, minutesUntil, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
+import { MAX_SLOTS_PER_BOOKING } from './booking-limits.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { BOOKING_INCLUDE, customerCanPay } from './booking.dto.js';
 import {
   bookingNotFound, bookingNotPending, dueOf, bookingToken, confirmationUrl, isUnderReview, isValidBookingToken, isWalletMethod, methodName,
   paymentUnderReview, slotNotAvailable, withBookingNumber, type WalletMethod,
 } from './booking-rules.js';
+import { spanOf, sumPrice, windowTimes } from './booking-slots.js';
 import type { CheckoutInput } from './bookings.schemas.js';
 import { assertCanBookUnpaid } from './checkout-limits.js';
+import { claimSlots, requestedStarts, resolveSlots } from './checkout-slots.js';
 import { portalCardOn, portalWalletNumber } from './portal-methods.js';
 
 export interface CheckoutResult {
@@ -46,6 +49,8 @@ export interface CheckoutOptions {
   serviceFee: number;
   currency: string;
   holdMinutes: number;
+  /** Most slots one booking can hold. */
+  maxSlotsPerBooking: number;
 }
 
 const outsideWindow = (message: string) => new AppError(message, 400, 'OUTSIDE_BOOKING_WINDOW');
@@ -63,6 +68,8 @@ const emailRequired = () =>
  *   Books the slot like cash, with a pending payment that staff verify in their own app. Off
  *   while the admin hasn't set that number or has switched it off (`portal-methods.ts`, as card).
  * - Cash, bKash and Nagad need a signed-in customer and are capped per phone (`checkout-limits.ts`).
+ * - One booking can hold up to MAX_SLOTS_PER_BOOKING slots of one ground and date: one booking number,
+ *   one payment, the service fee once. All slots are taken together or none (`checkout-slots.ts`).
  */
 @Injectable()
 export class CheckoutService {
@@ -81,7 +88,10 @@ export class CheckoutService {
       const number = portalWalletNumber(settings, method);
       return number ? [{ method, number }] : [];
     });
-    return { cardEnabled: portalCardOn(settings), cashEnabled: portalCashEnabled, wallets, serviceFee, currency: env.CURRENCY, holdMinutes };
+    return {
+      cardEnabled: portalCardOn(settings), cashEnabled: portalCashEnabled, wallets, serviceFee, currency: env.CURRENCY, holdMinutes,
+      maxSlotsPerBooking: MAX_SLOTS_PER_BOOKING,
+    };
   }
 
   /**
@@ -98,31 +108,33 @@ export class CheckoutService {
     if (!verifiedPhone && !input.customerEmail) throw emailRequired();
     const ground = await this.prisma.ground.findFirst({ where: { id: input.groundId, ...VISIBLE_GROUND } });
     if (!ground) throw groundNotFound();
-    const { date, startHour, startMinute } = input;
-    const slot = await this.prisma.slot.findUnique({
-      where: { groundId_date_startHour_startMinute: { groundId: ground.id, date: toDbDate(date), startHour, startMinute } },
-    });
-    if (!slot) throw slotNotAvailable();
-    assertBookable(slot, input.date, settings);
+    const slots = await resolveSlots(this.prisma, ground.id, input.date, requestedStarts(input));
+    for (const slot of slots) assertBookable(slot, input.date, settings);
     assertDayOpen(ground, input.date);
 
-    const bookingId = await this.reserve(input, ground, slot, settings, Boolean(verifiedPhone));
+    const bookingId = await this.reserve(input, ground, slots, settings, Boolean(verifiedPhone));
     if (input.paymentMethod !== 'card') {
       await this.notifier.received(bookingId);
       await this.notifier.newBookingToAdmins(bookingId);
       return { bookingId, paymentMethod: input.paymentMethod, checkoutUrl: null, confirmationUrl: confirmationUrl(bookingId) };
     }
+    return this.startCard(bookingId, input, ground, slots, settings);
+  }
+
+  /** Opens the Stripe session for a held booking; if that fails the slots go back straight away. */
+  private async startCard(bookingId: string, input: CheckoutInput, ground: Ground, slots: Slot[], settings: SlotSettings): Promise<CheckoutResult> {
+    const { startTime, endTime } = windowTimes(spanOf(slots));
     try {
       const session = await this.stripe.createCheckoutSession({
-        bookingId, total: slot.price + settings.serviceFee, customerEmail: input.customerEmail,
-        description: `${ground.name}, ${input.date} ${slotTimes(slot).startTime}`,
+        bookingId, total: sumPrice(slots) + settings.serviceFee, customerEmail: input.customerEmail,
+        description: `${ground.name}, ${input.date} ${startTime}–${endTime}`,
         successUrl: `${env.PUBLIC_APP_URL}/confirmation/${bookingId}?token=${bookingToken(bookingId)}`,
         cancelUrl: `${env.PUBLIC_APP_URL}/grounds/${ground.id}`,
       });
       await this.prisma.booking.update({ where: { id: bookingId }, data: { stripeCheckoutSessionId: session.id } });
       return { bookingId, paymentMethod: 'card', checkoutUrl: session.url, confirmationUrl: confirmationUrl(bookingId) };
     } catch (err) {
-      // No way to pay: give the slot back straight away.
+      // No way to pay: give every slot back straight away.
       await this.cancellation.cancel(bookingId, { actorId: null, reason: 'Payment could not be started', refund: false, notify: false });
       throw err;
     }
@@ -169,27 +181,30 @@ export class CheckoutService {
   }
 
   /**
-   * The race-safe part: only one request can take the slot from available — to `held` while a
-   * card payment is under way, or straight to `booked` for pay-at-venue, bKash and Nagad. A TrxID
-   * already used rolls the whole booking back (409 REFERENCE_ALREADY_USED).
+   * The race-safe part: only one request can take the slots from available — to `held` while a
+   * card payment is under way, or straight to `booked` for pay-at-venue, bKash and Nagad. One
+   * conditional update takes all of them, so a slot taken meanwhile rolls the whole booking back
+   * (409 SLOT_NOT_AVAILABLE), as does a TrxID already used (409 REFERENCE_ALREADY_USED).
    */
-  private reserve(input: CheckoutInput, ground: Ground, slot: Slot, settings: SlotSettings, verified: boolean): Promise<string> {
+  private reserve(input: CheckoutInput, ground: Ground, slots: Slot[], settings: SlotSettings, verified: boolean): Promise<string> {
     const bookingId = randomUUID();
-    const total = slot.price + settings.serviceFee;
+    const amount = sumPrice(slots);
+    const total = amount + settings.serviceFee;
+    const primary = slots[0]!;
     const slotData = input.paymentMethod !== 'card'
       ? { status: 'booked' as const }
       : { status: 'held' as const, heldUntil: new Date(Date.now() + settings.holdMinutes * 60_000), heldByBookingId: bookingId };
     return withBookingNumber((bookingNumber) => this.prisma.$transaction(async (tx) => {
-      const { count } = await tx.slot.updateMany({ where: { id: slot.id, status: 'available' }, data: slotData });
-      if (count === 0) throw slotNotAvailable();
+      await claimSlots(tx, slots, slotData);
       const contact = { name: input.customerName, email: input.customerEmail, phone: input.customerPhone };
       const customerId = await upsertCustomerByPhone(tx, contact, verified);
       const contactEmail = await contactEmailOf(tx, customerId, contact.email);
       await tx.booking.create({
         data: {
-          id: bookingId, bookingNumber, source: 'portal', groundId: ground.id, slotId: slot.id, liveSlotId: slot.id,
+          id: bookingId, bookingNumber, source: 'portal', groundId: ground.id, slotId: primary.id, liveSlotId: primary.id,
           customerId, contactName: contact.name, contactEmail, contactPhone: contact.phone,
-          amount: slot.price, serviceFee: settings.serviceFee, total, payAtVenue: input.paymentMethod === 'cash',
+          amount, serviceFee: settings.serviceFee, total, payAtVenue: input.paymentMethod === 'cash',
+          bookingSlots: { create: slots.map((s) => ({ slotId: s.id, liveSlotId: s.id, price: s.price })) },
           payments: walletPaymentOf(input, total),
           events: { create: { type: 'created', detail: createdDetail(input) } },
         },

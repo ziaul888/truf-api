@@ -4,11 +4,11 @@ import type { BookingStatus, Prisma } from '../generated/prisma/client.js';
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
-import { upcomingWhere } from '../slots/slot-rules.js';
 import { toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { loadOwing, matchesDue, type DueFilter } from './booking-due.js';
+import { hasUpcomingSlot } from './booking-slots.js';
 import { ABANDONED_CHECKOUT, bookingNotFound, confirmationUrl, isValidBookingToken } from './booking-rules.js';
 import {
   BOOKING_DETAIL_INCLUDE, BOOKING_INCLUDE, customerCanCancel, customerCanPay, customerCanRequestCancel, toBookingDetailDto, toBookingDto,
@@ -68,7 +68,7 @@ export class BookingQueriesService {
   /** The next pending or confirmed bookings from now (dashboard home). */
   async upcoming(limit: number): Promise<BookingDto[]> {
     const rows = await this.prisma.booking.findMany({
-      where: { deletedAt: null, status: { in: ['pending', 'confirmed'] }, slot: upcomingWhere(venueNow()) },
+      where: { deletedAt: null, status: { in: ['pending', 'confirmed'] }, ...hasUpcomingSlot(venueNow()) },
       include: BOOKING_INCLUDE,
       orderBy: [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }],
       take: limit,
@@ -79,7 +79,7 @@ export class BookingQueriesService {
   /** Every booking made with the signed-in customer's phone, guest and staff bookings included. */
   async listMine(phone: string, q: MyBookingsQuery): Promise<Paginated<MyBookingDto>> {
     const now = venueNow();
-    const upcoming: Prisma.BookingWhereInput = { status: { in: ['pending', 'confirmed'] }, slot: upcomingWhere(now) };
+    const upcoming: Prisma.BookingWhereInput = { status: { in: ['pending', 'confirmed'] }, ...hasUpcomingSlot(now) };
     const where: Prisma.BookingWhereInput = {
       deletedAt: null, customer: { phone },
       ...(q.scope === 'upcoming' ? { ...upcoming, NOT: ABANDONED_CHECKOUT } : { NOT: [ABANDONED_CHECKOUT, upcoming] }),

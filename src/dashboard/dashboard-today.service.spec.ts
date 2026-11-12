@@ -11,7 +11,7 @@ const slot = (
   startHour: number, status: 'available' | 'held' | 'booked' | 'blocked', b?: ReturnType<typeof booking>, closureId: string | null = null,
   startMinute = 0, durationMinutes = 60,
 ) => ({
-  groundId: 'g-1', startHour, startMinute, durationMinutes, status, closureId, bookings: b ? [b] : [],
+  groundId: 'g-1', startHour, startMinute, durationMinutes, status, closureId, bookingSlots: b ? [{ booking: b }] : [], bookings: [] as (typeof b)[],
 });
 const SLOTS = [slot(16, 'available'), slot(17, 'booked', booking('A')), slot(18, 'available'), slot(19, 'booked', booking('B', 1000, 400)), slot(20, 'blocked')];
 const at = (hour: number, minute: number) => ({ date: '2026-10-31', minutes: hour * 60 + minute });

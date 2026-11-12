@@ -41,6 +41,7 @@ describe('Booking series (e2e)', () => {
     await prisma.bookingSeriesSkip.deleteMany({ where: { series: { groundId: { in: ids } } } });
     await prisma.bookingEvent.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.payment.deleteMany({ where: { booking: { groundId: { in: ids } } } });
+    await prisma.bookingSlot.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.booking.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.bookingSeries.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });

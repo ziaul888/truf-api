@@ -33,6 +33,7 @@ describe('Dashboard (e2e)', () => {
     const groundIds = grounds.map((g) => g.id);
     await prisma.bookingEvent.deleteMany({ where: { booking: { groundId: { in: groundIds } } } });
     await prisma.payment.deleteMany({ where: { booking: { groundId: { in: groundIds } } } });
+    await prisma.bookingSlot.deleteMany({ where: { booking: { groundId: { in: groundIds } } } });
     await prisma.booking.deleteMany({ where: { groundId: { in: groundIds } } });
     await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });
     await prisma.slot.deleteMany({ where: { groundId: { in: groundIds } } });

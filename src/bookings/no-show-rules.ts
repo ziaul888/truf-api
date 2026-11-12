@@ -1,7 +1,8 @@
 import { AppError } from '../common/app-error.js';
 import { slotHour } from '../slots/slot-time.js';
-import { fromDbDate, hasEnded, hasStarted, type VenueNow } from '../slots/venue-time.js';
+import { fromDbDate, hasStarted, type VenueNow } from '../slots/venue-time.js';
 import { bookingNotPending, isUnderReview } from './booking-rules.js';
+import { windowHasEnded, windowOf } from './booking-slots.js';
 import type { BookingRow } from './booking.dto.js';
 
 type NoShowBooking = Pick<BookingRow, 'status' | 'source' | 'payAtVenue' | 'payments' | 'slot'>;
@@ -28,6 +29,6 @@ export function assertCanMarkNoShow(b: NoShowBooking, now: VenueNow) {
   }
 }
 
-/** Undoing a no-show: completed once the slot has ended, confirmed before that (the hourly job completes it later). */
-export const undoneStatusOf = (b: Pick<BookingRow, 'slot'>, now: VenueNow): 'completed' | 'confirmed' =>
-  hasEnded(now, fromDbDate(b.slot.date), slotHour(b.slot), b.slot.durationMinutes) ? 'completed' : 'confirmed';
+/** Undoing a no-show: completed once the last slot has ended, confirmed before that (the hourly job completes it later). */
+export const undoneStatusOf = (b: Pick<BookingRow, 'slot' | 'bookingSlots'>, now: VenueNow): 'completed' | 'confirmed' =>
+  windowHasEnded(now, windowOf(b)) ? 'completed' : 'confirmed';
