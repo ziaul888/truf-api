@@ -48,6 +48,7 @@ The row of action cards at the top. Refresh it every 60 seconds.
     "bookings": [
       { "id": "uuid", "bookingNumber": "CT-24A7F", "customerName": "Rakib Hasan", "groundName": "Green Arena",
         "slot": { "date": "2026-11-08", "startHour": 18, "endHour": 19 },
+        "slots": [{ "date": "2026-11-08", "startHour": 18, "startMinute": 0, "endHour": 19, "endMinute": 0, "startTime": "18:00", "endTime": "19:00" }],
         "total": 155000, "paid": 0, "due": 155000, "payAtVenue": true, "walletPayment": null }
     ]
   }
@@ -65,6 +66,8 @@ The row of action cards at the top. Refresh it every 60 seconds.
 | `needsOutcome` | Bookings still `pending` after their slot **ended**: staff should record what happened. Card checkouts still in Stripe are left out; bKash / Nagad bookings under review are included (`walletPayment.status: "pending"`: verify or reject them first, `due` is 0 meanwhile). `bookings` lists at most 10, most recently ended first; `count` has them all. Each row offers **Mark no-show** (`POST /admin/bookings/:id/no-show`) and, for cash or unpaid bookings, **Collect** (recording a payment confirms the booking) | Each booking's detail page; Confirm Bookings for the ones to verify |
 
 **A new filter on the bookings list:** `GET /admin/bookings?due=overdue | today | any`. `any` is every live booking with money due. Card checkouts still in Stripe never count as due.
+
+`needsOutcome.bookings[].slots` contains every live slot, earliest first, preserving gaps between nonconsecutive times. Render these times rather than treating the `slot` summary span as continuous. Older responses without `slots` fall back to `slot`. A booking appears only after its last live slot ends; ordering and the 10-row limit use that end time.
 
 ---
 

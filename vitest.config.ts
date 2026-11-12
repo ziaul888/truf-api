@@ -10,6 +10,6 @@ export default defineConfig({
     root: './',
     include: ['**/*.spec.ts'],
     // Stripe is mocked, but card checkout is only offered with keys set. Never real keys.
-    env: { STRIPE_SECRET_KEY: 'sk_test_unit', STRIPE_WEBHOOK_SECRET: 'whsec_unit' },
+    env: { STRIPE_SECRET_KEY: 'sk_test_unit', STRIPE_WEBHOOK_SECRET: 'whsec_unit', MULTI_SLOT_BOOKINGS_ENABLED: 'true' },
   },
 });

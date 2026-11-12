@@ -30,6 +30,8 @@ const EnvSchema = z.object({
     .string()
     .default('Asia/Dhaka')
     .refine(isTimeZone, 'must be an IANA timezone, e.g. Asia/Dhaka'),
+  /** Enable only after every old API instance has stopped and the BookingSlot cut-over repair has run. */
+  MULTI_SLOT_BOOKINGS_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   /** The customer site, for Stripe return URLs and links in emails. */
   PUBLIC_APP_URL: z.url().default('http://localhost:3000').transform((url) => url.replace(/\/$/, '')),
   /** ISO 4217, lowercase as Stripe uses it. Prices are in its smallest unit. */
@@ -46,10 +48,15 @@ const EnvSchema = z.object({
   TWILIO_VERIFY_SERVICE_SID: z.string().startsWith('VA', 'must be a Twilio Verify service SID (VA…)').optional(),
   /** Testing only: every sign-in code is this and no SMS is sent. Refused in production. */
   TEST_OTP_CODE: z.string().regex(/^\d{4,10}$/, 'must be 4–10 digits').optional(),
+  /** Optional live test customer: both fields must be set. Use a dedicated number in E.164 format. */
+  LIVE_TEST_PHONE: z.string().regex(/^\+[1-9]\d{7,14}$/, 'must be an E.164 phone number, e.g. +8801799009901').optional(),
+  LIVE_TEST_OTP: z.string().regex(/^\d{8,10}$/, 'must be 8–10 digits').optional(),
   /** How long a customer stays signed in (customer_token). */
   CUSTOMER_SESSION_DAYS: z.coerce.number().int().positive().max(365).default(30),
 }).refine((e) => !(e.NODE_ENV === 'production' && e.TEST_OTP_CODE), {
   path: ['TEST_OTP_CODE'], message: 'must not be set in production',
+}).refine((e) => Boolean(e.LIVE_TEST_PHONE) === Boolean(e.LIVE_TEST_OTP), {
+  path: ['LIVE_TEST_PHONE'], message: 'LIVE_TEST_PHONE and LIVE_TEST_OTP must be set together',
 });
 
 function isTimeZone(timeZone: string): boolean {

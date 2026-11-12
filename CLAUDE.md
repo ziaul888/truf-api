@@ -144,6 +144,8 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 
 - Customers may sign in with phone + SMS code (Twilio Verify, `customer_token` cookie keyed on the verified phone; login is optional for card, guest card checkout stays). Signed in, checkout books on the verified phone and "My bookings" lists every booking for it. Every booking also has a signed link (`bookingToken`) to view, cancel and pay
 
+- Optional live test customer: `LIVE_TEST_PHONE` (one dedicated E.164 number) plus `LIVE_TEST_OTP` (8–10 digits), both backend env values, permit fixed-code login for that number only, including production. Default off; normal customer sessions, rate limits and authorization still apply. Never expose the code to the frontend or logs. The global `TEST_OTP_CODE` remains forbidden in production. Setup and disabling: `docs/live-test-login.md`.
+
 - Every booking state change goes through `BookingCancellationService` / `StaffBookingsService` actions and writes a `BookingEvent`; never PATCH a status directly
 
 - Cancellation = full refund to the original payment method: card via Stripe (502 `REFUND_FAILED` leaves the booking unchanged), cash, bank transfer, bKash and Nagad marked refunded (paid back by hand). A bKash / Nagad payment not yet verified is marked failed instead
@@ -159,10 +161,12 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 - No other dynamic pricing, coupons, SMS (beyond sign-in codes), wallets (beyond manual bKash / Nagad), reviews or multi-branch
 
 ## Deploy notes (multi-slot bookings)
-- Roll out backend + migration `20261112090000_booking_slots` FIRST. Do NOT deploy/enable the multi-slot frontend until the old backend container has stopped serving: it knows nothing of `BookingSlot`, so it would confirm, cancel or release only the primary slot of a multi-slot booking.
-- After cut-over (no old instance running), run once, by hand: the missing-row `INSERT INTO "BookingSlot" ...` at the bottom of the migration (bookings created during the overlap), then
-  `UPDATE "BookingSlot" s SET "liveSlotId" = NULL, "cancelledAt" = COALESCE(b."cancelledAt", now()) FROM "Booking" b WHERE s."bookingId" = b."id" AND b."status" = 'cancelled' AND s."liveSlotId" IS NOT NULL;`
-  (bookings the old container cancelled left their live index set). Until then the code self-heals: booking a slot first clears such stale rows (`releaseStaleBookingSlots`), and readers ignore a live BookingSlot whose booking is cancelled.
+- Keep `MULTI_SLOT_BOOKINGS_ENABLED=false` (the default) throughout the rollout. Both booking services enforce a limit of 1 and `GET /checkout/options` reports 1. Docker runs migration `20261112090000_booking_slots` automatically before starting the new API. Existing multi-slot bookings can still be read, paid and cancelled if this flag is later turned off; it only limits new bookings.
+- Roll out the backend with that flag off. Stop/drain **every** old API instance and its jobs: the old code knows nothing of `BookingSlot`, so it would confirm, cancel or release only a multi-slot booking's primary slot. Frontend single-slot requests use legacy `startHour`/`startMinute` or `slotId`, and missing capabilities mean a limit of 1, so the compatible frontend may deploy in either order while the gate stays off.
+- Once no old instance is running, run `yarn db:reconcile:booking-slots` in the new container, using its normal production environment. This executes `prisma/rollouts/booking-slots.sql`, in one transaction, and is safe to repeat. It clears cancelled bookings' stale live indexes **before** inserting missing rows: an old instance may have rebooked a slot, so INSERT-first can hit a unique-index collision. Table locks keep booking writes out of this short repair transaction. Do not run this repair automatically on container startup, while old instances might still write.
+- After reconciliation succeeds, set `MULTI_SLOT_BOOKINGS_ENABLED=true` on every new API instance. Verify `/api/v1/checkout/options` reports `maxSlotsPerBooking: 4`; frontend capability caches refresh within 60 seconds. Never roll back to a pre-multi-slot backend while multi-slot bookings exist; turn the flag off and keep the new readers/actions instead.
+- Until reconciliation, booking paths (including repeat booking creation/extension) self-heal stale rows with `releaseStaleBookingSlots`; readers ignore live BookingSlot rows belonging to cancelled bookings.
+- Before committing: use only the isolated test DB for `NODE_ENV=test yarn prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` and `yarn test:e2e`. Ensure the diff does not change `Payment_method_reference_key`. Never run these checks against the app/production DB.
 
 ## Testing
 - Unit test every service (70% coverage target); e2e every endpoint with Supertest

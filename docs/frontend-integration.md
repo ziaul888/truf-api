@@ -125,7 +125,7 @@ List endpoints, once they exist, return `data: { data: [...], total, page, limit
 | 409 | `SLOT_HAS_BOOKING` | Blocking a booked slot | Show `error` |
 | 409 | `SLOT_ALREADY_BLOCKED`, `SLOT_NOT_BLOCKED` | Blocking twice, or unblocking a slot that isn't blocked | Refresh the slot |
 | 409 | `SLOT_NOT_AVAILABLE` | A slot changed while saving (someone else acted first); for a multi-slot booking, any one of its slots | Refresh and try again |
-| 400 | `TOO_MANY_SLOTS` | A booking (checkout or staff) with more slots than `maxSlotsPerBooking` (4, from `GET /checkout/options`) | Cap the slot picker at that number |
+| 400 | `TOO_MANY_SLOTS` | A booking (checkout or staff) with more slots than `maxSlotsPerBooking` (1 during rollout, 4 after enablement, from `GET /checkout/options`) | Cap both pickers at that number; assume 1 when absent |
 | 409 | `BOOKING_IN_PROGRESS` | Blocking one slot (`cancelBooking: true`) of a multi-slot booking that has already started: it would cancel and refund the whole booking | Show `error`; handle that booking from its own page |
 | 400 | `SLOTS_MUST_SHARE_GROUND_DATE` | Staff `slotIds` of different grounds or dates | Pick the slots on one ground and date |
 | 404 | `CLOSURE_NOT_FOUND` | No closure with that id | Refresh the list |

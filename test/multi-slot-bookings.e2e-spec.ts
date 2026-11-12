@@ -5,6 +5,7 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from './../src/app.module.js';
 import { configureApp } from './../src/app.setup.js';
+import { env } from './../src/config/env.js';
 import { hashPassword } from './../src/auth/password.js';
 import { EmailService } from './../src/email/email.service.js';
 import { StripeService } from './../src/payments/stripe.service.js';
@@ -48,6 +49,7 @@ describe('Multi-slot bookings (e2e)', () => {
     await prisma.bookingSlot.deleteMany({ where: { booking: { groundId: { in: ids } } } });
     await prisma.booking.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });
+    await prisma.slotEvent.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.slot.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.ground.deleteMany({ where: { id: { in: ids } } });
     await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
@@ -60,7 +62,7 @@ describe('Multi-slot bookings (e2e)', () => {
     groundId = (await prisma.ground.create({
       data: { name: `${PREFIX} Main`, sport: 'football', hourlyPrice: 1000, openingHour: 8, closingHour: 16 },
     })).id;
-    const dates = [3, 4, 5, 6, 7, 8, 9].map(day);
+    const dates = [3, 4, 5, 6, 7, 8, 9, 10].map(day);
     await prisma.slot.createMany({
       data: dates.flatMap((date) => HOURS.map((startHour) => ({ groundId, date: toDbDate(date), startHour, price: 1000 }))),
     });
@@ -115,6 +117,26 @@ describe('Multi-slot bookings (e2e)', () => {
   it('tells the portal how many slots one booking can hold', async () => {
     const res = await http().get(`${API}/checkout/options`).expect(200);
     expect(res.body.data.maxSlotsPerBooking).toBe(4);
+  });
+
+  it('rollout gate refuses both multi-slot endpoints but keeps legacy single-slot bookings working', async () => {
+    env.MULTI_SLOT_BOOKINGS_ENABLED = false;
+    try {
+      const options = await http().get(`${API}/checkout/options`).expect(200);
+      expect(options.body.data.maxSlotsPerBooking).toBe(1);
+      const portal = await guestCheckout(day(10), { paymentMethod: 'card', slots: slots(8, 9) }).expect(400);
+      expect(portal.body.code).toBe('TOO_MANY_SLOTS');
+      const agent = await signInAdmin();
+      const ids = [(await slotAt(day(10), 8)).id, (await slotAt(day(10), 9)).id];
+      const customer = { name: 'Rollout Walk In', phone: '01799005013' };
+      const staff = await agent.post(`${API}/admin/bookings`).send({ slotIds: ids, customer, payment: { type: 'none' } }).expect(400);
+      expect(staff.body.code).toBe('TOO_MANY_SLOTS');
+      expect(await statuses(day(10), [8, 9])).toEqual(['available', 'available']);
+      await guestCheckout(day(10), { paymentMethod: 'card', startHour: 8, startMinute: 0 }).expect(201);
+      await agent.post(`${API}/admin/bookings`).send({ slotId: ids[1], customer, payment: { type: 'none' } }).expect(201);
+    } finally {
+      env.MULTI_SLOT_BOOKINGS_ENABLED = true;
+    }
   });
 
   describe('portal checkout', () => {

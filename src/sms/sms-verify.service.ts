@@ -1,4 +1,4 @@
-import { randomInt } from 'node:crypto';
+import { randomInt, timingSafeEqual } from 'node:crypto';
 import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import { env } from '../config/env.js';
@@ -16,6 +16,8 @@ const tooManyCodes = () => new AppError('Too many codes requested for this numbe
  * expires and rate-limits the codes. Without Twilio settings (dev only), codes are kept in memory
  * and logged instead of sent. With TEST_OTP_CODE (never in production), that fixed code always
  * works and no SMS is sent. Tests mock it. Never log codes when Twilio is configured.
+ * LIVE_TEST_PHONE + LIVE_TEST_OTP allow one dedicated test customer to sign in without SMS,
+ * including in production. Other numbers use the normal flow. Neither the live code nor phone is logged.
  */
 @Injectable()
 export class SmsVerifyService {
@@ -24,6 +26,7 @@ export class SmsVerifyService {
 
   /** `phone` is normalised E.164 ("+8801711000000"). */
   async send(phone: string): Promise<void> {
+    if (this.liveTestCode(phone)) return;
     if (env.TEST_OTP_CODE) return this.logger.warn(`TEST_OTP_CODE is set: no SMS sent to ${phone}`);
     if (!this.configured()) return this.devSend(phone);
     const res = await this.call('Verifications', { To: phone, Channel: 'sms' });
@@ -37,6 +40,12 @@ export class SmsVerifyService {
 
   /** True when the code is right. A wrong, expired or used-up code is just false. */
   async check(phone: string, code: string): Promise<boolean> {
+    const liveCode = this.liveTestCode(phone);
+    if (liveCode) {
+      const expected = Buffer.from(liveCode);
+      const actual = Buffer.from(code);
+      return expected.length === actual.length && timingSafeEqual(expected, actual);
+    }
     if (env.TEST_OTP_CODE) return code === env.TEST_OTP_CODE;
     if (!this.configured()) return this.devCheck(phone, code);
     const res = await this.call('VerificationCheck', { To: phone, Code: code });
@@ -48,6 +57,10 @@ export class SmsVerifyService {
     }
     const body = (await res.json()) as { status?: string };
     return body.status === 'approved';
+  }
+
+  private liveTestCode(phone: string): string | undefined {
+    return env.LIVE_TEST_PHONE === phone ? env.LIVE_TEST_OTP : undefined;
   }
 
   private configured(): boolean {

@@ -11,6 +11,6 @@ export default defineConfig({
     testTimeout: 15_000,
     // Stripe is mocked, but card checkout is only offered with keys set. Never real keys.
     // TEST_OTP_CODE: customers sign in with this code and no SMS is sent (test/sign-in-customer.ts).
-    env: { STRIPE_SECRET_KEY: 'sk_test_e2e', STRIPE_WEBHOOK_SECRET: 'whsec_e2e', TEST_OTP_CODE: '123456' },
+    env: { STRIPE_SECRET_KEY: 'sk_test_e2e', STRIPE_WEBHOOK_SECRET: 'whsec_e2e', TEST_OTP_CODE: '123456', MULTI_SLOT_BOOKINGS_ENABLED: 'true' },
   },
 });

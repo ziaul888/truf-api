@@ -23,6 +23,7 @@
     "postinstall": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:test": "NODE_ENV=test prisma migrate deploy",
+    "db:reconcile:booking-slots": "prisma db execute --file prisma/rollouts/booking-slots.sql",
     "db:seed": "prisma db seed",
     "db:generate": "prisma generate",
     "db:studio": "prisma studio",

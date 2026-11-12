@@ -3,7 +3,7 @@ import type { PrismaService } from '../prisma/prisma.service.js';
 import { assertDayOpen, slotEnded, slotNotFound } from '../slots/slot-rules.js';
 import { startMinutesOf } from '../slots/slot-time.js';
 import { fromDbDate, hasEnded, venueNow } from '../slots/venue-time.js';
-import { MAX_SLOTS_PER_BOOKING } from './booking-limits.js';
+import { bookingSlotLimit } from './booking-limits.js';
 import { slotNotAvailable } from './booking-rules.js';
 import { assertSameGroundDate, tooManySlots } from './booking-slots.js';
 import type { CreateStaffBookingInput } from './bookings.schemas.js';
@@ -21,7 +21,8 @@ export const staffSlotIds = (input: Pick<CreateStaffBookingInput, 'slotId' | 'sl
  * day open. Open until a slot ends, so a team walking in just after the start can still play.
  */
 export async function loadStaffSlots(db: Pick<PrismaService, 'slot'>, ids: string[]): Promise<StaffSlot[]> {
-  if (ids.length > MAX_SLOTS_PER_BOOKING) throw tooManySlots(MAX_SLOTS_PER_BOOKING);
+  const max = bookingSlotLimit();
+  if (ids.length > max) throw tooManySlots(max);
   const slots = await db.slot.findMany({ where: { id: { in: ids } }, include: WITH_GROUND_DAYS });
   if (slots.length !== ids.length) throw slotNotFound();
   assertSameGroundDate(slots);

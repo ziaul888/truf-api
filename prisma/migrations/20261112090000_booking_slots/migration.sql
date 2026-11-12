@@ -4,11 +4,10 @@
 -- dropped (the hand-written partial index "Payment_method_reference_key" is not touched). The copy is
 -- idempotent: it skips bookings that already have a row, so running it twice adds nothing.
 -- A booking created by an old release during the deploy overlap has no row yet (the code falls back to
--- Booking.slotId for it): once no old instance is running, run the INSERT at the bottom of this file once more,
--- AND this one, which frees live indexes an old release left on bookings it cancelled (it knows nothing of
--- BookingSlot; the new code also self-heals these when a slot is next booked):
---   UPDATE "BookingSlot" s SET "liveSlotId" = NULL, "cancelledAt" = COALESCE(b."cancelledAt", now())
---   FROM "Booking" b WHERE s."bookingId" = b."id" AND b."status" = 'cancelled' AND s."liveSlotId" IS NOT NULL;
+-- Booking.slotId for it). Keep MULTI_SLOT_BOOKINGS_ENABLED=false during rollout. After ALL old
+-- instances stop, run `yarn db:reconcile:booking-slots` (prisma/rollouts/booking-slots.sql), then
+-- enable multi-slot bookings. The repair clears stale live indexes BEFORE inserting missing rows,
+-- because an old instance may already have rebooked one of those cancelled slots.
 
 -- CreateTable
 CREATE TABLE "BookingSlot" (

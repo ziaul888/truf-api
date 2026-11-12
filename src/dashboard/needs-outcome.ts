@@ -1,9 +1,9 @@
 import { CARD_CHECKOUT_IN_PROGRESS, isWalletMethod, owedOf, paidOf } from '../bookings/booking-rules.js';
-import { windowHasEnded, windowOf, windowTimes } from '../bookings/booking-slots.js';
+import { currentSlots, windowHasEnded, windowOf, windowTimes } from '../bookings/booking-slots.js';
 import type { PaymentMethod, PaymentStatus } from '../generated/prisma/client.js';
 import type { PrismaService } from '../prisma/prisma.service.js';
-import type { SlotTimes } from '../slots/slot-time.js';
-import { toDbDate, type IsoDate, type VenueNow } from '../slots/venue-time.js';
+import { slotTimes, type SlotTimes } from '../slots/slot-time.js';
+import { fromDbDate, toDbDate, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 
 const SLOT_CLOCK = { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } as const;
 
@@ -16,6 +16,8 @@ export interface NeedsOutcomeBooking {
   customerName: string;
   groundName: string;
   slot: { date: IsoDate } & SlotTimes;
+  /** Each actual slot, preserving gaps between nonconsecutive times. */
+  slots: ({ date: IsoDate } & SlotTimes)[];
   total: number;
   /** Received so far: what stays if staff mark it no-show. */
   paid: number;
@@ -49,8 +51,12 @@ export async function loadNeedsOutcome(prisma: PrismaService, now: VenueNow): Pr
     },
     orderBy: [{ slot: { date: 'desc' } }, { slot: { startHour: 'desc' } }, { slot: { startMinute: 'desc' } }],
   });
-  // Ended once the last live slot has; the card shows the whole booked span.
-  const ended = rows.filter((b) => windowHasEnded(now, windowOf(b)));
+  // Sort by the last slot's end, rather than the primary slot's start.
+  const ended = rows.filter((b) => windowHasEnded(now, windowOf(b))).sort((a, b) => {
+    const first = windowOf(a);
+    const second = windowOf(b);
+    return second.date.localeCompare(first.date) || second.endMinutes - first.endMinutes;
+  });
   return {
     count: ended.length,
     bookings: ended.slice(0, NEEDS_OUTCOME_LIMIT).map((b) => {
@@ -58,6 +64,7 @@ export async function loadNeedsOutcome(prisma: PrismaService, now: VenueNow): Pr
       return {
         id: b.id, bookingNumber: b.bookingNumber, customerName: b.contactName, groundName: b.ground.name,
         slot: { date: windowOf(b).date, ...windowTimes(windowOf(b)) },
+        slots: currentSlots(b).map(({ slot }) => ({ date: fromDbDate(slot.date), ...slotTimes(slot) })),
         total: b.total, paid: paidOf(b.payments), due: owedOf(b, b.payments), payAtVenue: b.payAtVenue,
         walletPayment: wallet ? { method: wallet.method, status: wallet.status } : null,
       };

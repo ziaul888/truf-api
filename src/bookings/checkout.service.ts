@@ -13,7 +13,7 @@ import type { SlotSettings } from '../slots/slots.schemas.js';
 import { slotHour } from '../slots/slot-time.js';
 import { addDays, hasStarted, minutesUntil, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
-import { MAX_SLOTS_PER_BOOKING } from './booking-limits.js';
+import { bookingSlotLimit } from './booking-limits.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { BOOKING_INCLUDE, customerCanPay } from './booking.dto.js';
 import {
@@ -90,7 +90,7 @@ export class CheckoutService {
     });
     return {
       cardEnabled: portalCardOn(settings), cashEnabled: portalCashEnabled, wallets, serviceFee, currency: env.CURRENCY, holdMinutes,
-      maxSlotsPerBooking: MAX_SLOTS_PER_BOOKING,
+      maxSlotsPerBooking: bookingSlotLimit(),
     };
   }
 

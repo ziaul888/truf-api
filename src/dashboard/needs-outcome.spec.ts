@@ -36,6 +36,7 @@ describe('loadNeedsOutcome', () => {
       id: 'A', bookingNumber: 'CT-A', customerName: 'Rakib', groundName: 'Main', slot: {
         date: '2026-10-28', startHour: 9, startMinute: 0, endHour: 10, endMinute: 0, startTime: '09:00', endTime: '10:00',
       },
+      slots: [{ date: '2026-10-28', startHour: 9, startMinute: 0, endHour: 10, endMinute: 0, startTime: '09:00', endTime: '10:00' }],
       total: 1000, paid: 0, due: 1000, payAtVenue: true, walletPayment: null,
     });
     // Under review: not money owed; the card says Verify.
@@ -58,5 +59,21 @@ describe('loadNeedsOutcome', () => {
     const result = await loadNeedsOutcome(setup(rows).prisma, now);
     expect(result.count).toBe(NEEDS_OUTCOME_LIMIT + 3);
     expect(result.bookings).toHaveLength(NEEDS_OUTCOME_LIMIT);
+  });
+
+  it('preserves nonconsecutive times and orders by the last slot end before applying the limit', async () => {
+    const live = (startHour: number, startMinute = 0, durationMinutes = 60) => ({
+      price: 1500, cancelledAt: null,
+      slot: { id: `s-${startHour}`, date: day('2026-10-28'), startHour, startMinute, durationMinutes },
+    });
+    const { prisma } = setup([
+      row('single', '2026-10-28', 8),
+      row('gap', '2026-10-28', 6, { bookingSlots: [live(8, 30, 90), live(6)] }),
+    ]);
+    const result = await loadNeedsOutcome(prisma, now);
+    expect(result.bookings.map((b) => b.id)).toEqual(['gap', 'single']);
+    expect(result.bookings[0]!.slots).toMatchObject([
+      { startTime: '06:00', endTime: '07:00' }, { startTime: '08:30', endTime: '10:00' },
+    ]);
   });
 });

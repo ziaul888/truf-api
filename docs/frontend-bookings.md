@@ -68,7 +68,7 @@ How they move together:
 { "cardEnabled": true, "cashEnabled": true, "wallets": [{ "method": "bkash", "number": "+8801700000000" }], "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15, "maxSlotsPerBooking": 4 }
 ```
 - **Load this on the checkout page.**
-  - `maxSlotsPerBooking` is how many slots one booking can hold; cap the slot picker at it.
+  - `maxSlotsPerBooking` is how many slots one booking can hold; cap both portal and staff pickers at it. It is **1** while `MULTI_SLOT_BOOKINGS_ENABLED=false` (default), and **4** after the cut-over repair and explicit enablement. Missing from an older API, loading or failed capability checks: allow **1** only. Single-slot requests should keep the legacy `startHour` / `startMinute` or staff `slotId` format so frontend deployment can precede the backend safely. See `CLAUDE.md` deploy notes.
   - Show the card option only when `cardEnabled` is true: it needs both the Stripe key and the webhook secret. Otherwise `POST /checkout` with `card` returns `400 CARD_NOT_AVAILABLE`, and `canPay` is false on every booking.
   - Show the "Pay at venue (cash)" option only when `cashEnabled` is true.
   - Show a bKash / Nagad option for each entry in `wallets` (only the ones the admin has set a number for). Choosing one shows "Send ৳{total} to {number}", where the total includes the service fee, plus two required fields: the TrxID and the number the money was sent from.
