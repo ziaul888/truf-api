@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { isDueToday, isOverdue, loadOwing, type OwingBooking } from '../bookings/booking-due.js';
 import { CARD_CHECKOUT_IN_PROGRESS, WALLET_UNDER_REVIEW } from '../bookings/booking-rules.js';
+import { REFUND_DUE_BOOKING } from '../bookings/refund-tracking.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { slotHour } from '../slots/slot-time.js';
 import { addDays, fromDbDate, minutesUntil, toDbDate, venueNow } from '../slots/venue-time.js';
@@ -18,6 +19,8 @@ export interface DashboardAttention {
   startingSoon: { count: number; withinMinutes: number };
   /** Still pending after the slot ended: collect, verify, or mark no-show. */
   needsOutcome: NeedsOutcome;
+  /** Cancelled bookings whose bKash / Nagad refund staff still have to send back by hand. */
+  refundDue: { count: number };
 }
 
 const sumDue = (list: OwingBooking[]) => ({ count: list.length, amount: list.reduce((sum, b) => sum + b.due, 0) });
@@ -29,7 +32,7 @@ export class DashboardAttentionService {
 
   async attention(): Promise<DashboardAttention> {
     const now = venueNow();
-    const [pending, owing, held, nearby, toVerify, needsOutcome] = await Promise.all([
+    const [pending, owing, held, nearby, toVerify, needsOutcome, refundDue] = await Promise.all([
       // Unpaid staff bookings and pay-at-venue requests; card checkouts confirm themselves.
       this.prisma.booking.findMany({ where: { deletedAt: null, status: 'pending', NOT: CARD_CHECKOUT_IN_PROGRESS }, select: { payAtVenue: true } }),
       loadOwing(this.prisma),
@@ -45,6 +48,7 @@ export class DashboardAttentionService {
       }),
       this.prisma.booking.count({ where: { deletedAt: null, ...WALLET_UNDER_REVIEW } }),
       loadNeedsOutcome(this.prisma, now),
+      this.prisma.booking.count({ where: { deletedAt: null, ...REFUND_DUE_BOOKING } }),
     ]);
     const soon = nearby.filter(({ slot }) => {
       const minutes = minutesUntil(now, fromDbDate(slot.date), slotHour(slot));
@@ -58,6 +62,7 @@ export class DashboardAttentionService {
       payingNow: { count: held.length },
       startingSoon: { count: soon.length, withinMinutes: SOON_MINUTES },
       needsOutcome,
+      refundDue: { count: refundDue },
     };
   }
 }

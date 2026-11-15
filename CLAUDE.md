@@ -152,6 +152,8 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 
 - Cancellation = full refund to the original payment method: card via Stripe (502 `REFUND_FAILED` leaves the booking unchanged), cash, bank transfer, bKash and Nagad marked refunded (paid back by hand). A bKash / Nagad payment not yet verified is marked failed instead
 
+- Refund tracking (bKash / Nagad only; cash and card unchanged): the refund itself is still paid by hand, so staff record it. `Payment.refundSentAt` / `refundSentById` / `refundNote` (null = still due); `POST /admin/bookings/:id/refund-sent { note? }` (max 200) marks every refunded bKash / Nagad payment of the booking not yet sent, conditionally (`409 NO_REFUND_DUE` when none, so a double click is safe), and logs a `refunded` event. The admin booking DTO has `refund` (`bookings/refund-tracking.ts`: amount summed, method and payer number from the latest, `sentAt` only when all are sent; null without a refunded wallet payment); the customer DTOs don't. Dashboard attention has `refundDue: { count }` and the bookings list takes `refundDue=true`. Revenue and reports still follow `receivedAt` / `refundedAt`, never `refundSentAt`
+
 - Per-ground hourly price, plus an optional peak price for set hour ranges (`peakPrice` + `peakRanges`); a slot's price is summed half hour by half hour (`slotPrice` in `grounds/ground-schedule.ts`; an odd price over 90 minutes is rounded)
 
 - Money due is overdue once its `dueDate` has passed, or, with no due date, once the slot has started (completed bookings still count). Portal card checkouts still in Stripe are never "due" or "to confirm" (`booking-due.ts`)
@@ -175,6 +177,11 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 - Docker runs migration `20261115090000_cash_deposit_settings` automatically before starting the new API. It is additive (two columns with defaults and a CHECK 1..100 on the one-row `SlotSettings` table, hand-written in the migration) and leaves behaviour unchanged: the deposit starts OFF. It does not touch `Payment_method_reference_key`.
 - An admin turns on Settings -> Payments -> Booking money for cash bookings only once the frontend that sends `depositMethod` / `reference` / `payerNumber` for cash is deployed: with the setting on, an old frontend's plain cash checkout gets `400 CASH_DEPOSIT_REQUIRED`. Verify `/api/v1/checkout/options` reports `cashDepositPercent`. To stop: turn it off (cash is plain again; bookings already made keep their deposit payment and are verified or rejected as usual). Reset to defaults turns it off.
 - Before committing, as above (isolated test DB only), the migrate diff will also want to drop the hand-written CHECK `SlotSettings_cashDepositPercent_range`: keep it.
+
+## Deploy notes (refund tracking)
+- Docker runs migration `20261116090000_refund_tracking` automatically before starting the new API. It is additive (three nullable columns on `Payment` plus a foreign key on `refundSentById`, hand-written in the migration) and changes no behaviour: the migration also backfills existing refunded bKash / Nagad payments as already sent (`refundSentAt = refundedAt`, note "Before refund tracking", no staff member), so only refunds made after the deploy show as "refund due". It does not touch `Payment_method_reference_key`.
+- Deploy the backend BEFORE the frontend that reads `refund` / `refundDue` or calls `refund-sent`; the old frontend ignores the new fields. To stop: nothing to switch off; the fields are additive. Never roll back to code without the columns once refunds are recorded.
+- Before committing, as above (isolated test DB only), the migrate diff must not change `Payment_method_reference_key`. The Prisma relations on `Payment` / `User` are now named (`PaymentRecordedBy`, `PaymentRefundSentBy`); naming changes no database object.
 
 ## Testing
 - Unit test every service (70% coverage target); e2e every endpoint with Supertest

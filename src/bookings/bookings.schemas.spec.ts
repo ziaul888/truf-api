@@ -1,4 +1,4 @@
-import { CheckoutSchema, CreateStaffBookingSchema } from './bookings.schemas.js';
+import { CheckoutSchema, CreateStaffBookingSchema, ListBookingsQuerySchema, RefundSentSchema } from './bookings.schemas.js';
 
 const body = {
   groundId: '6f1c2a8e-0b7d-4c3e-9a51-2d4f8e6b7c10', date: '2026-10-29', hour: 16,
@@ -58,5 +58,25 @@ describe('CreateStaffBookingSchema', () => {
     expect(paths({ ...rest, slotIds: [] })).toEqual(['slotIds']);
     expect(paths({ ...rest, slotIds: [id(0), id(0)] })).toEqual(['slotIds']);
     expect(CreateStaffBookingSchema.shape.customer).toBeDefined();
+  });
+});
+
+describe('RefundSentSchema', () => {
+  it('trims the note, which is optional', () => {
+    expect(RefundSentSchema.parse({})).toEqual({});
+    expect(RefundSentSchema.parse({ note: '  sent  ' })).toEqual({ note: 'sent' });
+  });
+
+  it('refuses a note over 200 characters', () => {
+    expect(RefundSentSchema.safeParse({ note: 'x'.repeat(201) }).success).toBe(false);
+    expect(RefundSentSchema.safeParse({ note: 'x'.repeat(200) }).success).toBe(true);
+  });
+});
+
+describe('ListBookingsQuerySchema refundDue', () => {
+  it('takes refundDue=true only', () => {
+    expect(ListBookingsQuerySchema.parse({ refundDue: 'true' }).refundDue).toBe(true);
+    expect(ListBookingsQuerySchema.parse({}).refundDue).toBeUndefined();
+    expect(ListBookingsQuerySchema.safeParse({ refundDue: 'false' }).success).toBe(false);
   });
 });

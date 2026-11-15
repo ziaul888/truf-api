@@ -329,6 +329,50 @@ describe('StaffBookingsService', () => {
     });
   });
 
+  describe('marking a bKash / Nagad refund as sent', () => {
+    const dueRefund = { id: 'p-1', amount: 6000, method: 'bkash' };
+    const refundSetup = (due: object[] = [dueRefund]) => {
+      const ctx = setup(bookingRow({ status: 'cancelled' }));
+      Object.assign(ctx.tx.payment, { findMany: vi.fn(async (_args: object) => due) });
+      ctx.prisma.booking.findUniqueOrThrow.mockImplementation(async () => { throw new Error('dto not needed'); });
+      return ctx;
+    };
+
+    it('marks the due payments sent by the actor, only if still unsent, and logs a refunded event', async () => {
+      const { service, tx } = refundSetup();
+      await service.markRefundSent('u-1', 'b-1', { note: 'TrxID 9BC4' }).catch(() => undefined);
+      expect(tx.payment.updateMany).toHaveBeenCalledWith({
+        where: expect.objectContaining({ id: { in: ['p-1'] }, status: 'refunded', refundSentAt: null, deletedAt: null }),
+        data: { refundSentAt: NOW, refundSentById: 'u-1', refundNote: 'TrxID 9BC4' },
+      });
+      expect(tx.bookingEvent.create).toHaveBeenCalledWith({
+        data: { bookingId: 'b-1', type: 'refunded', userId: 'u-1', detail: 'Refund of 6000 sent back by bKash: TrxID 9BC4' },
+      });
+    });
+
+    it('stores no note as null', async () => {
+      const { service, tx } = refundSetup();
+      await service.markRefundSent('u-1', 'b-1', {}).catch(() => undefined);
+      expect(tx.payment.updateMany.mock.calls[0]![0].data).toMatchObject({ refundNote: null });
+    });
+
+    it('is 409 NO_REFUND_DUE when nothing is due or a double click got there first', async () => {
+      const { service, tx } = refundSetup();
+      tx.payment.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(service.markRefundSent('u-1', 'b-1', {})).rejects.toMatchObject({ status: 409, code: 'NO_REFUND_DUE' });
+      expect(tx.bookingEvent.create).not.toHaveBeenCalled();
+      const none = refundSetup([]);
+      none.tx.payment.updateMany.mockResolvedValueOnce({ count: 0 });
+      await expect(none.service.markRefundSent('u-1', 'b-1', {})).rejects.toMatchObject({ code: 'NO_REFUND_DUE' });
+    });
+
+    it('is 404 for an unknown booking', async () => {
+      const { service, prisma } = refundSetup();
+      prisma.booking.findFirst.mockResolvedValueOnce(null as never);
+      await expect(service.markRefundSent('u-1', 'nope', {})).rejects.toMatchObject({ status: 404, code: 'BOOKING_NOT_FOUND' });
+    });
+  });
+
   it.each([
     ['a confirmed booking', bookingRow({ status: 'confirmed' })],
     ['a card booking waiting for payment', bookingRow({ source: 'portal', payAtVenue: false })],

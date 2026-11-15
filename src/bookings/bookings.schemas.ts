@@ -124,6 +124,8 @@ export const ListBookingsQuerySchema = PaginationSchema.extend({
   sort: oneOf(['slot', 'created'] as const, 'Sort').default('created'),
   /** Money due: `overdue` (past its due date, or the slot started), `today` (due date today), or `any`. */
   due: oneOf(DUE_FILTERS, 'Due').optional(),
+  /** `true`: cancelled bookings with a bKash / Nagad refund staff have not yet sent. */
+  refundDue: z.enum(['true']).transform(() => true).optional(),
 }).refine((v) => (v.from === undefined) === (v.to === undefined), { path: ['from'], message: 'Send both from and to' });
 export type ListBookingsQuery = z.infer<typeof ListBookingsQuerySchema>;
 
@@ -193,6 +195,10 @@ export type CancelBookingInput = z.infer<typeof CancelBookingSchema>;
 /** "Mark no-show": the reason is optional, as for a cancel. */
 export const NoShowSchema = z.object({ reason: note(500) });
 export type NoShowInput = z.infer<typeof NoShowSchema>;
+
+/** "Refund sent": the money was paid back by hand (bKash / Nagad). The note is optional. */
+export const RefundSentSchema = z.object({ note: note(200) });
+export type RefundSentInput = z.infer<typeof RefundSentSchema>;
 
 export const RecordPaymentSchema = z.object({
   amount: z.number().int('Must be a whole number of the smallest unit').min(1, 'Amount must be above 0'),

@@ -9,9 +9,10 @@ import { toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import {
-  bookingChanged, bookingNotFound, bookingNotPending, dueOf, noShowDetail, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
-  receivedDetail, withBookingNumber, withUniqueReference,
+  bookingChanged, bookingNotFound, bookingNotPending, dueOf, methodName, noShowDetail, paymentStatusOf, paymentUnderReview,
+  pendingWalletPayment, receivedDetail, withBookingNumber, withUniqueReference,
 } from './booking-rules.js';
+import { REFUND_DUE } from './refund-tracking.js';
 import { slotLimitOf } from './booking-limits.js';
 import { sumPrice } from './booking-slots.js';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from './booking.dto.js';
@@ -20,7 +21,7 @@ import { claimSlots } from './checkout-slots.js';
 import { loadStaffSlots, staffSlotIds } from './staff-booking-slots.js';
 import { verifyWalletPayment } from './wallet-verification.js';
 import type {
-  CancelBookingInput, ConfirmBookingInput, CreateStaffBookingInput, NoShowInput, RecordPaymentInput, UpdateBookingInput,
+  CancelBookingInput, ConfirmBookingInput, CreateStaffBookingInput, NoShowInput, RecordPaymentInput, RefundSentInput, UpdateBookingInput,
 } from './bookings.schemas.js';
 
 const exceedsDue = (message: string) => new AppError(message, 400, 'PAYMENT_EXCEEDS_DUE');
@@ -137,6 +138,28 @@ export class StaffBookingsService {
     await this.load(id);
     await this.cancellation.cancel(id, {
       actorId, reason: input.reason, refund: input.refund, notify: input.notifyCustomer, rejectWallet: input.rejectWalletPayment,
+    });
+    return this.dto(id);
+  }
+
+  /**
+   * The bKash / Nagad money was paid back by hand: marks every refunded wallet payment of the booking still due as sent.
+   * Conditional on "not yet sent", so a double click records it once (the second gets 409 NO_REFUND_DUE).
+   */
+  async markRefundSent(actorId: string, id: string, { note }: RefundSentInput): Promise<BookingDto> {
+    await this.load(id);
+    await this.prisma.$transaction(async (tx) => {
+      const due = await tx.payment.findMany({ where: { bookingId: id, ...REFUND_DUE }, select: { id: true, amount: true, method: true } });
+      const { count } = await tx.payment.updateMany({
+        where: { id: { in: due.map((p) => p.id) }, ...REFUND_DUE },
+        data: { refundSentAt: new Date(), refundSentById: actorId, refundNote: note || null },
+      });
+      if (count === 0) throw new AppError('No refund is due on this booking', 409, 'NO_REFUND_DUE');
+      const amount = due.reduce((sum, p) => sum + p.amount, 0);
+      const methods = [...new Set(due.map((p) => methodName(p.method)))].join(' and ');
+      await tx.bookingEvent.create({
+        data: { bookingId: id, type: 'refunded', userId: actorId, detail: `Refund of ${amount} sent back by ${methods}${note ? `: ${note}` : ''}` },
+      });
     });
     return this.dto(id);
   }
