@@ -9,6 +9,7 @@ import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { loadOwing, matchesDue, type DueFilter } from './booking-due.js';
 import { hasUpcomingSlot } from './booking-slots.js';
+import { REFUND_DUE_BOOKING } from './refund-tracking.js';
 import { ABANDONED_CHECKOUT, bookingNotFound, confirmationUrl, isValidBookingToken } from './booking-rules.js';
 import {
   BOOKING_DETAIL_INCLUDE, BOOKING_INCLUDE, customerCanCancel, customerCanPay, customerCanRequestCancel, toBookingDetailDto, toBookingDto,
@@ -36,7 +37,7 @@ export class BookingQueriesService {
 
   /** `counts` ignore the status filter, for the stat cards. */
   async list(q: ListBookingsQuery): Promise<Paginated<BookingDto> & { counts: BookingCounts }> {
-    const base: Prisma.BookingWhereInput = { ...listWhere(q), ...(q.due && { id: { in: await this.owingIds(q.due) } }) };
+    const base: Prisma.BookingWhereInput = { ...listWhere(q), ...(q.due && { id: { in: await this.owingIds(q.due) } }), ...(q.refundDue && REFUND_DUE_BOOKING) };
     const where: Prisma.BookingWhereInput = { ...base, ...(q.status && { status: q.status }) };
     const orderBy: Prisma.BookingOrderByWithRelationInput[] = q.sort === 'slot'
       ? [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }]

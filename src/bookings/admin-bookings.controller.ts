@@ -6,8 +6,9 @@ import { IdParamSchema, type IdParam } from '../common/schemas.js';
 import { BookingQueriesService } from './booking-queries.service.js';
 import {
   CancelBookingSchema, ConfirmBookingSchema, CreateStaffBookingSchema, ListBookingsQuerySchema, NoShowSchema, RecordPaymentSchema,
-  UpcomingQuerySchema, UpdateBookingSchema, type CancelBookingInput, type ConfirmBookingInput, type CreateStaffBookingInput,
-  type ListBookingsQuery, type NoShowInput, type RecordPaymentInput, type UpcomingQuery, type UpdateBookingInput,
+  RefundSentSchema, UpcomingQuerySchema, UpdateBookingSchema, type CancelBookingInput, type ConfirmBookingInput, type CreateStaffBookingInput,
+  type ListBookingsQuery, type NoShowInput, type RecordPaymentInput, type RefundSentInput,
+  type UpcomingQuery, type UpdateBookingInput,
 } from './bookings.schemas.js';
 import { StaffBookingsService } from './staff-bookings.service.js';
 
@@ -62,6 +63,17 @@ export class AdminBookingsController {
     @Body(new ZodValidationPipe(CancelBookingSchema)) body: CancelBookingInput,
   ) {
     return this.staff.cancel(user.id, id, body);
+  }
+
+  /** bKash / Nagad refunds are paid back by hand: records that the money was sent (409 NO_REFUND_DUE if none is due). */
+  @Post(':id/refund-sent')
+  @HttpCode(200)
+  refundSent(
+    @CurrentUser() user: AuthUser,
+    @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
+    @Body(new ZodValidationPipe(RefundSentSchema)) body: RefundSentInput,
+  ) {
+    return this.staff.markRefundSent(user.id, id, body);
   }
 
   /** The team didn't turn up: the advance stays, the rest of the due is written off. */

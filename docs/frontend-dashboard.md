@@ -64,8 +64,11 @@ The row of action cards at the top. Refresh it every 60 seconds.
 | `payingNow` | Card checkouts on hold right now (a customer is in Stripe), any date: one per checkout, even when it holds several slots | `GET /admin/slots?status=held` |
 | `startingSoon` | Pending or confirmed bookings starting in the next 60 minutes. This works across midnight | The upcoming list on the same page |
 | `needsOutcome` | Bookings still `pending` after their slot **ended**: staff should record what happened. Card checkouts still in Stripe are left out; bKash / Nagad bookings under review are included (`walletPayment.status: "pending"`: verify or reject them first, `due` is 0 meanwhile). `bookings` lists at most 10, most recently ended first; `count` has them all. Each row offers **Mark no-show** (`POST /admin/bookings/:id/no-show`) and, for cash or unpaid bookings, **Collect** (recording a payment confirms the booking) | Each booking's detail page; Confirm Bookings for the ones to verify |
+| `refundDue` | `{ count }`: cancelled bookings with a refunded **bKash / Nagad** payment staff have not yet sent back by hand (`refund.sentAt` is null). Not money owed by the customer, so never in `overdue` or `dueToday`. Cash and card refunds never count | `GET /admin/bookings?refundDue=true` |
 
 **A new filter on the bookings list:** `GET /admin/bookings?due=overdue | today | any`. `any` is every live booking with money due. Card checkouts still in Stripe never count as due.
+
+**Another filter:** `GET /admin/bookings?refundDue=true` lists cancelled bookings whose bKash / Nagad refund is still to be sent (only the value `true`; anything else is `400 VALIDATION_FAILED`). It combines with the other filters; the `counts` in the response follow it too.
 
 `needsOutcome.bookings[].slots` contains every live slot, earliest first, preserving gaps between nonconsecutive times. Render these times rather than treating the `slot` summary span as continuous. Older responses without `slots` fall back to `slot`. A booking appears only after its last live slot ends; ordering and the 10-row limit use that end time.
 

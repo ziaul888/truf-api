@@ -59,3 +59,22 @@ describe('booking DTOs with several slots', () => {
     expect(dto.slots[0]).toMatchObject({ price: 1000, status: 'active' });
   });
 });
+
+describe('booking DTO refund', () => {
+  const walletRefund = { method: 'bkash', status: 'refunded', amount: 6000, payerNumber: '01811000000', refundSentAt: null, refundNote: null, refundSentBy: null };
+
+  it('is null without a refunded bKash / Nagad payment', () => {
+    expect(toBookingDto(row()).refund).toBeNull();
+    expect(toBookingDto(row({ payments: [{ ...walletRefund, method: 'cash' }] })).refund).toBeNull();
+  });
+
+  it('shows what is due for a refunded bKash payment', () => {
+    expect(toBookingDto(row({ payments: [walletRefund] })).refund).toEqual({
+      amount: 6000, method: 'bkash', payerNumber: '01811000000', sentAt: null, sentBy: null, note: null,
+    });
+  });
+
+  it('is not in the public DTO', () => {
+    expect(toPublicBookingDto(row({ payments: [walletRefund] }), false, false)).not.toHaveProperty('refund');
+  });
+});

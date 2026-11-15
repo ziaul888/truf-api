@@ -6,6 +6,7 @@ import { slotHour, slotTimes, type SlotTimes } from '../slots/slot-time.js';
 import { fromDbDate, minutesUntil, type IsoDate, type VenueNow } from '../slots/venue-time.js';
 import { dueOf, isUnderReview, isWalletMethod, paidOf, type WalletMethod } from './booking-rules.js';
 import { primaryOf, slotRowsOf, type BookingSlotRef } from './booking-slots.js';
+import { refundOf, type RefundDto } from './refund-tracking.js';
 
 const STAFF = { select: { id: true, name: true } } as const;
 const SLOT_SELECT = { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } as const;
@@ -17,7 +18,7 @@ export const BOOKING_INCLUDE = {
   /** Every slot of the booking (`slot` is the earliest). */
   bookingSlots: { select: { price: true, cancelledAt: true, slot: { select: SLOT_SELECT } } },
   customer: { select: { id: true, name: true, phone: true, email: true } },
-  payments: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' }, include: { recordedBy: STAFF } },
+  payments: { where: { deletedAt: null }, orderBy: { createdAt: 'asc' }, include: { recordedBy: STAFF, refundSentBy: STAFF } },
   createdBy: STAFF,
 } satisfies Prisma.BookingInclude;
 
@@ -65,6 +66,8 @@ export interface BookingDto {
   payAtVenue: boolean;
   /** Portal customer paid by bKash / Nagad: what they sent, for staff to verify. Null otherwise. */
   walletPayment: WalletPaymentDto | null;
+  /** Manual bKash / Nagad refund to send back (or sent): non-null once the booking has a refunded bKash / Nagad payment. */
+  refund: RefundDto | null;
   /** The customer asked to cancel while their bKash / Nagad payment was under review ("Cancel requested"). */
   cancelRequestedAt: Date | null;
   /** Made by a repeat booking (`/admin/booking-series/:id`); null otherwise. */
@@ -177,7 +180,7 @@ const walletPaymentOf = (b: BookingRow): WalletPaymentDto | null => {
 
 export const toBookingDto = (b: BookingRow): BookingDto => ({
   id: b.id, bookingNumber: b.bookingNumber, source: b.source, status: b.status, paymentStatus: b.paymentStatus,
-  payAtVenue: b.payAtVenue, walletPayment: walletPaymentOf(b), cancelRequestedAt: b.cancelRequestedAt, seriesId: b.seriesId,
+  payAtVenue: b.payAtVenue, walletPayment: walletPaymentOf(b), refund: refundOf(b.payments), cancelRequestedAt: b.cancelRequestedAt, seriesId: b.seriesId,
   ground: { id: b.ground.id, name: b.ground.name, sport: b.ground.sport },
   slot: slotOf(primaryOf(b).slot),
   slots: slotRowsOf(b).map((s) => bookedSlotOf(s, b.status === 'cancelled')),

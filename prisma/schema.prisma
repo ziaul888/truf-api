@@ -149,7 +149,8 @@ model User {
   slotEvents        SlotEvent[]
   bookingsCreated   Booking[]      @relation("BookingCreatedBy")
   bookingsCancelled Booking[]      @relation("BookingCancelledBy")
-  paymentsRecorded  Payment[]
+  paymentsRecorded  Payment[]      @relation("PaymentRecordedBy")
+  refundsSent       Payment[]      @relation("PaymentRefundSentBy")
   bookingEvents     BookingEvent[]
   closuresCreated Closure[] @relation("ClosureCreatedBy")
   closuresLifted  Closure[] @relation("ClosureLiftedBy")
@@ -532,12 +533,18 @@ model Payment {
   payerNumber           String?
   note                  String?
   recordedById          String?
+  /// bKash / Nagad refunds are paid back by hand: when staff sent the money back, who, and an optional note
+  /// (max 200). Null while the refund is still due. Does not affect revenue (that follows `refundedAt`).
+  refundSentAt          DateTime?
+  refundSentById        String?
+  refundNote            String?
   createdAt             DateTime      @default(now())
   updatedAt             DateTime      @updatedAt
   deletedAt             DateTime?
 
   booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  recordedBy User?   @relation(fields: [recordedById], references: [id], onDelete: SetNull)
+  recordedBy User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  refundSentBy User? @relation("PaymentRefundSentBy", fields: [refundSentById], references: [id], onDelete: SetNull)
 
   @@index([bookingId])
   @@index([status])
