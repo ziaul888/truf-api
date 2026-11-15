@@ -47,7 +47,7 @@ function setup({
     openSessionUrl: vi.fn(async () => 'https://stripe.test/open'),
   };
   const cancellation = { cancel: vi.fn(async () => undefined) };
-  const settings = { get: vi.fn(async () => ({ ...DEFAULT_SLOT_SETTINGS, portalCashEnabled: cash, bkashNumber, ...switches })) };
+  const settings = { get: vi.fn(async () => ({ ...DEFAULT_SLOT_SETTINGS, portalCashEnabled: cash, bkashNumber, ...(slots ? { multiSlotEnabled: true } : {}), ...switches })) };
   const notifier = { received: vi.fn(async () => true), newBookingToAdmins: vi.fn(async () => undefined) };
   const service = new CheckoutService(
     prisma as unknown as PrismaService, stripe as unknown as StripeService,
@@ -200,8 +200,13 @@ describe('CheckoutService', () => {
 
   it('tells the portal which payment methods are offered and the fee', async () => {
     await expect(setup({ cash: false }).service.options()).resolves.toEqual({
-      cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15, maxSlotsPerBooking: 4,
+      cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15, maxSlotsPerBooking: 1,
     });
+  });
+
+  it('reports the multi-slot limit from the settings: 1 while off, the admin maximum while on', async () => {
+    await expect(setup().service.options()).resolves.toMatchObject({ maxSlotsPerBooking: 1 });
+    await expect(setup({ switches: { multiSlotEnabled: true, maxSlotsPerBooking: 3 } }).service.options()).resolves.toMatchObject({ maxSlotsPerBooking: 3 });
   });
 
   describe('card switched off by the admin (Stripe keys set)', () => {
@@ -398,6 +403,12 @@ describe('CheckoutService', () => {
         code: 'P2002', meta: { driverAdapterError: { cause: { constraint: { index: 'BookingSlot_liveSlotId_key' } } } },
       }));
       await expect(service.start(two)).rejects.toMatchObject({ status: 409, code: 'SLOT_NOT_AVAILABLE' });
+    });
+
+    it('refuses two slots while multi-slot is off, claiming nothing', async () => {
+      const { service, tx } = setup({ slots: [at(18), at(19)], held: 2, switches: { multiSlotEnabled: false } });
+      await expect(service.start(two)).rejects.toMatchObject({ status: 400, code: 'TOO_MANY_SLOTS' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
     });
 
     it('refuses if any one slot is blocked or inside the cutoff', async () => {

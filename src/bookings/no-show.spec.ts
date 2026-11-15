@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service.js';
+import type { SlotSettingsService } from '../slots/slot-settings.service.js';
 import type { BookingCancellationService } from './booking-cancellation.service.js';
 import type { BookingNotifier } from './booking-notifier.service.js';
 import { StaffBookingsService } from './staff-bookings.service.js';
@@ -36,6 +37,7 @@ function setup(booking: object, updated = 1) {
   const notifier = { confirmed: vi.fn(async () => true) };
   const service = new StaffBookingsService(
     prisma as unknown as PrismaService, {} as BookingCancellationService, notifier as unknown as BookingNotifier,
+    {} as SlotSettingsService,
   );
   return { service, tx, notifier };
 }

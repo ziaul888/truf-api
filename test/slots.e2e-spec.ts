@@ -223,6 +223,12 @@ describe('Slots (e2e)', () => {
       const adminAgent = await signIn(admin);
       expect((await adminAgent.get(SETTINGS).expect(200)).body.data).toMatchObject({ advanceBookingDays: 30, autoGenerate: true });
       await (await signIn(manager)).put(SETTINGS).send({ autoGenerate: false }).expect(403);
+      await (await signIn(manager)).put(SETTINGS).send({ multiSlotEnabled: true }).expect(403);
+      // Only invalid values here: multi-slot-bookings.e2e-spec owns the saved multi-slot values (parallel files, one DB).
+      for (const maxSlotsPerBooking of [1, 5]) {
+        expect((await adminAgent.put(SETTINGS).send({ maxSlotsPerBooking }).expect(400)).body.code).toBe('VALIDATION_FAILED');
+      }
+      expect((await adminAgent.put(SETTINGS).send({ multiSlotEnabled: 'yes' }).expect(400)).body.code).toBe('VALIDATION_FAILED');
       expect((await adminAgent.put(SETTINGS).send({ advanceBookingDays: 0 }).expect(400)).body.code).toBe('VALIDATION_FAILED');
       // The portal method switches: only true here, as other files book by card, bKash and Nagad in parallel (unit-tested off).
       expect((await adminAgent.put(SETTINGS).send({ portalBkashEnabled: 'no' }).expect(400)).body.code).toBe('VALIDATION_FAILED');
@@ -234,6 +240,8 @@ describe('Slots (e2e)', () => {
         holdMinutes: 15, serviceFee: 5000, portalCashEnabled: true, portalCardEnabled: true, portalBkashEnabled: true, portalNagadEnabled: true,
         // wallet-payments.e2e-spec sets these meanwhile.
         bkashNumber: expect.toSatisfy(nullOrString), nagadNumber: expect.toSatisfy(nullOrString),
+        // multi-slot-bookings.e2e-spec sets these meanwhile.
+        multiSlotEnabled: expect.any(Boolean), maxSlotsPerBooking: expect.any(Number),
         updatedAt: expect.any(String), updatedBy: { id: expect.any(String), name: 'Admin' },
       });
     });

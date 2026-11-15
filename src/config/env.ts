@@ -30,8 +30,6 @@ const EnvSchema = z.object({
     .string()
     .default('Asia/Dhaka')
     .refine(isTimeZone, 'must be an IANA timezone, e.g. Asia/Dhaka'),
-  /** Enable only after every old API instance has stopped and the BookingSlot cut-over repair has run. */
-  MULTI_SLOT_BOOKINGS_ENABLED: z.enum(['true', 'false']).default('false').transform((value) => value === 'true'),
   /** The customer site, for Stripe return URLs and links in emails. */
   PUBLIC_APP_URL: z.url().default('http://localhost:3000').transform((url) => url.replace(/\/$/, '')),
   /** ISO 4217, lowercase as Stripe uses it. Prices are in its smallest unit. */

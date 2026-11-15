@@ -125,7 +125,7 @@ List endpoints, once they exist, return `data: { data: [...], total, page, limit
 | 409 | `SLOT_HAS_BOOKING` | Blocking a booked slot | Show `error` |
 | 409 | `SLOT_ALREADY_BLOCKED`, `SLOT_NOT_BLOCKED` | Blocking twice, or unblocking a slot that isn't blocked | Refresh the slot |
 | 409 | `SLOT_NOT_AVAILABLE` | A slot changed while saving (someone else acted first); for a multi-slot booking, any one of its slots | Refresh and try again |
-| 400 | `TOO_MANY_SLOTS` | A booking (checkout or staff) with more slots than `maxSlotsPerBooking` (1 during rollout, 4 after enablement, from `GET /checkout/options`) | Cap both pickers at that number; assume 1 when absent |
+| 400 | `TOO_MANY_SLOTS` | A booking (checkout or staff) with more slots than `maxSlotsPerBooking` (1 until an admin allows multiple slots, then 2 to 4, from `GET /checkout/options`) | Cap both pickers at that number; assume 1 when absent |
 | 409 | `BOOKING_IN_PROGRESS` | Blocking one slot (`cancelBooking: true`) of a multi-slot booking that has already started: it would cancel and refund the whole booking | Show `error`; handle that booking from its own page |
 | 400 | `SLOTS_MUST_SHARE_GROUND_DATE` | Staff `slotIds` of different grounds or dates | Pick the slots on one ground and date |
 | 404 | `CLOSURE_NOT_FOUND` | No closure with that id | Refresh the list |
@@ -459,6 +459,8 @@ Close some or all grounds for a date range (Eid, a power cut). The closure itsel
 | `cancellationCutoffHours` | int 0–72 | 2 | Customers can't book or cancel inside this window |
 | `notifyCustomerOnBlock` | boolean | `true` | Stored now; emails start when SendGrid lands |
 | `notifyAdminOnBooking` | boolean | `false` | Stored now; emails start when SendGrid lands |
+| `multiSlotEnabled` | boolean | `false` | Allow one booking to hold several slots (portal checkout and staff bookings). Off: `maxSlotsPerBooking` in `GET /checkout/options` is 1. Existing multi-slot bookings stay readable, payable and cancellable |
+| `maxSlotsPerBooking` | int 2–4 | 4 | Most slots per booking while `multiSlotEnabled` is on (`400 VALIDATION_FAILED` for 1 or 5). Admin-only PUT; managers can read |
 
 Remove these from the settings page: **buffer minutes** (slots always start on the hour), **partial payments** (v1 uses Stripe Checkout only), and **peak hours, peak and off-peak prices and default slot length** (they're ground fields; link to the ground's edit page instead). Also drop the **30 min** and **Custom** slot lengths everywhere: the length comes from the ground, 60 or 120.
 

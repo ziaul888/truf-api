@@ -328,6 +328,10 @@ model SlotSettings {
   /// The venue's bKash / Nagad number customers send money to. Null = not offered on the portal.
   bkashNumber             String?
   nagadNumber             String?
+  /// Lets one booking hold several slots (portal checkout and staff bookings). Off = one slot per booking; existing multi-slot bookings stay readable, payable and cancellable.
+  multiSlotEnabled        Boolean  @default(false)
+  /// Most slots one booking can hold while multi-slot is on, 2 to 4. The CHECK ("SlotSettings_maxSlotsPerBooking_range") lives in the migration, which Prisma can't express.
+  maxSlotsPerBooking      Int      @default(4)
   updatedAt               DateTime @updatedAt
 }
 

@@ -4,6 +4,7 @@ import { env } from '../config/env.js';
 import { contactEmailOf, upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import type { PaymentStatus, Prisma, Slot } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { toDbDate, venueNow } from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
@@ -11,6 +12,7 @@ import {
   bookingChanged, bookingNotFound, bookingNotPending, dueOf, noShowDetail, paymentStatusOf, paymentUnderReview, pendingWalletPayment,
   receivedDetail, withBookingNumber, withUniqueReference,
 } from './booking-rules.js';
+import { slotLimitOf } from './booking-limits.js';
 import { sumPrice } from './booking-slots.js';
 import { BOOKING_INCLUDE, toBookingDto, type BookingDto } from './booking.dto.js';
 import { assertCanMarkNoShow, bookingNoShow, undoneStatusOf } from './no-show-rules.js';
@@ -33,17 +35,20 @@ export class StaffBookingsService {
     private readonly prisma: PrismaService,
     private readonly cancellation: BookingCancellationService,
     private readonly notifier: BookingNotifier,
+    private readonly settings: SlotSettingsService,
   ) {}
 
   /**
    * Paid in full or in part → confirmed; not paid → pending (the review queue). The slot is booked
    * either way. Open until the slot ends, so a team walking in just after the start can still play.
-   * One booking can hold up to MAX_SLOTS_PER_BOOKING slots (`slotIds`) of one ground and date; the
+   * One booking can hold several slots (`slotIds`, at most the slot settings' limit) of one ground and date; the
    * payment is against their combined total.
    * Email optional: left blank, the customer's stored one is used, else no customer emails are sent.
    */
   async create(actorId: string, input: CreateStaffBookingInput): Promise<BookingDto> {
-    const slots = await loadStaffSlots(this.prisma, staffSlotIds(input));
+    const ids = staffSlotIds(input);
+    const max = ids.length > 1 ? slotLimitOf(await this.settings.get()) : 1;
+    const slots = await loadStaffSlots(this.prisma, ids, max);
     const total = sumPrice(slots);
     const paid = paymentAmount(input.payment, total);
     if (input.customer.id && !(await this.prisma.customer.findFirst({ where: { id: input.customer.id, deletedAt: null } }))) {
