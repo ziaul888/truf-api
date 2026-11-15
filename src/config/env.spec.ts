@@ -41,6 +41,11 @@ describe('live test login environment', () => {
     await expect(load({ LIVE_TEST_PHONE: PHONE, LIVE_TEST_OTP: code })).rejects.toThrow('must be 8–10 digits');
   });
 
+  it('ignores the removed MULTI_SLOT_BOOKINGS_ENABLED variable (a leftover value must not break boot)', async () => {
+    const { env } = await load({ MULTI_SLOT_BOOKINGS_ENABLED: 'true' });
+    expect(env).not.toHaveProperty('MULTI_SLOT_BOOKINGS_ENABLED');
+  });
+
   it('continues to reject global TEST_OTP_CODE in production', async () => {
     await expect(load({ TEST_OTP_CODE: '13456', LIVE_TEST_PHONE: PHONE, LIVE_TEST_OTP: CODE })).rejects.toThrow('must not be set in production');
   });

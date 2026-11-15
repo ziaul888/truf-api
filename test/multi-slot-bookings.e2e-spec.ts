@@ -5,7 +5,6 @@ import request from 'supertest';
 import type { App } from 'supertest/types';
 import { AppModule } from './../src/app.module.js';
 import { configureApp } from './../src/app.setup.js';
-import { env } from './../src/config/env.js';
 import { hashPassword } from './../src/auth/password.js';
 import { EmailService } from './../src/email/email.service.js';
 import { StripeService } from './../src/payments/stripe.service.js';
@@ -41,6 +40,10 @@ describe('Multi-slot bookings (e2e)', () => {
   let prisma: PrismaService;
   let groundId: string;
 
+  /** The settings row is shared: wallets need a number, and multi-slot is set here, not by env. */
+  const multiSlot = (settings: { multiSlotEnabled: boolean; maxSlotsPerBooking: number }) =>
+    prisma.slotSettings.upsert({ where: { id: 1 }, create: { id: 1, bkashNumber: BKASH, ...settings }, update: { bkashNumber: BKASH, ...settings } });
+
   const cleanup = async () => {
     const grounds = await prisma.ground.findMany({ where: { name: { startsWith: PREFIX } }, select: { id: true } });
     const ids = grounds.map((g) => g.id);
@@ -66,11 +69,12 @@ describe('Multi-slot bookings (e2e)', () => {
     await prisma.slot.createMany({
       data: dates.flatMap((date) => HOURS.map((startHour) => ({ groundId, date: toDbDate(date), startHour, price: 1000 }))),
     });
-    // The settings row is shared: wallets need a number.
-    await prisma.slotSettings.upsert({ where: { id: 1 }, create: { id: 1, bkashNumber: BKASH }, update: { bkashNumber: BKASH } });
+    await multiSlot({ multiSlotEnabled: true, maxSlotsPerBooking: 4 });
   });
 
   beforeEach(async () => {
+    // slots.e2e-spec deletes the settings row and files run in parallel on one DB: set it again every test.
+    await multiSlot({ multiSlotEnabled: true, maxSlotsPerBooking: 4 });
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
       .overrideProvider(StripeService).useValue(stripe)
       .overrideProvider(EmailService).useValue(email)
@@ -83,7 +87,7 @@ describe('Multi-slot bookings (e2e)', () => {
 
   afterAll(async () => {
     await cleanup();
-    await prisma.slotSettings.updateMany({ data: { bkashNumber: null } });
+    await prisma.slotSettings.updateMany({ data: { bkashNumber: null, multiSlotEnabled: false, maxSlotsPerBooking: 4 } });
     await prisma.$disconnect();
   });
 
@@ -119,8 +123,8 @@ describe('Multi-slot bookings (e2e)', () => {
     expect(res.body.data.maxSlotsPerBooking).toBe(4);
   });
 
-  it('rollout gate refuses both multi-slot endpoints but keeps legacy single-slot bookings working', async () => {
-    env.MULTI_SLOT_BOOKINGS_ENABLED = false;
+  it('with Allow multiple slots off, both multi-slot endpoints are refused but single-slot bookings still work', async () => {
+    await multiSlot({ multiSlotEnabled: false, maxSlotsPerBooking: 4 });
     try {
       const options = await http().get(`${API}/checkout/options`).expect(200);
       expect(options.body.data.maxSlotsPerBooking).toBe(1);
@@ -135,7 +139,39 @@ describe('Multi-slot bookings (e2e)', () => {
       await guestCheckout(day(10), { paymentMethod: 'card', startHour: 8, startMinute: 0 }).expect(201);
       await agent.post(`${API}/admin/bookings`).send({ slotId: ids[1], customer, payment: { type: 'none' } }).expect(201);
     } finally {
-      env.MULTI_SLOT_BOOKINGS_ENABLED = true;
+      await multiSlot({ multiSlotEnabled: true, maxSlotsPerBooking: 4 });
+    }
+  });
+
+  it('a lower admin maximum refuses more slots on both endpoints, and options report it', async () => {
+    await multiSlot({ multiSlotEnabled: true, maxSlotsPerBooking: 2 });
+    try {
+      expect((await http().get(`${API}/checkout/options`).expect(200)).body.data.maxSlotsPerBooking).toBe(2);
+      const portal = await guestCheckout(day(10), { paymentMethod: 'card', slots: slots(10, 11, 12) }).expect(400);
+      expect(portal.body.code).toBe('TOO_MANY_SLOTS');
+      const agent = await signInAdmin();
+      const ids = await Promise.all([10, 11, 12].map(async (h) => (await slotAt(day(10), h)).id));
+      const staff = await agent.post(`${API}/admin/bookings`).send({ slotIds: ids, customer: { name: 'Max Two', phone: '01799005014' }, payment: { type: 'none' } }).expect(400);
+      expect(staff.body.code).toBe('TOO_MANY_SLOTS');
+      expect(await statuses(day(10), [10, 11, 12])).toEqual(['available', 'available', 'available']);
+    } finally {
+      await multiSlot({ multiSlotEnabled: true, maxSlotsPerBooking: 4 });
+    }
+  });
+
+  it('an existing multi-slot booking stays fetchable, payable and cancellable while multi-slot is off', async () => {
+    const agent = await signInAdmin();
+    const res = await signedInCheckout(day(10), { paymentMethod: 'cash', slots: slots(14, 15) });
+    const id = res.body.data.bookingId;
+    await multiSlot({ multiSlotEnabled: false, maxSlotsPerBooking: 4 });
+    try {
+      const link = await http().get(`${API}/bookings/${id}`).query({ token: res.body.data.confirmationUrl.split('token=')[1] }).expect(200);
+      expect(link.body.data).toMatchObject({ slotCount: 2 });
+      await agent.post(`${API}/admin/bookings/${id}/payments`).send({ amount: 500, method: 'cash' }).expect(201);
+      await agent.post(`${API}/admin/bookings/${id}/cancel`).send({ refund: true, notifyCustomer: false }).expect(200);
+      expect(await statuses(day(10), [14, 15])).toEqual(['available', 'available']);
+    } finally {
+      await multiSlot({ multiSlotEnabled: true, maxSlotsPerBooking: 4 });
     }
   });
 

@@ -1,4 +1,4 @@
--- Run only after ALL old API instances have stopped, before enabling MULTI_SLOT_BOOKINGS_ENABLED.
+-- Run only after ALL old API instances have stopped, before turning on Allow multiple slots in Settings -> Booking.
 -- Safe to repeat. Both repairs commit together; a failed repair leaves the rollout gate off.
 BEGIN;
 LOCK TABLE "Booking", "BookingSlot" IN SHARE ROW EXCLUSIVE MODE;

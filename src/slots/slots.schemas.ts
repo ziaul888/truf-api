@@ -140,6 +140,10 @@ export const SlotSettingsSchema = z.object({
   /** The venue's bKash / Nagad number for portal payments; null or "" = not offered. */
   bkashNumber: walletNumber,
   nagadNumber: walletNumber,
+  /** One booking may hold several slots (portal and staff). Off = one slot. */
+  multiSlotEnabled: z.boolean('multiSlotEnabled must be true or false'),
+  /** Most slots per booking while multi-slot is on. */
+  maxSlotsPerBooking: z.number().int('Must be a whole number').min(2).max(4),
 });
 export type SlotSettings = z.infer<typeof SlotSettingsSchema>;
 

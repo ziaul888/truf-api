@@ -1,7 +1,8 @@
-import { env } from '../config/env.js';
+import type { SlotSettings } from '../slots/slots.schemas.js';
 
-/** Most slots one booking can hold (a portal checkout or a staff booking). Also sent as `maxSlotsPerBooking` in GET /checkout/options. */
+/** Hard ceiling on slots per booking; the admin setting `maxSlotsPerBooking` (2 to 4) can only lower it. */
 export const MAX_SLOTS_PER_BOOKING = 4;
 
-/** Single-slot mode keeps rolling deploys safe until the operator completes the cut-over. */
-export const bookingSlotLimit = () => env.MULTI_SLOT_BOOKINGS_ENABLED ? MAX_SLOTS_PER_BOOKING : 1;
+/** Slots one new booking may hold (portal checkout or staff booking): 1 unless an admin allowed multiple slots. */
+export const slotLimitOf = ({ multiSlotEnabled, maxSlotsPerBooking }: Pick<SlotSettings, 'multiSlotEnabled' | 'maxSlotsPerBooking'>): number =>
+  multiSlotEnabled ? Math.min(Math.max(maxSlotsPerBooking, 1), MAX_SLOTS_PER_BOOKING) : 1;

@@ -1,4 +1,5 @@
 import type { PrismaService } from '../prisma/prisma.service.js';
+import { DEFAULT_SLOT_SETTINGS, type SlotSettingsService } from '../slots/slot-settings.service.js';
 import type { BookingCancellationService } from './booking-cancellation.service.js';
 import type { BookingNotifier } from './booking-notifier.service.js';
 import { StaffBookingsService } from './staff-bookings.service.js';
@@ -14,7 +15,7 @@ const bookingRow = (overrides: object = {}) => ({
   id: 'b-1', status: 'pending', source: 'staff', total: 1000, payments: [{ amount: 400, status: 'succeeded' }], ...overrides,
 });
 
-function setup(booking: object = bookingRow(), foundSlot: object | object[] = slot, claimed = 1) {
+function setup(booking: object = bookingRow(), foundSlot: object | object[] = slot, claimed = 1, multiSlot: object = { multiSlotEnabled: true }) {
   const tx = {
     slot: { updateMany: vi.fn(async (_args: { where: object; data: object }) => ({ count: claimed })) },
     customer: { findUnique: vi.fn(async (): Promise<object | null> => null), create: vi.fn(async () => ({ id: 'c-1' })) },
@@ -36,10 +37,12 @@ function setup(booking: object = bookingRow(), foundSlot: object | object[] = sl
   };
   const notifier = { confirmed: vi.fn(async () => true) };
   const cancellation = { cancel: vi.fn(async () => undefined) };
+  const settings = { get: vi.fn(async () => ({ ...DEFAULT_SLOT_SETTINGS, ...multiSlot })) };
   const service = new StaffBookingsService(
     prisma as unknown as PrismaService, cancellation as unknown as BookingCancellationService, notifier as unknown as BookingNotifier,
+    settings as unknown as SlotSettingsService,
   );
-  return { service, tx, notifier, cancellation };
+  return { service, tx, notifier, cancellation, settings, prisma };
 }
 
 const customer = { name: 'Walk In', phone: '+8801711000000', email: 'w@x.test' };
@@ -134,6 +137,29 @@ describe('StaffBookingsService', () => {
       await expect(service.create('u-1', { slotIds: ['a', 'b', 'c', 'd', 'e'], customer, payment: { type: 'none' } }))
         .rejects.toMatchObject({ status: 400, code: 'TOO_MANY_SLOTS' });
       expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('reads no settings for a single slot', async () => {
+      const { service, settings } = setup(bookingRow(), slot, 1, { multiSlotEnabled: false });
+      await service.create('u-1', { slotId: 's-1', customer, payment: { type: 'none' } }).catch(() => undefined);
+      expect(settings.get).not.toHaveBeenCalled();
+    });
+
+    it('refuses two slots while multi-slot is off, before reading any', async () => {
+      const { service, prisma, tx } = setup(bookingRow(), [slot, second], 2, { multiSlotEnabled: false });
+      await expect(service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 400, code: 'TOO_MANY_SLOTS' });
+      expect(prisma.slot.findMany).not.toHaveBeenCalled();
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses more slots than the admin limit, and accepts up to it', async () => {
+      const limit = { multiSlotEnabled: true, maxSlotsPerBooking: 2 };
+      await expect(setup(bookingRow(), [slot, second], 2, limit).service.create('u-1', { slotIds: ['a', 'b', 'c'], customer, payment: { type: 'none' } }))
+        .rejects.toMatchObject({ status: 400, code: 'TOO_MANY_SLOTS' });
+      const ok = setup(bookingRow(), [slot, second], 2, limit);
+      await ok.service.create('u-1', { slotIds: ['s-1', 's-2'], customer, payment: { type: 'none' } }).catch(() => undefined);
+      expect(ok.tx.booking.create).toHaveBeenCalled();
     });
 
     it('404s when one of the slots does not exist, and refuses one already booked', async () => {

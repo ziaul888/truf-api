@@ -18,6 +18,8 @@ export const DEFAULT_SLOT_SETTINGS: SlotSettings = {
   portalNagadEnabled: true,
   bkashNumber: null,
   nagadNumber: null,
+  multiSlotEnabled: false,
+  maxSlotsPerBooking: 4,
 };
 
 /** The single venue-wide row (id = 1). */
@@ -37,6 +39,8 @@ const toSettings = (row: SlotSettingsRow): SlotSettings => ({
   portalNagadEnabled: row.portalNagadEnabled,
   bkashNumber: row.bkashNumber,
   nagadNumber: row.nagadNumber,
+  multiSlotEnabled: row.multiSlotEnabled,
+  maxSlotsPerBooking: row.maxSlotsPerBooking,
 });
 
 @Injectable()

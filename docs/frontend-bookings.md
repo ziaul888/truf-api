@@ -68,7 +68,7 @@ How they move together:
 { "cardEnabled": true, "cashEnabled": true, "wallets": [{ "method": "bkash", "number": "+8801700000000" }], "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15, "maxSlotsPerBooking": 4 }
 ```
 - **Load this on the checkout page.**
-  - `maxSlotsPerBooking` is how many slots one booking can hold; cap both portal and staff pickers at it. It is **1** while `MULTI_SLOT_BOOKINGS_ENABLED=false` (default), and **4** after the cut-over repair and explicit enablement. Missing from an older API, loading or failed capability checks: allow **1** only. Single-slot requests should keep the legacy `startHour` / `startMinute` or staff `slotId` format so frontend deployment can precede the backend safely. See `CLAUDE.md` deploy notes.
+  - `maxSlotsPerBooking` is how many slots one booking can hold; cap both portal and staff pickers at it. It is **1** until an admin turns on **Allow multiple slots** (`multiSlotEnabled` in `GET/PUT /admin/settings/slots`, default off), then the admin's `maxSlotsPerBooking` setting (2 to 4, default 4). One setting covers portal checkout and staff bookings. Existing multi-slot bookings stay readable, payable and cancellable while it is off. Missing from an older API, loading or failed capability checks: allow **1** only. Single-slot requests should keep the legacy `startHour` / `startMinute` or staff `slotId` format so frontend deployment can precede the backend safely. See `CLAUDE.md` deploy notes.
   - Show the card option only when `cardEnabled` is true: it needs both the Stripe key and the webhook secret. Otherwise `POST /checkout` with `card` returns `400 CARD_NOT_AVAILABLE`, and `canPay` is false on every booking.
   - Show the "Pay at venue (cash)" option only when `cashEnabled` is true.
   - Show a bKash / Nagad option for each entry in `wallets` (only the ones the admin has set a number for). Choosing one shows "Send ৳{total} to {number}", where the total includes the service fee, plus two required fields: the TrxID and the number the money was sent from.
@@ -121,7 +121,7 @@ How they move together:
 
 ### Several slots in one booking
 
-One booking can hold **up to `maxSlotsPerBooking` (4) slots of one ground and one date**, consecutive or not. One booking number, one payment, one booking link.
+One booking can hold **up to `maxSlotsPerBooking` (2 to 4, set by an admin) slots of one ground and one date**, consecutive or not. One booking number, one payment, one booking link.
 - **Request:** `POST /checkout` takes either the single `hour` (or `startHour`, plus `startMinute`) as before, **or** `slots: [{ "hour": 18 }, { "hour": 19, "minute": 30 }]` (`startHour` / `startMinute` also work per item, no repeats). Send exactly one of the two. `groundId` and `date` stay at the top level, so every slot is on that ground and date (an item carrying `groundId` or `date` is `400 VALIDATION_FAILED`). Staff `POST /admin/bookings` takes `slotId` (one) or `slotIds: ["uuid", …]` (1 to 4, no repeats), exactly one of the two.
 - **Price:** `amount` is the sum of the slots' prices, the **service fee is charged once** per booking, `total = amount + serviceFee`. A bKash / Nagad payment, the Stripe session and the staff payment (`full`, or an advance, which must stay below the combined total) are all against that one total.
 - **All or none:** every slot is taken in the same step. If any one was just taken, the whole request is `409 SLOT_NOT_AVAILABLE` and nothing is reserved. A card checkout holds every slot for `holdMinutes`; the payment confirms all of them or none (a payment that arrives when any slot has been taken meanwhile is refunded in full).
@@ -398,7 +398,7 @@ Optional. Guests can still book, and signed links keep working. The session is a
 | 404 | `BOOKING_NOT_FOUND` | Unknown id, or a public request with a bad token |
 | 404 | `CUSTOMER_NOT_FOUND` | Unknown customer |
 | 409 | `SLOT_NOT_AVAILABLE` | Slot held, booked or blocked, or just taken (any one slot of a multi-slot booking) |
-| 400 | `TOO_MANY_SLOTS` | More than `maxSlotsPerBooking` (4) slots in one booking |
+| 400 | `TOO_MANY_SLOTS` | More than `maxSlotsPerBooking` slots in one booking |
 | 409 | `BOOKING_IN_PROGRESS` | Blocking one slot of a multi-slot booking that has already started (`cancelBooking: true`) |
 | 400 | `SLOTS_MUST_SHARE_GROUND_DATE` | Staff `slotIds` of different grounds or dates |
 | 400 | `OUTSIDE_BOOKING_WINDOW` | Portal: beyond `advanceBookingDays`, or inside the cutoff |
