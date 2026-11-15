@@ -208,3 +208,7 @@ yarn lint             # oxlint
 ```
 
 ## When in doubt — ask before implementing. Keep it simple. Ship v1 first.
+
+## Deploy notes (hero video)
+- The website hero has an optional `videoUrl` (`""` = none, else an https link to an `.mp4` / `.webm` file, 500 characters at most; YouTube/Vimeo page links are rejected; `website.schemas.ts`). It is part of the JSON `website` section, so there is no migration; a hero stored without it (or a PUT that omits it) reads as `""`. The schema default matters: without it an old stored row would fail validation and the whole website section would fall back to the defaults.
+- Deploy the backend BEFORE the frontend that sends `videoUrl`: an old API drops the unknown field silently. To stop: clear the field in Settings -> Website; nothing to roll back.

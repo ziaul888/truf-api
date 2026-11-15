@@ -12,11 +12,32 @@ export const WEBSITE_UPLOAD = new RegExp(`^${UPLOADS_ROUTE}/website/[0-9a-f-]{36
 
 const imageSrc = z.union([z.string().regex(WEBSITE_UPLOAD), httpsUrl], 'Upload an image or enter a link starting with https://');
 
+const VIDEO_MESSAGE = 'Use a direct link to an .mp4 or .webm file';
+
+/** "" for none, else an https link straight to an .mp4 or .webm file (a query string is fine). YouTube and Vimeo page links are not video files. */
+export const heroVideoUrl = z.string().trim().max(500, 'Keep it under 500 characters').refine((v) => {
+  if (v === '') return true;
+  try {
+    return new URL(v).protocol === 'https:';
+  } catch {
+    return false;
+  }
+}, 'Enter a full URL starting with https://').refine((v) => {
+  if (v === '') return true;
+  try {
+    return /\.(mp4|webm)$/i.test(new URL(v).pathname);
+  } catch {
+    return true; // already reported by the https check
+  }
+}, VIDEO_MESSAGE);
+
 export const WebsiteHeroSchema = z.object({
   badge: text(40),
   headline: text(60, 'Add a headline'),
   description: text(280),
   imageUrl: imageSrc,
+  // Default '' so a hero saved before this field existed still parses (else the whole section would reset) and an old frontend's PUT is accepted.
+  videoUrl: heroVideoUrl.default(''),
 });
 
 /** One schema per homepage section; a PUT may send any of them, each in full. */
