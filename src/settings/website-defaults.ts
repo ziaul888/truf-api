@@ -8,6 +8,7 @@ export const DEFAULT_WEBSITE: WebsiteStored = {
     description:
       'See which slots are free right now and book your ground in a minute.',
     imageUrl: 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=1920',
+    videoUrl: '',
   },
   sections: {
     sportChips: { enabled: true, title: 'Browse by sport' },

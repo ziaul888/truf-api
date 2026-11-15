@@ -78,6 +78,7 @@ Until an admin saves General, `tagline`, `phone`, `email`, `address` and `openHo
   - `hero` and `social` replace those parts whole.
   - `sections` replaces only the sections it names, each one whole. For example, `{ "sections": { "sportChips": { … } } }` leaves the other sections alone.
 - **Shape and limits** are exactly the existing form's (`src/validations/website-settings.ts`), minus `contact`, which moved to the venue profile.
+- **`hero.videoUrl`** (optional background video): `""` for none, otherwise an `https://` link straight to an `.mp4` or `.webm` file (a query string is fine), 500 characters at most. YouTube and Vimeo page links are rejected with `Use a direct link to an .mp4 or .webm file`. A hero saved before this field existed, or a `PUT` that leaves it out, reads and saves as `""`. `GET /website` and the admin `GET` always include it. No migration (JSON). Deploy the backend BEFORE the frontend, or an old API drops the field.
 - **`imageUrl`** is either an uploaded file (`/api/v1/uploads/website/<uuid>.<ext>`) or an `https://` link.
   - **Upload** with the images endpoint. It sets `hero.imageUrl` or `sections.visitUs.imageUrl` and deletes the previous upload.
   - **Stop using** the old `/api/settings/website/images/…?v=` URLs.
