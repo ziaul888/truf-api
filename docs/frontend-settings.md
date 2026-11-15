@@ -89,7 +89,7 @@ Until an admin saves General, `tagline`, `phone`, `email`, `address` and `openHo
 
 ## 3. Booking
 
-There's nothing new. The page edits `GET/PUT /admin/settings/slots`: `advanceBookingDays`, `cancellationCutoffHours`, `autoGenerate`, `holdMinutes`, `serviceFee`, `portalCashEnabled`, `multiSlotEnabled` (boolean, default off: allow several slots per booking for portal and staff) and `maxSlotsPerBooking` (int 2 to 4, default 4). Only admins can save; managers read.
+There's nothing new. The page edits `GET/PUT /admin/settings/slots`: `advanceBookingDays`, `cancellationCutoffHours`, `autoGenerate`, `holdMinutes`, `serviceFee`, `portalCashEnabled`, `multiSlotEnabled` (boolean, default off: allow several slots per booking for portal and staff) `maxSlotsPerBooking` (int 2 to 4, default 4), `cashDepositEnabled` (boolean, default off: portal cash bookings also pay a bKash / Nagad deposit; only effective while a wallet number is set and switched on) and `cashDepositPercent` (int 1 to 100, default 30). Only admins can save; managers read.
 - That endpoint now also returns `updatedAt` and `updatedBy`.
 - **Remove from the page:**
   - minimum advance booking (the cutoff does this);

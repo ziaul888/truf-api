@@ -242,6 +242,8 @@ describe('Slots (e2e)', () => {
         bkashNumber: expect.toSatisfy(nullOrString), nagadNumber: expect.toSatisfy(nullOrString),
         // multi-slot-bookings.e2e-spec sets these meanwhile.
         multiSlotEnabled: expect.any(Boolean), maxSlotsPerBooking: expect.any(Number),
+        // cash-deposit.e2e-spec sets these meanwhile.
+        cashDepositEnabled: expect.any(Boolean), cashDepositPercent: expect.any(Number),
         updatedAt: expect.any(String), updatedBy: { id: expect.any(String), name: 'Admin' },
       });
     });

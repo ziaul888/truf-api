@@ -332,6 +332,10 @@ model SlotSettings {
   multiSlotEnabled        Boolean  @default(false)
   /// Most slots one booking can hold while multi-slot is on, 2 to 4. The CHECK ("SlotSettings_maxSlotsPerBooking_range") lives in the migration, which Prisma can't express.
   maxSlotsPerBooking      Int      @default(4)
+  /// Portal cash checkouts also pay a deposit by bKash / Nagad (needs one of those wallets offered); the rest is paid in cash at the venue. Off = cash works as before.
+  cashDepositEnabled      Boolean  @default(false)
+  /// The deposit as a percent of the booking total, 1 to 100. The CHECK ("SlotSettings_cashDepositPercent_range") lives in the migration, which Prisma can't express.
+  cashDepositPercent      Int      @default(30)
   updatedAt               DateTime @updatedAt
 }
 

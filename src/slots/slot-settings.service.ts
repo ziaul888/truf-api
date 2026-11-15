@@ -20,6 +20,8 @@ export const DEFAULT_SLOT_SETTINGS: SlotSettings = {
   nagadNumber: null,
   multiSlotEnabled: false,
   maxSlotsPerBooking: 4,
+  cashDepositEnabled: false,
+  cashDepositPercent: 30,
 };
 
 /** The single venue-wide row (id = 1). */
@@ -41,6 +43,8 @@ const toSettings = (row: SlotSettingsRow): SlotSettings => ({
   nagadNumber: row.nagadNumber,
   multiSlotEnabled: row.multiSlotEnabled,
   maxSlotsPerBooking: row.maxSlotsPerBooking,
+  cashDepositEnabled: row.cashDepositEnabled,
+  cashDepositPercent: row.cashDepositPercent,
 });
 
 @Injectable()
