@@ -7,6 +7,7 @@ import type { BookingNotifier } from './booking-notifier.service.js';
 import { bookingToken } from './booking-rules.js';
 import { CheckoutSchema } from './bookings.schemas.js';
 import { CheckoutService } from './checkout.service.js';
+import { depositOf } from './portal-methods.js';
 
 // 04:00 UTC = 10:00 in Dhaka, Wed 28 Oct 2026.
 const NOW = new Date('2026-10-28T04:00:00Z');
@@ -200,7 +201,7 @@ describe('CheckoutService', () => {
 
   it('tells the portal which payment methods are offered and the fee', async () => {
     await expect(setup({ cash: false }).service.options()).resolves.toEqual({
-      cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15, maxSlotsPerBooking: 1,
+      cardEnabled: true, cashEnabled: false, wallets: [], serviceFee: 5000, currency: 'bdt', holdMinutes: 15, maxSlotsPerBooking: 1, cashDepositPercent: null,
     });
   });
 
@@ -268,10 +269,13 @@ describe('CheckoutService', () => {
       for (const reference of ['ABC12', 'ABC-123-XYZ', 'A'.repeat(21)]) {
         expect(CheckoutSchema.safeParse({ ...body, reference }).success).toBe(false);
       }
-      for (const paymentMethod of ['card', 'cash']) {
-        const dropped = CheckoutSchema.safeParse({ ...body, paymentMethod, reference: 'ABC123XYZ', payerNumber: '01811000000' });
-        expect(dropped.error?.issues.map((i) => i.path.join('.')).sort()).toEqual(['payerNumber', 'reference']);
-      }
+      const dropped = CheckoutSchema.safeParse({ ...body, paymentMethod: 'card', reference: 'ABC123XYZ', payerNumber: '01811000000', depositMethod: 'bkash' });
+      expect(dropped.error?.issues.map((i) => i.path.join('.')).sort()).toEqual(['depositMethod', 'payerNumber', 'reference']);
+      // Cash: the cash-deposit setting decides, so the service checks these (see "cash deposit").
+      expect(CheckoutSchema.safeParse({ ...body, paymentMethod: 'cash', reference: 'ABC123XYZ', payerNumber: '01811000000', depositMethod: 'bkash' }).success).toBe(true);
+      expect(CheckoutSchema.safeParse({ ...body, paymentMethod: 'bkash', reference: 'ABC123XYZ', payerNumber: '01811000000', depositMethod: 'bkash' }).error?.issues.map((i) => i.path.join('.')))
+        .toEqual(['depositMethod']);
+      expect(CheckoutSchema.safeParse({ ...body, paymentMethod: 'cash', depositMethod: 'bank_transfer' }).success).toBe(false);
       const missing = CheckoutSchema.safeParse({ ...body, reference: undefined, payerNumber: undefined });
       expect(missing.error?.issues.map((i) => i.path.join('.')).sort()).toEqual(['payerNumber', 'reference']);
     });
@@ -431,5 +435,116 @@ describe('CheckoutService', () => {
     stripe.createCheckoutSession.mockRejectedValueOnce(new Error('down'));
     await expect(service.start(input)).rejects.toThrow('down');
     expect(cancellation.cancel).toHaveBeenCalledWith(expect.any(String), expect.objectContaining({ refund: false, notify: false }));
+  });
+  describe('cash deposit', () => {
+    const WALLET = '+8801700000000';
+    const on = { cashDepositEnabled: true, cashDepositPercent: 30 };
+    const cash = { ...input, paymentMethod: 'cash' as const };
+    const deposit = { ...cash, depositMethod: 'bkash' as const, reference: 'ABC123XYZ', payerNumber: '+8801811000000' };
+    const paymentsOf = (tx: ReturnType<typeof setup>['tx']) => tx.booking.create.mock.calls[0]![0].data.payments as { create: Record<string, unknown> } | undefined;
+
+    it('is off by default: cash needs nothing and says so in the options', async () => {
+      const { service, tx } = setup({ bkashNumber: WALLET });
+      await expect(service.options()).resolves.toMatchObject({ cashEnabled: true, cashDepositPercent: null });
+      await service.start(cash, SIGNED_IN);
+      expect(paymentsOf(tx)).toBeUndefined();
+    });
+
+    it('still refuses the deposit fields on cash while it is off (400 VALIDATION_FAILED)', async () => {
+      const { service, tx } = setup({ bkashNumber: WALLET });
+      await expect(service.start(deposit, SIGNED_IN)).rejects.toMatchObject({
+        status: 400, response: { code: 'VALIDATION_FAILED', details: [
+          { field: 'depositMethod', message: 'Only for bKash and Nagad' }, { field: 'reference', message: 'Only for bKash and Nagad' },
+          { field: 'payerNumber', message: 'Only for bKash and Nagad' },
+        ] },
+      });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('reports the percent in the options when on and a wallet is offered', async () => {
+      await expect(setup({ bkashNumber: WALLET, switches: on }).service.options())
+        .resolves.toMatchObject({ cashEnabled: true, cashDepositPercent: 30 });
+      await expect(setup({ bkashNumber: WALLET, switches: { ...on, cashDepositPercent: 50 } }).service.options())
+        .resolves.toMatchObject({ cashDepositPercent: 50 });
+    });
+
+    it('hides cash (no error) when on but no wallet is offered, and refuses a cash checkout', async () => {
+      for (const switches of [on, { ...on, nagadNumber: '+8801900000000', portalNagadEnabled: false }]) {
+        const { service, tx } = setup({ switches });
+        await expect(service.options()).resolves.toMatchObject({ cashEnabled: false, cashDepositPercent: null, wallets: [] });
+        await expect(service.start(cash, SIGNED_IN)).rejects.toMatchObject({ status: 400, code: 'CASH_NOT_AVAILABLE' });
+        expect(tx.slot.updateMany).not.toHaveBeenCalled();
+      }
+    });
+
+    it('books the slot as cash with ONE pending wallet payment for the deposit', async () => {
+      const { service, tx, notifier } = setup({ bkashNumber: WALLET, switches: on });
+      const result = await service.start(deposit, SIGNED_IN);
+      expect(result).toMatchObject({ paymentMethod: 'cash', checkoutUrl: null });
+      expect(tx.slot.updateMany.mock.calls[0]![0]).toMatchObject({ data: { status: 'booked' } });
+      expect(tx.booking.create.mock.calls[0]![0].data).toMatchObject({ payAtVenue: true, total: 6500 });
+      // 30% of 6500 (1500 slot + 5000 fee) = 1950
+      expect(paymentsOf(tx)).toEqual({
+        create: { method: 'bkash', amount: 1950, currency: 'bdt', status: 'pending', reference: 'ABC123XYZ', payerNumber: '+8801811000000' },
+      });
+      expect(notifier.received).toHaveBeenCalledWith(result.bookingId);
+    });
+
+    it.each([
+      [33, 6500, 2145], // 2145 exactly
+      [1, 6500, 65],
+      [15, 6501, 975], // 975.15 rounds down
+      [15, 6503, 975], // 975.45 rounds down
+      [15, 6504, 976], // 975.6 rounds up
+      [100, 6500, 6500],
+    ])('rounds %i%% of %i to %i in whole minor units', async (cashDepositPercent, total, expected) => {
+      const { service, tx } = setup({ bkashNumber: WALLET, switches: { ...on, cashDepositPercent, serviceFee: total - 1500 } });
+      await service.start(deposit, SIGNED_IN);
+      expect(paymentsOf(tx)!.create.amount).toBe(expected);
+    });
+
+    it('never exceeds the total', () => {
+      expect(depositOf(6500, 100)).toBe(6500);
+      expect(depositOf(1, 100)).toBe(1);
+    });
+
+    it('takes the percent of the combined total for several slots (service fee once)', async () => {
+      const slots = [18, 19].map((h) => slotRow({ id: `s-${h}`, startHour: h }));
+      const { service, tx } = setup({ slots, held: 2, bkashNumber: WALLET, switches: on });
+      await service.start({ ...deposit, startHour: undefined, slots: [{ startHour: 18, startMinute: 0 }, { startHour: 19, startMinute: 0 }] }, SIGNED_IN);
+      expect(tx.booking.create.mock.calls[0]![0].data).toMatchObject({ amount: 3000, total: 8000 });
+      expect(paymentsOf(tx)!.create).toMatchObject({ method: 'bkash', amount: 2400 });
+    });
+
+    it('can be paid to Nagad', async () => {
+      const { service, tx } = setup({ switches: { ...on, nagadNumber: '+8801900000000' } });
+      await service.start({ ...deposit, depositMethod: 'nagad' }, SIGNED_IN);
+      expect(paymentsOf(tx)!.create).toMatchObject({ method: 'nagad', amount: 1950 });
+    });
+
+    it.each([
+      ['depositMethod', { depositMethod: undefined }],
+      ['reference', { reference: undefined }],
+      ['payerNumber', { payerNumber: undefined }],
+      ['everything', { depositMethod: undefined, reference: undefined, payerNumber: undefined }],
+    ])('refuses a cash checkout missing %s with 400 CASH_DEPOSIT_REQUIRED, claiming nothing', async (_label, missing) => {
+      const { service, tx } = setup({ bkashNumber: WALLET, switches: on });
+      await expect(service.start({ ...deposit, ...missing }, SIGNED_IN)).rejects.toMatchObject({ status: 400, code: 'CASH_DEPOSIT_REQUIRED' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('refuses a deposit sent to a wallet that is not offered', async () => {
+      const { service, tx } = setup({ bkashNumber: WALLET, switches: on });
+      await expect(service.start({ ...deposit, depositMethod: 'nagad' }, SIGNED_IN)).rejects.toMatchObject({ status: 400, code: 'WALLET_NOT_AVAILABLE' });
+      expect(tx.slot.updateMany).not.toHaveBeenCalled();
+    });
+
+    it('leaves bKash and card checkouts alone while it is on', async () => {
+      const bkash = setup({ bkashNumber: WALLET, switches: on });
+      await bkash.service.start({ ...input, paymentMethod: 'bkash', reference: 'ABC123XYZ', payerNumber: '+8801811000000' }, SIGNED_IN);
+      expect(paymentsOf(bkash.tx)!.create).toMatchObject({ amount: 6500 });
+      const card = setup({ bkashNumber: WALLET, switches: on });
+      await expect(card.service.start(input)).resolves.toMatchObject({ paymentMethod: 'card' });
+    });
   });
 });

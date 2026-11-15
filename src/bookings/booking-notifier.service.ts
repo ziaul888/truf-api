@@ -6,7 +6,7 @@ import { SettingsStore } from '../settings/settings-store.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import { slotTimes } from '../slots/slot-time.js';
 import { fromDbDate } from '../slots/venue-time.js';
-import { confirmationUrl, methodName, pendingWalletPayment } from './booking-rules.js';
+import { confirmationUrl, dueOf, methodName, paidOf, pendingWalletPayment } from './booking-rules.js';
 import { currentSlots, primaryOf } from './booking-slots.js';
 import { BOOKING_INCLUDE, type BookingRow } from './booking.dto.js';
 
@@ -16,6 +16,14 @@ const section = (title: string, lines: string[]) => (lines.length > 0 ? [`${titl
 const when = (b: BookingRow) => {
   const times = currentSlots(b).map(({ slot }) => slotTimes(slot)).map(({ startTime, endTime }) => `${startTime}–${endTime}`);
   return `${fromDbDate(primaryOf(b).slot.date)}, ${times.join(', ')}`;
+};
+
+/** A cash booking whose deposit was verified: what was paid and what is left for the venue. */
+const balanceLines = (b: BookingRow) => {
+  const due = dueOf(b, b.payments);
+  return b.payAtVenue && paidOf(b.payments) > 0 && due > 0
+    ? [`Paid so far: ${money(paidOf(b.payments))}. Please pay the remaining ${money(due)} in cash at the venue.`]
+    : [];
 };
 
 export interface CancelledNotice {
@@ -49,6 +57,7 @@ export class BookingNotifier {
       `Booking number: ${b.bookingNumber}`,
       `When: ${when(b)}`,
       `Total: ${money(b.total)}`,
+      ...balanceLines(b),
       ...(b.ground.address ? [`Address: ${b.ground.address}`] : []),
       `View or cancel your booking: ${confirmationUrl(b.id)}`,
     ]);
@@ -63,7 +72,9 @@ export class BookingNotifier {
       `We've reserved ${b.ground.name} for you and will confirm your booking shortly.`,
       `Booking number: ${b.bookingNumber}`,
       `When: ${when(b)}`,
-      wallet
+      wallet && b.payAtVenue
+        ? `We've received your ${methodName(wallet.method)} deposit of ${money(wallet.amount)} (TrxID ${wallet.reference}). The venue will verify it and confirm your booking. Please pay the remaining ${money(Math.max(b.total - wallet.amount, 0))} in cash at the venue.`
+        : wallet
         ? `We've received your ${methodName(wallet.method)} payment details for ${money(wallet.amount)} (TrxID ${wallet.reference}). The venue will verify the payment and confirm your booking.`
         : `Please pay ${money(b.total)} in cash at the venue.`,
       ...(b.ground.address ? [`Address: ${b.ground.address}`] : []),

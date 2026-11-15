@@ -461,6 +461,8 @@ Close some or all grounds for a date range (Eid, a power cut). The closure itsel
 | `notifyAdminOnBooking` | boolean | `false` | Stored now; emails start when SendGrid lands |
 | `multiSlotEnabled` | boolean | `false` | Allow one booking to hold several slots (portal checkout and staff bookings). Off: `maxSlotsPerBooking` in `GET /checkout/options` is 1. Existing multi-slot bookings stay readable, payable and cancellable |
 | `maxSlotsPerBooking` | int 2–4 | 4 | Most slots per booking while `multiSlotEnabled` is on (`400 VALIDATION_FAILED` for 1 or 5). Admin-only PUT; managers can read |
+| `cashDepositEnabled` | boolean | `false` | "Booking money for cash bookings": a portal cash checkout also pays a deposit by bKash / Nagad (manual, staff Verify / Reject). Takes effect only while a wallet is offered. `GET /checkout/options` → `cashDepositPercent` (number or `null`) and `cashEnabled` reflect it. See [`frontend-bookings.md`](frontend-bookings.md) "Cash with a deposit" |
+| `cashDepositPercent` | int 1–100 | 30 | The deposit as a percent of the booking total (`400 VALIDATION_FAILED` for 0 or 101). Admin-only PUT; managers can read |
 
 Remove these from the settings page: **buffer minutes** (slots always start on the hour), **partial payments** (v1 uses Stripe Checkout only), and **peak hours, peak and off-peak prices and default slot length** (they're ground fields; link to the ground's edit page instead). Also drop the **30 min** and **Custom** slot lengths everywhere: the length comes from the ground, 60 or 120.
 

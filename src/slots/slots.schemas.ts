@@ -144,6 +144,10 @@ export const SlotSettingsSchema = z.object({
   multiSlotEnabled: z.boolean('multiSlotEnabled must be true or false'),
   /** Most slots per booking while multi-slot is on. */
   maxSlotsPerBooking: z.number().int('Must be a whole number').min(2).max(4),
+  /** Portal cash checkouts also pay a deposit by bKash / Nagad. Off = cash as before. */
+  cashDepositEnabled: z.boolean('cashDepositEnabled must be true or false'),
+  /** The deposit, as a percent of the booking total. */
+  cashDepositPercent: z.number().int('Must be a whole number').min(1).max(100),
 });
 export type SlotSettings = z.infer<typeof SlotSettingsSchema>;
 

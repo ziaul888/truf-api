@@ -65,12 +65,13 @@ How they move together:
 ### `GET /api/v1/checkout/options`
 
 ```json
-{ "cardEnabled": true, "cashEnabled": true, "wallets": [{ "method": "bkash", "number": "+8801700000000" }], "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15, "maxSlotsPerBooking": 4 }
+{ "cardEnabled": true, "cashEnabled": true, "wallets": [{ "method": "bkash", "number": "+8801700000000" }], "serviceFee": 5000, "currency": "bdt", "holdMinutes": 15, "maxSlotsPerBooking": 4, "cashDepositPercent": 30 }
 ```
 - **Load this on the checkout page.**
   - `maxSlotsPerBooking` is how many slots one booking can hold; cap both portal and staff pickers at it. It is **1** until an admin turns on **Allow multiple slots** (`multiSlotEnabled` in `GET/PUT /admin/settings/slots`, default off), then the admin's `maxSlotsPerBooking` setting (2 to 4, default 4). One setting covers portal checkout and staff bookings. Existing multi-slot bookings stay readable, payable and cancellable while it is off. Missing from an older API, loading or failed capability checks: allow **1** only. Single-slot requests should keep the legacy `startHour` / `startMinute` or staff `slotId` format so frontend deployment can precede the backend safely. See `CLAUDE.md` deploy notes.
   - Show the card option only when `cardEnabled` is true: it needs both the Stripe key and the webhook secret. Otherwise `POST /checkout` with `card` returns `400 CARD_NOT_AVAILABLE`, and `canPay` is false on every booking.
-  - Show the "Pay at venue (cash)" option only when `cashEnabled` is true.
+  - Show the "Pay at venue (cash)" option only when `cashEnabled` is true. `cashEnabled` is also false when the admin turned on the cash deposit but no bKash / Nagad wallet is offered (cash is hidden, not an error).
+  - `cashDepositPercent` is a number (1 to 100) or `null`. It is a number only while the admin has turned on **Booking money for cash bookings** (`cashDepositEnabled`) AND at least one wallet is in `wallets`. When it is a number, choosing cash also needs a deposit (see "Cash with a deposit" below); `null` means cash works as before. Missing from an older API: treat as `null`.
   - Show a bKash / Nagad option for each entry in `wallets` (only the ones the admin has set a number for). Choosing one shows "Send ৳{total} to {number}", where the total includes the service fee, plus two required fields: the TrxID and the number the money was sent from.
   - Show the fee from `serviceFee`, not a hardcoded ৳50.
 
@@ -92,7 +93,13 @@ How they move together:
   - `checkoutUrl` is `null`. Go straight to `confirmationUrl`.
   - The slot is reserved, and the booking is `pending` with `payAtVenue: true` until staff confirm it. The customer gets a "booking received, pay at the venue" email with their link.
   - On the confirmation page, show "Reserved: waiting for confirmation. Pay ৳{total} in cash at the venue". Don't poll.
-  - `400 CASH_NOT_AVAILABLE` when the setting is off.
+  - `400 CASH_NOT_AVAILABLE` when the setting is off (or the deposit is on and no wallet is offered).
+- **Cash with a deposit** (only while `cashDepositPercent` is not `null`):
+  - The customer sends `cashDepositPercent`% of the total (service fee included, rounded to the nearest whole unit, never above the total) to the venue's bKash / Nagad number and pays the rest in cash at the venue. The amount is computed by the API: show "Send ৳{round(total × percent / 100)} to {number}" as an estimate.
+  - Same `POST /checkout` with `paymentMethod: "cash"` plus three required fields: `depositMethod` (`"bkash"` or `"nagad"`, one of `wallets`), `reference` (the TrxID) and `payerNumber`. `201 { bookingId, paymentMethod: "cash", checkoutUrl: null, confirmationUrl }`: go to `confirmationUrl`.
+  - The booking is `pending`, `payAtVenue: true`, `paid: 0`, with `walletPayment: { method, amount: <deposit>, reference, status: "pending" }` until staff **Verify** it (then `confirmed`, `paymentStatus: "partial"`, `paid` = deposit, `due` = the balance to pay in cash) or **Reject** it (cancelled, slot freed, as for a bKash booking). While it is under review the same rules as a bKash booking apply: no direct cancel (`PAYMENT_UNDER_REVIEW`; use the cancel request), nothing "due". There is no hold or expiry: it waits for staff.
+  - The "received" email says the deposit is under review and the balance is paid in cash; the confirmation email names the balance.
+  - Errors: `400 CASH_DEPOSIT_REQUIRED` (one of the three fields missing), `400 WALLET_NOT_AVAILABLE` (that wallet isn't offered), `409 REFERENCE_ALREADY_USED`. While the deposit is off (or `depositMethod` sent with card / bKash / Nagad) these fields are refused with `400 VALIDATION_FAILED`, as `reference` and `payerNumber` always were for cash and card.
 - **bKash / Nagad:**
   - `checkoutUrl` is `null`. Go straight to `confirmationUrl`.
   - The slot is booked, the booking is `pending` (`payAtVenue: false`) and has a `pending` payment of the full total with the TrxID. The customer gets a "booking received" email saying the venue will verify the payment and confirm.

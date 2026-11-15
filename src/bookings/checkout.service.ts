@@ -24,7 +24,8 @@ import { spanOf, sumPrice, windowTimes } from './booking-slots.js';
 import type { CheckoutInput } from './bookings.schemas.js';
 import { assertCanBookUnpaid } from './checkout-limits.js';
 import { claimSlots, requestedStarts, resolveSlots } from './checkout-slots.js';
-import { portalCardOn, portalWalletNumber } from './portal-methods.js';
+import { assertCashDepositInput } from './cash-deposit.js';
+import { cashDepositPercentOf, depositOf, portalCardOn, portalCashOn, portalWalletNumber, portalWallets } from './portal-methods.js';
 
 export interface CheckoutResult {
   bookingId: string;
@@ -51,6 +52,8 @@ export interface CheckoutOptions {
   holdMinutes: number;
   /** Most slots one booking can hold. */
   maxSlotsPerBooking: number;
+  /** A cash checkout also pays this percent of the total by bKash / Nagad (a deposit); null when there is no deposit. */
+  cashDepositPercent: number | null;
 }
 
 const outsideWindow = (message: string) => new AppError(message, 400, 'OUTSIDE_BOOKING_WINDOW');
@@ -63,7 +66,8 @@ const emailRequired = () =>
  *   transaction, then opens a Stripe Checkout Session. The webhook confirms it; the hold sweep
  *   releases it if the customer doesn't pay.
  * - Cash ("pay at the venue"): books the slot and creates a pending, unpaid booking that waits
- *   in the staff review queue. Off when the `portalCashEnabled` setting is.
+ *   in the staff review queue. Off when the `portalCashEnabled` setting is. With `cashDepositEnabled` it
+ *   also carries a pending bKash / Nagad payment for the deposit, like the next case (`cash-deposit.ts`).
  * - bKash / Nagad: the customer has sent the total to the venue's number and gives the TrxID.
  *   Books the slot like cash, with a pending payment that staff verify in their own app. Off
  *   while the admin hasn't set that number or has switched it off (`portal-methods.ts`, as card).
@@ -83,14 +87,10 @@ export class CheckoutService {
 
   async options(): Promise<CheckoutOptions> {
     const settings = await this.settings.get();
-    const { portalCashEnabled, serviceFee, holdMinutes } = settings;
-    const wallets = (['bkash', 'nagad'] as const).flatMap((method) => {
-      const number = portalWalletNumber(settings, method);
-      return number ? [{ method, number }] : [];
-    });
+    const { serviceFee, holdMinutes } = settings;
     return {
-      cardEnabled: portalCardOn(settings), cashEnabled: portalCashEnabled, wallets, serviceFee, currency: env.CURRENCY, holdMinutes,
-      maxSlotsPerBooking: slotLimitOf(settings),
+      cardEnabled: portalCardOn(settings), cashEnabled: portalCashOn(settings), wallets: portalWallets(settings), serviceFee,
+      currency: env.CURRENCY, holdMinutes, maxSlotsPerBooking: slotLimitOf(settings), cashDepositPercent: cashDepositPercentOf(settings),
     };
   }
 
@@ -104,6 +104,7 @@ export class CheckoutService {
     const input = verifiedPhone ? { ...body, customerPhone: verifiedPhone } : body;
     const settings = await this.settings.get();
     assertMethodAvailable(input.paymentMethod, settings);
+    assertCashDepositInput(input, settings);
     await assertCanBookUnpaid(this.prisma, input.paymentMethod, verifiedPhone);
     if (!verifiedPhone && !input.customerEmail) throw emailRequired();
     const ground = await this.prisma.ground.findFirst({ where: { id: input.groundId, ...VISIBLE_GROUND } });
@@ -205,7 +206,7 @@ export class CheckoutService {
           customerId, contactName: contact.name, contactEmail, contactPhone: contact.phone,
           amount, serviceFee: settings.serviceFee, total, payAtVenue: input.paymentMethod === 'cash',
           bookingSlots: { create: slots.map((s) => ({ slotId: s.id, liveSlotId: s.id, price: s.price })) },
-          payments: walletPaymentOf(input, total),
+          payments: walletPaymentOf(input, total, cashDepositPercentOf(settings)),
           events: { create: { type: 'created', detail: createdDetail(input) } },
         },
       });
@@ -219,7 +220,7 @@ const cardNotAvailable = () => new AppError('Card payment is not available right
 /** Each payment method only while the portal offers it (`portal-methods.ts`). */
 function assertMethodAvailable(method: CheckoutInput['paymentMethod'], settings: SlotSettings) {
   if (method === 'card' && !portalCardOn(settings)) throw cardNotAvailable();
-  if (method === 'cash' && !settings.portalCashEnabled) {
+  if (method === 'cash' && !portalCashOn(settings)) {
     throw new AppError('Paying at the venue is not available right now. Please pay by card', 400, 'CASH_NOT_AVAILABLE');
   }
   if (isWalletMethod(method) && !portalWalletNumber(settings, method)) {
@@ -227,19 +228,30 @@ function assertMethodAvailable(method: CheckoutInput['paymentMethod'], settings:
   }
 }
 
-/** bKash / Nagad: the money the customer says they sent, pending until staff verify it. */
-function walletPaymentOf(input: CheckoutInput, total: number) {
-  if (!isWalletMethod(input.paymentMethod)) return undefined;
+/**
+ * bKash / Nagad: the money the customer says they sent, pending until staff verify it. For a bKash / Nagad
+ * booking that is the whole total; for cash with a deposit (`depositPercent`, already validated) just the deposit.
+ */
+function walletPaymentOf(input: CheckoutInput, total: number, depositPercent: number | null) {
+  const wallet = isWalletMethod(input.paymentMethod)
+    ? { method: input.paymentMethod, amount: total }
+    : input.paymentMethod === 'cash' && input.depositMethod && depositPercent !== null
+      ? { method: input.depositMethod, amount: depositOf(total, depositPercent) }
+      : null;
+  if (!wallet) return undefined;
   return {
     create: {
-      method: input.paymentMethod, amount: total, currency: env.CURRENCY, status: 'pending' as const,
-      reference: input.reference!, payerNumber: input.payerNumber!,
+      ...wallet, currency: env.CURRENCY, status: 'pending' as const, reference: input.reference!, payerNumber: input.payerNumber!,
     },
   };
 }
 
 function createdDetail(input: CheckoutInput) {
-  if (input.paymentMethod === 'cash') return 'Booked on the portal, paying cash at the venue';
+  if (input.paymentMethod === 'cash') {
+    return input.depositMethod
+      ? `Booked on the portal, paying cash at the venue after a ${methodName(input.depositMethod)} deposit (TrxID ${input.reference}), waiting for staff to verify`
+      : 'Booked on the portal, paying cash at the venue';
+  }
   if (input.paymentMethod === 'card') return 'Checkout started on the portal';
   return `Booked on the portal, paid by ${methodName(input.paymentMethod)} (TrxID ${input.reference}), waiting for staff to verify`;
 }

@@ -5,7 +5,7 @@ import { CustomerNameSchema, PhoneSchema } from '../customers/customers.schemas.
 import { oneOf } from '../grounds/grounds.schemas.js';
 import { isoDate } from '../slots/slots.schemas.js';
 import { DUE_FILTERS } from './booking-due.js';
-import { isWalletMethod } from './booking-rules.js';
+import { isWalletMethod, WALLET_METHODS } from './booking-rules.js';
 
 export const BOOKING_STATUSES = ['pending', 'confirmed', 'cancelled', 'completed', 'no_show'] as const;
 export const BOOKING_PAYMENT_STATUSES = ['unpaid', 'partial', 'paid', 'refunded', 'failed'] as const;
@@ -73,10 +73,12 @@ export const CheckoutSchema = z.preprocess(
      * customer has sent the total to the venue's number; pending until staff verify it.
      */
     paymentMethod: oneOf(['card', 'cash', 'bkash', 'nagad'] as const, 'Payment method').default('card'),
-    /** bKash / Nagad only: the TrxID. */
+    /** bKash / Nagad, or cash while the cash deposit is on: the TrxID. */
     reference: TrxIdSchema.optional(),
-    /** bKash / Nagad only: the number the money was sent from. */
+    /** bKash / Nagad, or cash while the cash deposit is on: the number the money was sent from. */
     payerNumber: PhoneSchema.optional(),
+    /** Cash only, and only while the cash deposit is on (checked by the service, which reads the setting): the wallet the deposit was sent to. */
+    depositMethod: oneOf(WALLET_METHODS, 'Deposit method').optional(),
   }).superRefine((v, ctx) => {
     if (v.slots !== undefined && v.startHour !== undefined) {
       ctx.addIssue({ code: 'custom', path: ['slots'], message: 'Send either the hour or slots, not both' });
@@ -86,13 +88,15 @@ export const CheckoutSchema = z.preprocess(
     if (v.slots && new Set(v.slots.map((s) => `${s.startHour}:${s.startMinute}`)).size !== v.slots.length) {
       ctx.addIssue({ code: 'custom', path: ['slots'], message: 'The same slot is listed twice' });
     }
+    if (v.paymentMethod === 'cash') return; // reference, payerNumber and depositMethod depend on the cash-deposit setting: the service checks them
     if (!isWalletMethod(v.paymentMethod)) {
       // Refused rather than silently dropped.
-      for (const field of ['reference', 'payerNumber'] as const) {
+      for (const field of ['reference', 'payerNumber', 'depositMethod'] as const) {
         if (v[field] !== undefined) ctx.addIssue({ code: 'custom', path: [field], message: 'Only for bKash and Nagad' });
       }
       return;
     }
+    if (v.depositMethod !== undefined) ctx.addIssue({ code: 'custom', path: ['depositMethod'], message: 'Only for cash bookings' });
     if (v.reference === undefined) ctx.addIssue({ code: 'custom', path: ['reference'], message: 'Enter the transaction ID (TrxID)' });
     if (v.payerNumber === undefined) ctx.addIssue({ code: 'custom', path: ['payerNumber'], message: 'Enter the number you sent the money from' });
   }),
