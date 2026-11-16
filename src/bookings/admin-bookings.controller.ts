@@ -11,6 +11,7 @@ import {
   type UpcomingQuery, type UpdateBookingInput,
 } from './bookings.schemas.js';
 import { StaffBookingsService } from './staff-bookings.service.js';
+import { ListRefundBookingsQuerySchema, type ListRefundBookingsQuery } from './refund-bookings.schemas.js';
 
 /**
  * Dashboard bookings, for admins and managers. Status changes go through the actions
@@ -32,6 +33,11 @@ export class AdminBookingsController {
   @Get('upcoming')
   upcoming(@Query(new ZodValidationPipe(UpcomingQuerySchema)) { limit }: UpcomingQuery) {
     return this.queries.upcoming(limit);
+  }
+
+  @Get('refunds')
+  refunds(@Query(new ZodValidationPipe(ListRefundBookingsQuerySchema)) query: ListRefundBookingsQuery) {
+    return this.queries.refunds(query);
   }
 
   @Get(':id')

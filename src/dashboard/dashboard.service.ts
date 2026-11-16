@@ -4,6 +4,8 @@ import { receivedIn } from '../reports/report-data.js';
 import { addDays, toDbDate, venueDayStart, venueNow, type IsoDate } from '../slots/venue-time.js';
 
 export interface DashboardStats {
+  /** All-time received sales, excluding refunded, pending and deleted payments. */
+  totalRevenue: number;
   todayRevenue: number;
   todayRevenueTrend: number | null;
   todayBookings: number;
@@ -28,7 +30,8 @@ export class DashboardService {
     const today = venueNow().date;
     const lastWeek = addDays(today, -7);
     const weekAgo = venueDayStart(addDays(today, -6));
-    const [revenue, revenueBefore, bookings, bookingsBefore, customers, customersBefore, grounds, groundsBefore, byGround] = await Promise.all([
+    const [totalRevenue, revenue, revenueBefore, bookings, bookingsBefore, customers, customersBefore, grounds, groundsBefore, byGround] = await Promise.all([
+      this.prisma.payment.aggregate({ where: { deletedAt: null, status: 'succeeded' }, _sum: { amount: true } }),
       this.revenueOn(today), this.revenueOn(lastWeek),
       this.bookingsOn(today), this.bookingsOn(lastWeek),
       this.prisma.customer.count({ where: { deletedAt: null } }),
@@ -40,6 +43,7 @@ export class DashboardService {
       }),
     ]);
     return {
+      totalRevenue: totalRevenue._sum.amount ?? 0,
       todayRevenue: revenue, todayRevenueTrend: trend(revenue, revenueBefore),
       todayBookings: bookings, todayBookingsTrend: trend(bookings, bookingsBefore),
       totalCustomers: customers, totalCustomersTrend: trend(customers, customersBefore),

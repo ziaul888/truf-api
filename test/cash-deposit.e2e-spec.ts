@@ -241,7 +241,7 @@ describe('cash booking deposit (e2e)', () => {
         subject: expect.stringContaining('confirmed'), text: expect.stringContaining('remaining 42.00'),
       }));
       // At the venue staff collect the rest in cash.
-      const paid = await agent.post(`${API}/admin/bookings/${bookingId}/payments`).send({ amount: 4200, method: 'cash' }).expect(200);
+      const paid = await agent.post(`${API}/admin/bookings/${bookingId}/payments`).send({ amount: 4200, method: 'cash' }).expect(201);
       expect(paid.body.data).toMatchObject({ paymentStatus: 'paid', paid: 6000, due: 0 });
     });
 

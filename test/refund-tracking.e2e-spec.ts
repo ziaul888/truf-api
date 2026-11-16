@@ -103,7 +103,7 @@ describe('Refund tracking for bKash / Nagad (e2e)', () => {
   it('a refunded bKash booking shows the refund as due, in the detail, the list and the dashboard card', async () => {
     const { id, agent } = await refundedWalletBooking(6);
     const detail = (await agent.get(`${API}/admin/bookings/${id}`).expect(200)).body.data;
-    expect(detail.refund).toEqual({ amount: 6000, method: 'bkash', payerNumber: '01811000120', sentAt: null, sentBy: null, note: null });
+    expect(detail.refund).toEqual({ amount: 6000, method: 'bkash', payerNumber: '+8801811000120', sentAt: null, sentBy: null, note: null });
 
     const due = await agent.get(`${API}/admin/bookings`).query({ refundDue: 'true', groundId }).expect(200);
     expect(due.body.data.data.map((b: { id: string }) => b.id)).toContain(id);
@@ -149,6 +149,83 @@ describe('Refund tracking for bKash / Nagad (e2e)', () => {
     const missing = await agent.post(`${API}/admin/bookings/6f1c2a8e-0b7d-4c3e-9a51-2d4f8e6b7c10/refund-sent`).send({}).expect(404);
     expect(missing.body.code).toBe('BOOKING_NOT_FOUND');
     await request(app.getHttpServer()).post(`${API}/admin/bookings/${id}/refund-sent`).send({}).expect(401);
+  });
+
+  it('lists refunds with search, method filters and stable pagination, then moves a sent refund into recorded history', async () => {
+    const { id, agent } = await refundedWalletBooking(9);
+    const other = await refundedWalletBooking(10, 'nagad');
+    await prisma.booking.update({ where: { id }, data: { bookingNumber: `RF-SEARCH-1-${trx()}` } });
+    const detail = (await agent.get(`${API}/admin/bookings/${id}`).expect(200)).body.data;
+    const all = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId }).expect(200)).body.data;
+    expect(all.data.map((b: { id: string }) => b.id)).toEqual(expect.arrayContaining([id, other.id]));
+    expect(all.data.find((b: { id: string }) => b.id === id).refundSummary)
+      .toMatchObject({ amount: 6000, dueAmount: 6000, methods: ['bkash'], status: 'due', refundedAt: expect.any(String) });
+
+    const search = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, status: 'due', search: detail.bookingNumber }).expect(200)).body.data;
+    expect(search.total).toBe(1);
+    expect(search.data[0].id).toBe(id);
+    const phone = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, search: '01799 0120' }).expect(200)).body.data;
+    expect(phone.data.map((b: { id: string }) => b.id)).toContain(id);
+    const bkash = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, method: 'bkash' }).expect(200)).body.data;
+    expect(bkash.data.map((b: { id: string }) => b.id)).toContain(id);
+    expect(bkash.data.map((b: { id: string }) => b.id)).not.toContain(other.id);
+    const page1 = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, limit: 1 }).expect(200)).body.data;
+    const page2 = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, limit: 1, page: 2 }).expect(200)).body.data;
+    expect(page1.data).toHaveLength(1);
+    expect(page2.data).toHaveLength(1);
+    expect(page1.total).toBe(all.total);
+    expect(page1.data[0].id).not.toBe(page2.data[0].id);
+
+    await agent.post(`${API}/admin/bookings/${id}/refund-sent`).send({ note: 'Refund list test' }).expect(200);
+    const due = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, status: 'due', search: detail.bookingNumber }).expect(200)).body.data;
+    expect(due.total).toBe(0);
+    const recorded = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, status: 'recorded', search: detail.bookingNumber }).expect(200)).body.data;
+    expect(recorded.total).toBe(1);
+    expect(recorded.data[0].refundSummary).toMatchObject({ amount: 6000, dueAmount: 0, status: 'recorded' });
+  });
+
+  it('includes card, cash and bank refunds but excludes deleted bookings, deleted payments and unrefunded money', async () => {
+    const agent = await staff();
+    const customer = await prisma.customer.create({ data: { name: 'Refund History', phone: `${PHONE}98` } });
+    const slot = await prisma.slot.findFirstOrThrow({ where: { groundId, date: toDbDate(d1), startHour: 21 } });
+    const prefix = `RF-LIST-${trx()}`;
+    const cases = [
+      { name: 'card', method: 'card', status: 'refunded' },
+      { name: 'cash', method: 'cash', status: 'refunded' },
+      { name: 'bank', method: 'bank_transfer', status: 'refunded' },
+      { name: 'pending', method: 'bkash', status: 'pending' },
+      { name: 'failed', method: 'card', status: 'failed' },
+      { name: 'deleted-payment', method: 'card', status: 'refunded', paymentDeleted: true },
+      { name: 'deleted-booking', method: 'cash', status: 'refunded', bookingDeleted: true },
+    ] as const;
+    const created = [];
+    for (const item of cases) {
+      created.push(await prisma.booking.create({ data: {
+        bookingNumber: `${prefix}-${item.name}`, source: 'staff', groundId, slotId: slot.id, customerId: customer.id,
+        contactName: customer.name, contactPhone: customer.phone!, status: 'cancelled',
+        paymentStatus: item.status === 'refunded' ? 'refunded' : 'unpaid', amount: 1000, total: 1000,
+        deletedAt: 'bookingDeleted' in item ? new Date() : null,
+        payments: { create: { method: item.method, status: item.status, amount: 1000, currency: 'bdt',
+          refundedAt: item.status === 'refunded' ? new Date() : null, deletedAt: 'paymentDeleted' in item ? new Date() : null } },
+      } }));
+    }
+    const all = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, search: prefix }).expect(200)).body.data;
+    expect(all.total).toBe(3);
+    expect(all.data.map((b: { id: string }) => b.id).sort()).toEqual(created.slice(0, 3).map((b) => b.id).sort());
+    expect(all.data.map((b: { refundSummary: { amount: number; status: string } }) => b.refundSummary))
+      .toEqual(expect.arrayContaining([expect.objectContaining({ amount: 1000, status: 'recorded' })]));
+    const cash = (await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, search: prefix, method: 'cash' }).expect(200)).body.data;
+    expect(cash.total).toBe(1);
+    expect(cash.data[0].id).toBe(created[1]!.id);
+    expect((await agent.get(`${API}/admin/bookings/refunds`).query({ groundId, search: prefix, status: 'due' }).expect(200)).body.data.total).toBe(0);
+  });
+
+  it('guards the refund list and rejects invalid filters', async () => {
+    await request(app.getHttpServer()).get(`${API}/admin/bookings/refunds`).expect(401);
+    const agent = await staff();
+    for (const query of [{ status: 'sent' }, { method: 'upi' }, { groundId: 'bad' }, { page: 0 }, { limit: 101 }]) {
+      await agent.get(`${API}/admin/bookings/refunds`).query(query).expect(400);
+    }
   });
 
   it('the customer link does not expose the refund', async () => {

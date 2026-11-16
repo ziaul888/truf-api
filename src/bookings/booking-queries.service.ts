@@ -10,6 +10,8 @@ import { BookingNotifier } from './booking-notifier.service.js';
 import { loadOwing, matchesDue, type DueFilter } from './booking-due.js';
 import { hasUpcomingSlot } from './booking-slots.js';
 import { REFUND_DUE_BOOKING } from './refund-tracking.js';
+import { toRefundBookingDto, type RefundBookingDto } from './refund-bookings.dto.js';
+import type { ListRefundBookingsQuery } from './refund-bookings.schemas.js';
 import { ABANDONED_CHECKOUT, bookingNotFound, confirmationUrl, isValidBookingToken } from './booking-rules.js';
 import {
   BOOKING_DETAIL_INCLUDE, BOOKING_INCLUDE, customerCanCancel, customerCanPay, customerCanRequestCancel, toBookingDetailDto, toBookingDto,
@@ -50,6 +52,27 @@ export class BookingQueriesService {
     const counts: BookingCounts = { pending: 0, confirmed: 0, cancelled: 0, completed: 0, no_show: 0 };
     for (const g of groups) counts[g.status] = (g._count as { _all: number })._all;
     return { data: rows.map(toBookingDto), total, page: q.page, limit: q.limit, counts };
+  }
+
+  /** Refund history across every method; due/recorded is tracked separately from booking status. */
+  async refunds(q: ListRefundBookingsQuery): Promise<Paginated<RefundBookingDto>> {
+    const { status, method, ...filters } = q;
+    const refunded: Prisma.PaymentWhereInput = { deletedAt: null, status: 'refunded', ...(method && { method }) };
+    const where: Prisma.BookingWhereInput = {
+      ...listWhere({ ...filters, sort: 'created' }),
+      AND: [
+        { payments: { some: refunded } },
+        ...(status === 'due' ? [REFUND_DUE_BOOKING] : status === 'recorded' ? [{ NOT: REFUND_DUE_BOOKING }] : []),
+      ],
+    };
+    const [rows, total] = await this.prisma.$transaction([
+      this.prisma.booking.findMany({
+        where, include: BOOKING_INCLUDE, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip: (q.page - 1) * q.limit, take: q.limit,
+      }),
+      this.prisma.booking.count({ where }),
+    ]);
+    return { data: rows.map(toRefundBookingDto), total, page: q.page, limit: q.limit };
   }
 
   private async owingIds(filter: DueFilter): Promise<string[]> {
@@ -144,7 +167,10 @@ function listWhere(q: ListBookingsQuery): Prisma.BookingWhereInput {
       OR: [
         { bookingNumber: { contains: search, mode: 'insensitive' } },
         { contactName: { contains: search, mode: 'insensitive' } },
-        { contactPhone: { contains: search.replace(/[^\d+]/g, '') || search } },
+        // A booking number or name containing digits is not a phone-number search.
+        ...(/^[\d\s()+.-]+$/.test(search) && /\d/.test(search)
+          ? [{ contactPhone: { contains: search.replace(/[^\d+]/g, '') } }]
+          : []),
         { customer: { name: { contains: search, mode: 'insensitive' } } },
       ],
     }),
