@@ -27,3 +27,6 @@ src/generated/
 uploads/
 .uploads-test/
 .neon
+
+# Generated client for the isolated tenant transaction proof
+test/tenant-isolation/generated/

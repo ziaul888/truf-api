@@ -1,3 +1,4 @@
+import { OwnerModule } from '../owner/owner.module.js';
 import { Module } from '@nestjs/common';
 import { DiscoveryModule } from '@nestjs/core';
 import { JwtModule } from '@nestjs/jwt';
@@ -11,10 +12,14 @@ import { PermissionsService } from './permissions.service.js';
 /** Import this module wherever a controller needs `@UseGuards(AuthGuard)`. */
 @Module({
   imports: [
+    OwnerModule,
     DiscoveryModule,
     JwtModule.register({
       secret: env.JWT_SECRET,
-      signOptions: { expiresIn: env.JWT_TTL_HOURS * 60 * 60, algorithm: 'HS256' },
+      signOptions: {
+        expiresIn: env.JWT_TTL_HOURS * 60 * 60,
+        algorithm: 'HS256',
+      },
       verifyOptions: { algorithms: ['HS256'] },
     }),
     // Login only (applied by LoginThrottlerGuard): 5 attempts per minute per IP + email.

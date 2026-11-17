@@ -1,0 +1,145 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "./generated"
+  runtime      = "nodejs"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+  schemas  = ["public", "tenant_isolation_proof"]
+}
+
+enum TenantStatus {
+  draft
+  active
+  suspended
+  archived
+
+  @@schema("public")
+}
+
+enum TenantMembershipRole {
+  owner
+  admin
+  manager
+
+  @@schema("public")
+}
+
+enum SlotStatus {
+  available
+  held
+  booked
+  blocked
+
+  @@schema("public")
+}
+
+enum BookingStatus {
+  pending
+  confirmed
+  cancelled
+  completed
+  no_show
+
+  @@schema("public")
+}
+
+// Existing real foundation tables, read by the same authorization helper.
+model Tenant {
+  id           String             @id
+  status       TenantStatus
+  memberships  TenantMembership[]
+  grounds      Ground[]
+  slots        Slot[]
+  bookings     Booking[]
+  bookingSlots BookingSlot[]
+
+  @@schema("public")
+}
+
+model User {
+  id          String             @id
+  isActive    Boolean
+  memberships TenantMembership[]
+
+  @@schema("public")
+}
+
+model TenantMembership {
+  id       String               @id
+  tenantId String
+  userId   String
+  role     TenantMembershipRole
+  isActive Boolean
+  tenant   Tenant               @relation(fields: [tenantId], references: [id])
+  user     User                 @relation(fields: [userId], references: [id])
+
+  @@unique([tenantId, userId])
+  @@schema("public")
+}
+
+// Test-only reservation projection: no legacy booking table is altered.
+model Ground {
+  id       String    @id @default(uuid())
+  tenantId String
+  name     String
+  tenant   Tenant    @relation(fields: [tenantId], references: [id])
+  slots    Slot[]
+  bookings Booking[]
+
+  @@unique([tenantId, id])
+  @@schema("tenant_isolation_proof")
+}
+
+model Slot {
+  id              String        @id @default(uuid())
+  tenantId        String
+  groundId        String
+  date            DateTime      @db.Date
+  startHour       Int
+  startMinute     Int           @default(0)
+  durationMinutes Int           @default(60)
+  price           Int
+  status          SlotStatus    @default(available)
+  tenant          Tenant        @relation(fields: [tenantId], references: [id])
+  ground          Ground        @relation(fields: [tenantId, groundId], references: [tenantId, id])
+  bookings        Booking[]
+  bookingSlots    BookingSlot[]
+
+  @@unique([tenantId, id])
+  @@unique([groundId, date, startHour, startMinute])
+  @@schema("tenant_isolation_proof")
+}
+
+model Booking {
+  id           String        @id @default(uuid())
+  tenantId     String
+  groundId     String
+  slotId       String
+  liveSlotId   String?       @unique
+  status       BookingStatus @default(confirmed)
+  tenant       Tenant        @relation(fields: [tenantId], references: [id])
+  ground       Ground        @relation(fields: [tenantId, groundId], references: [tenantId, id])
+  slot         Slot          @relation(fields: [tenantId, slotId], references: [tenantId, id])
+  bookingSlots BookingSlot[]
+
+  @@unique([tenantId, id])
+  @@schema("tenant_isolation_proof")
+}
+
+model BookingSlot {
+  id         String  @id @default(uuid())
+  tenantId   String
+  bookingId  String
+  slotId     String
+  liveSlotId String? @unique
+  price      Int
+  tenant     Tenant  @relation(fields: [tenantId], references: [id])
+  booking    Booking @relation(fields: [tenantId, bookingId], references: [tenantId, id])
+  slot       Slot    @relation(fields: [tenantId, slotId], references: [tenantId, id])
+
+  @@unique([bookingId, slotId])
+  @@schema("tenant_isolation_proof")
+}

@@ -26,8 +26,11 @@
     "db:reconcile:booking-slots": "prisma db execute --file prisma/rollouts/booking-slots.sql",
     "db:seed": "prisma db seed",
     "db:generate": "prisma generate",
+    "platform:grant": "tsx scripts/grant-platform-admin.ts",
     "db:studio": "prisma studio",
-    "pretest:e2e": "yarn db:migrate:test"
+    "pretest:e2e": "yarn db:migrate:test && yarn db:generate:tenant-proof",
+    "db:generate:tenant-proof": "prisma generate --schema test/tenant-isolation/schema.prisma",
+    "test:tenant-isolation": "NODE_ENV=test tsx test/tenant-isolation/run.ts"
   },
   "dependencies": {
     "@nestjs/common": "^12.0.1",

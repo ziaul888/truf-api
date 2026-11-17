@@ -10,8 +10,10 @@ import { hashPassword, verifyPassword } from './password.js';
 // Checked when the email is unknown, so response time doesn't reveal which emails exist.
 const dummyHash = hashPassword('timing-equaliser-not-a-real-password');
 
-const invalidCredentials = () => new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
-const unauthenticated = () => new AppError('Please sign in', 401, 'UNAUTHENTICATED');
+const invalidCredentials = () =>
+  new AppError('Invalid email or password', 401, 'INVALID_CREDENTIALS');
+const unauthenticated = () =>
+  new AppError('Please sign in', 401, 'UNAUTHENTICATED');
 
 @Injectable()
 export class AuthService {
@@ -20,12 +22,30 @@ export class AuthService {
     private readonly jwt: JwtService,
   ) {}
 
-  async login({ email, password }: LoginInput): Promise<{ user: AuthUser; token: string }> {
-    const user = await this.prisma.user.findUnique({ where: { email } });
-    const valid = await verifyPassword(password, user?.passwordHash ?? (await dummyHash));
-    if (!user || !valid || !user.isActive) throw invalidCredentials();
+  async login(input: LoginInput): Promise<{ user: AuthUser; token: string }> {
+    const user = await this.verifyCredentials(input);
+    return this.issueVerified(user);
+  }
 
+  async issueVerified(user: User): Promise<{ user: AuthUser; token: string }> {
+    if (user.legacyStaffAccess === false)
+      throw new AppError(
+        'Use your turf owner account to sign in',
+        403,
+        'OWNER_ACCOUNT_ONLY',
+      );
     return { user: toAuthUser(user), token: await this.signToken(user) };
+  }
+
+  /** Shared password check; each audience checks access and issues its own session. */
+  async verifyCredentials({ email, password }: LoginInput): Promise<User> {
+    const user = await this.prisma.user.findUnique({ where: { email } });
+    const valid = await verifyPassword(
+      password,
+      user?.passwordHash ?? (await dummyHash),
+    );
+    if (!user || !valid || !user.isActive) throw invalidCredentials();
+    return user;
   }
 
   /**
@@ -36,8 +56,15 @@ export class AuthService {
     const payload = await this.verifyToken(token);
     if (!payload) throw unauthenticated();
 
-    const user = await this.prisma.user.findUnique({ where: { id: payload.sub } });
-    if (!user?.isActive || user.tokenVersion !== payload.ver) throw unauthenticated();
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+    });
+    if (
+      !user?.isActive ||
+      user.legacyStaffAccess === false ||
+      user.tokenVersion !== payload.ver
+    )
+      throw unauthenticated();
     return toAuthUser(user);
   }
 
@@ -53,28 +80,44 @@ export class AuthService {
   }
 
   /** Changes the signed-in user's password, signs out their other sessions, returns a fresh token. */
-  async changePassword(userId: string, input: ChangePasswordInput): Promise<string> {
+  async changePassword(
+    userId: string,
+    input: ChangePasswordInput,
+  ): Promise<string> {
     const user = await this.prisma.user.findUnique({ where: { id: userId } });
     if (!user) throw unauthenticated();
 
     // 400, not 401: a 401 would make the frontend treat this as "signed out".
     if (!(await verifyPassword(input.currentPassword, user.passwordHash))) {
-      throw new AppError('Current password is incorrect', 400, 'WRONG_PASSWORD');
+      throw new AppError(
+        'Current password is incorrect',
+        400,
+        'WRONG_PASSWORD',
+      );
     }
 
     const updated = await this.prisma.user.update({
       where: { id: userId },
-      data: { passwordHash: await hashPassword(input.newPassword), tokenVersion: { increment: 1 } },
+      data: {
+        passwordHash: await hashPassword(input.newPassword),
+        tokenVersion: { increment: 1 },
+      },
     });
     return this.signToken(updated);
   }
 
   private signToken(user: User): Promise<string> {
-    const payload: JwtPayload = { sub: user.id, role: user.role, ver: user.tokenVersion };
+    const payload: JwtPayload = {
+      sub: user.id,
+      role: user.role,
+      ver: user.tokenVersion,
+    };
     return this.jwt.signAsync(payload);
   }
 
-  private async verifyToken(token: string | undefined): Promise<JwtPayload | null> {
+  private async verifyToken(
+    token: string | undefined,
+  ): Promise<JwtPayload | null> {
     if (!token) return null;
     return this.jwt.verifyAsync<JwtPayload>(token).catch(() => null);
   }

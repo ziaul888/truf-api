@@ -1,0 +1,21 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "incremental": false
+  },
+  "include": [
+    "src/tenants/**/*.ts",
+    "src/platform/**/*.ts",
+    "src/owner/**/*.ts",
+    "test/owner-activation/**/*.ts",
+    "test/owner-activation.e2e-spec.ts",
+    "test/platform/**/*.ts",
+    "test/platform-billing/**/*.ts",
+    "test/platform-billing.e2e-spec.ts",
+    "test/platform.e2e-spec.ts",
+    "test/tenant-isolation/**/*.ts",
+    "test/tenant-isolation.e2e-spec.ts"
+  ],
+  "exclude": ["node_modules", "dist"]
+}

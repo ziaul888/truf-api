@@ -1,6 +1,10 @@
 import { resolve } from 'node:path';
 import type { INestApplication } from '@nestjs/common';
-import express from 'express';
+import express, {
+  type Request,
+  type Response,
+  type NextFunction,
+} from 'express';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
 import { env } from './config/env.js';
@@ -13,10 +17,27 @@ export function configureApp(app: INestApplication) {
   app.setGlobalPrefix('api/v1');
   app.use(helmet());
   app.use(cookieParser());
+  app.use(
+    ['/api/v1/platform', '/api/v1/owner', '/api/v1/admin/auth'],
+    (_req: Request, res: Response, next: NextFunction) => {
+      res.setHeader('Cache-Control', 'private, no-store');
+      next();
+    },
+  );
   // Stripe signs the exact bytes it sent, so this route keeps the raw body (Nest's JSON parser then skips it).
-  app.use('/api/v1/stripe/webhook', express.raw({ type: 'application/json', limit: '1mb' }));
+  app.use(
+    '/api/v1/stripe/webhook',
+    express.raw({ type: 'application/json', limit: '1mb' }),
+  );
   // File names are random UUIDs and never change, so they can be cached for good.
-  app.use(UPLOADS_ROUTE, express.static(resolve(env.UPLOAD_DIR), { index: false, immutable: true, maxAge: '365d' }));
+  app.use(
+    UPLOADS_ROUTE,
+    express.static(resolve(env.UPLOAD_DIR), {
+      index: false,
+      immutable: true,
+      maxAge: '365d',
+    }),
+  );
   app.enableCors({ origin: env.CORS_ORIGINS, credentials: true });
   app.useGlobalFilters(new AllExceptionsFilter());
   app.useGlobalInterceptors(new ResponseInterceptor());

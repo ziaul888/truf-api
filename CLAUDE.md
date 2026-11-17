@@ -107,6 +107,9 @@ test/                       # e2e tests (Supertest) — *.e2e-spec.ts
 
 - "No raw SQL" means queries. Migration DDL Prisma can't express may be hand-written in the migration, with a schema comment pointing to it (e.g. the partial unique index on `Payment(method, reference)`)
 
+- Tenant-foundation exception: `src/tenants/tenant-transaction.ts` may use parameterized transaction-local `set_config` and read-only PostgreSQL role/policy metadata to establish and verify RLS context. Business reads/writes still use Prisma delegates. Never set tenant context at session scope or run it outside the transaction client used for the operation.
+- The isolated tenant proof may use fixed-schema DDL, role bootstrap/cleanup and metadata SQL only after verifying a dedicated local test database. This is test infrastructure, never application/production bootstrap.
+
 - Before committing a migration, run `prisma migrate diff --from-config-datasource --to-schema prisma/schema.prisma --script` against the test DB and make sure it doesn't drop `Payment_method_reference_key`
 
 ## Business rules (v1)

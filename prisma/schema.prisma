@@ -14,6 +14,20 @@ datasource db {
   provider = "postgresql"
 }
 
+/// Tenant lifecycle is independent of future subscription/billing status.
+enum TenantStatus {
+  draft
+  active
+  suspended
+  archived
+}
+
+enum TenantMembershipRole {
+  owner
+  admin
+  manager
+}
+
 enum UserRole {
   admin
   manager
@@ -132,31 +146,91 @@ enum Weekday {
   sun
 }
 
-/// Dashboard staff. Customers never log in in v1.
+/// Global staff login identity. Tenant memberships will replace global business roles in stages.
 model User {
-  id           String   @id @default(uuid())
-  email        String   @unique
-  name         String
-  passwordHash String
-  role         UserRole @default(manager)
-  isActive     Boolean  @default(true)
+  id                String   @id @default(uuid())
+  email             String   @unique
+  name              String
+  passwordHash      String
+  role              UserRole @default(manager)
+  isActive          Boolean  @default(true)
+  /// Existing staff keep legacy access; provisioned SaaS owners use a separate session.
+  legacyStaffAccess Boolean  @default(true)
   /// Embedded in every JWT. Bumping it (logout, password change) invalidates all of the user's tokens.
+  tokenVersion      Int      @default(0)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  tenantMemberships      TenantMembership[]
+  platformGrant          PlatformGrant?
+  platformAuditEvents    PlatformAuditEvent[]
+  platformReceipts       PlatformReceipt[]
+  ownerInvitationsIssued OwnerInvitation[]    @relation("OwnerInvitationIssuer")
+
+  blockedSlots      Slot[]
+  slotEvents        SlotEvent[]
+  bookingsCreated   Booking[]       @relation("BookingCreatedBy")
+  bookingsCancelled Booking[]       @relation("BookingCancelledBy")
+  paymentsRecorded  Payment[]       @relation("PaymentRecordedBy")
+  refundsSent       Payment[]       @relation("PaymentRefundSentBy")
+  bookingEvents     BookingEvent[]
+  closuresCreated   Closure[]       @relation("ClosureCreatedBy")
+  closuresLifted    Closure[]       @relation("ClosureLiftedBy")
+  settingsEvents    SettingsEvent[]
+  seriesCreated     BookingSeries[] @relation("BookingSeriesCreatedBy")
+  seriesStopped     BookingSeries[] @relation("BookingSeriesStoppedBy")
+}
+
+/// Explicit SaaS administration, independent of staff roles and tenant memberships.
+model PlatformGrant {
+  id           String   @id @default(uuid())
+  userId       String   @unique
+  isActive     Boolean  @default(true)
   tokenVersion Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  blockedSlots      Slot[]
-  slotEvents        SlotEvent[]
-  bookingsCreated   Booking[]      @relation("BookingCreatedBy")
-  bookingsCancelled Booking[]      @relation("BookingCancelledBy")
-  paymentsRecorded  Payment[]      @relation("PaymentRecordedBy")
-  refundsSent       Payment[]      @relation("PaymentRefundSentBy")
-  bookingEvents     BookingEvent[]
-  closuresCreated Closure[] @relation("ClosureCreatedBy")
-  closuresLifted  Closure[] @relation("ClosureLiftedBy")
-  settingsEvents  SettingsEvent[]
-  seriesCreated   BookingSeries[] @relation("BookingSeriesCreatedBy")
-  seriesStopped   BookingSeries[] @relation("BookingSeriesStoppedBy")
+  user User @relation(fields: [userId], references: [id], onDelete: Restrict)
+}
+
+/// Additive SaaS foundation. Existing business rows are migrated in a later release.
+model Tenant {
+  id        String       @id @default(uuid())
+  slug      String       @unique
+  name      String
+  status    TenantStatus @default(draft)
+  timezone  String       @default("Asia/Dhaka")
+  currency  String       @default("bdt")
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  memberships           TenantMembership[]
+  platformSubscriptions PlatformSubscription[]
+  platformInvoices      PlatformInvoice[]
+  platformReceipts      PlatformReceipt[]
+  platformAuditEvents   PlatformAuditEvent[]
+}
+
+/// Business authority is explicit; User.role never implies membership or platform access.
+/// One active owner per user is enforced by a partial index in 20261117120000_platform_onboarding_billing.
+model TenantMembership {
+  id           String               @id @default(uuid())
+  tenantId     String
+  userId       String
+  role         TenantMembershipRole @default(manager)
+  isActive     Boolean              @default(true)
+  tokenVersion Int                  @default(0)
+  createdAt    DateTime             @default(now())
+  updatedAt    DateTime             @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Restrict)
+
+  ownerInvitations OwnerInvitation[]
+
+  @@unique([id, tenantId, userId])
+  @@unique([tenantId, userId])
+  @@index([userId, isActive])
 }
 
 model Ground {
@@ -542,9 +616,9 @@ model Payment {
   updatedAt             DateTime      @updatedAt
   deletedAt             DateTime?
 
-  booking    Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
-  recordedBy User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
-  refundSentBy User? @relation("PaymentRefundSentBy", fields: [refundSentById], references: [id], onDelete: SetNull)
+  booking      Booking @relation(fields: [bookingId], references: [id], onDelete: Restrict)
+  recordedBy   User?   @relation("PaymentRecordedBy", fields: [recordedById], references: [id], onDelete: SetNull)
+  refundSentBy User?   @relation("PaymentRefundSentBy", fields: [refundSentById], references: [id], onDelete: SetNull)
 
   @@index([bookingId])
   @@index([status])
@@ -612,4 +686,181 @@ model EmailLog {
   createdAt DateTime @default(now())
 
   @@index([createdAt])
+}
+
+// Platform software billing is separate from customer booking Payment records.
+enum PlatformBillingInterval {
+  monthly
+  yearly
+}
+
+enum PlatformSubscriptionState {
+  pending
+  active
+  cancelled
+}
+
+enum PlatformInvoiceState {
+  issued
+  paid
+  void
+}
+
+enum PlatformReceiptMethod {
+  bkash
+  nagad
+  bank_transfer
+}
+
+enum PlatformAuditAction {
+  tenant_created
+  plan_created
+  subscription_created
+  invoice_issued
+  invoice_paid
+  subscription_cancelled
+  owner_invited
+  owner_activated
+}
+
+model PlatformPlan {
+  id          String                @id @default(uuid())
+  code        String                @unique
+  name        String
+  description String?
+  isActive    Boolean               @default(true)
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  versions    PlatformPlanVersion[]
+}
+
+/// Immutable prices; subscriptions retain the version they agreed to.
+/// Positive BDT amount checks are in 20261117120000_platform_onboarding_billing.
+model PlatformPlanVersion {
+  id            String                 @id @default(uuid())
+  planId        String
+  version       Int
+  currency      String                 @default("bdt")
+  monthlyAmount Int
+  yearlyAmount  Int
+  createdAt     DateTime               @default(now())
+  plan          PlatformPlan           @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscriptions PlatformSubscription[]
+
+  @@unique([planId, version])
+}
+
+/// One non-cancelled agreement per tenant: partial index in the onboarding/billing migration.
+model PlatformSubscription {
+  id                String                    @id @default(uuid())
+  tenantId          String
+  planVersionId     String
+  planName          String
+  interval          PlatformBillingInterval
+  currency          String
+  amount            Int
+  anchorDate        DateTime                  @db.Date
+  paidThrough       DateTime?                 @db.Date
+  status            PlatformSubscriptionState @default(pending)
+  cancelAtPeriodEnd Boolean                   @default(false)
+  cancelledAt       DateTime?
+  cancelReason      String?
+  createdAt         DateTime                  @default(now())
+  updatedAt         DateTime                  @updatedAt
+  tenant            Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  planVersion       PlatformPlanVersion       @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+  invoices          PlatformInvoice[]
+
+  @@unique([id, tenantId])
+  @@index([tenantId, status])
+}
+
+/// One issued invoice per agreement and valid periods/amounts:
+/// partial index and CHECK in 20261117120000_platform_onboarding_billing.
+model PlatformInvoice {
+  id             String                  @id @default(uuid())
+  number         String                  @unique
+  tenantId       String
+  subscriptionId String
+  periodIndex    Int
+  periodStart    DateTime                @db.Date
+  periodEnd      DateTime                @db.Date
+  dueOn          DateTime                @db.Date
+  planName       String
+  interval       PlatformBillingInterval
+  currency       String
+  amount         Int
+  status         PlatformInvoiceState    @default(issued)
+  createdAt      DateTime                @default(now())
+  subscription   PlatformSubscription    @relation(fields: [subscriptionId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant         Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  receipt        PlatformReceipt?
+
+  @@unique([subscriptionId, periodIndex])
+  @@unique([id, tenantId])
+  @@index([tenantId, createdAt])
+  @@index([status, dueOn])
+}
+
+/// Full manual receipt only; amounts and currency are copied from the immutable invoice.
+/// Positive BDT amount CHECK is in 20261117120000_platform_onboarding_billing.
+model PlatformReceipt {
+  id                  String                @id @default(uuid())
+  invoiceId           String                @unique
+  tenantId            String
+  method              PlatformReceiptMethod
+  reference           String
+  referenceNormalized String
+  amount              Int
+  currency            String
+  receivedOn          DateTime              @db.Date
+  recordedById        String
+  createdAt           DateTime              @default(now())
+  invoice             PlatformInvoice       @relation(fields: [invoiceId, tenantId], references: [id, tenantId], onDelete: Restrict)
+  tenant              Tenant                @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  recordedBy          User                  @relation(fields: [recordedById], references: [id], onDelete: Restrict)
+
+  @@unique([invoiceId, tenantId])
+  @@unique([method, referenceNormalized])
+  @@index([tenantId, receivedOn])
+}
+
+/// Append-only command history and idempotency result; contains no credentials.
+model PlatformAuditEvent {
+  id        String              @id @default(uuid())
+  requestId String              @unique
+  actorId   String
+  tenantId  String?
+  action    PlatformAuditAction
+  targetId  String
+  inputHash String
+  details   Json                @default("{}")
+  createdAt DateTime            @default(now())
+  actor     User                @relation(fields: [actorId], references: [id], onDelete: Restrict)
+  tenant    Tenant?             @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+
+  @@index([tenantId, createdAt])
+  @@index([actorId, createdAt])
+}
+
+/// Only token hashes are stored. Links are single-use, expire and can be superseded.
+model OwnerInvitation {
+  id                String           @id @default(uuid())
+  requestId         String           @unique
+  membershipId      String
+  tenantId          String
+  userId            String
+  issuedById        String
+  tokenHash         String           @unique
+  userVersion       Int
+  membershipVersion Int
+  createdAt         DateTime         @default(now())
+  expiresAt         DateTime
+  consumedAt        DateTime?
+  revokedAt         DateTime?
+  membership        TenantMembership @relation(fields: [membershipId, tenantId, userId], references: [id, tenantId, userId], onDelete: Restrict)
+  issuedBy          User             @relation("OwnerInvitationIssuer", fields: [issuedById], references: [id], onDelete: Restrict)
+
+  @@index([membershipId, createdAt])
+  @@index([expiresAt])
 }
