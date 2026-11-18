@@ -5,7 +5,10 @@ import { env } from '../config/env.js';
 import type { Booking } from '../generated/prisma/client.js';
 import { StripeService } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { SystemStateService, type WebhookState } from '../settings/system-state.service.js';
+import {
+  SystemStateService,
+  type WebhookState,
+} from '../settings/system-state.service.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { dueOf, paymentStatusOf } from './booking-rules.js';
@@ -13,9 +16,13 @@ import { dueOf, paymentStatusOf } from './booking-rules.js';
 /** Thrown inside the confirm transaction when not every slot could be booked, so every write rolls back. */
 class SlotsLostError extends Error {}
 
-const LIVE_SLOT_INDEXES = ['Booking_liveSlotId_key', 'BookingSlot_liveSlotId_key'];
+const LIVE_SLOT_INDEXES = [
+  'Booking_liveSlotId_key',
+  'BookingSlot_liveSlotId_key',
+];
 
-const idOf = (value: string | { id: string } | null | undefined) => (typeof value === 'string' ? value : value?.id);
+const idOf = (value: string | { id: string } | null | undefined) =>
+  typeof value === 'string' ? value : value?.id;
 
 /**
  * Stripe events. Every handler is idempotent: Stripe may deliver an event more than once.
@@ -32,20 +39,35 @@ export class StripeWebhookService {
   ) {}
 
   /** Signed events only. When each arrived and whether it was handled shows on the Payments page. */
-  async handle(rawBody: Buffer, signature: string | undefined): Promise<{ received: true }> {
+  async handle(
+    rawBody: Buffer,
+    signature: string | undefined,
+  ): Promise<{ received: true }> {
     const event = this.stripe.parseWebhook(rawBody, signature);
     let ok = false;
     try {
       switch (event.type) {
-        case 'checkout.session.completed': await this.paid(event.data.object); break;
-        case 'checkout.session.expired': await this.expired(event.data.object); break;
-        case 'payment_intent.payment_failed': await this.failed(event.data.object); break;
-        case 'charge.refunded': await this.refundedInStripe(event.data.object); break;
-        default: break;
+        case 'checkout.session.completed':
+          await this.paid(event.data.object);
+          break;
+        case 'checkout.session.expired':
+          await this.expired(event.data.object);
+          break;
+        case 'payment_intent.payment_failed':
+          await this.failed(event.data.object);
+          break;
+        case 'charge.refunded':
+          await this.refundedInStripe(event.data.object);
+          break;
+        default:
+          break;
       }
       ok = true;
     } finally {
-      const seen: WebhookState = { lastEventAt: new Date().toISOString(), lastEventOk: ok };
+      const seen: WebhookState = {
+        lastEventAt: new Date().toISOString(),
+        lastEventOk: ok,
+      };
       await this.state.set('stripe_webhook', seen).catch(() => undefined);
     }
     return { received: true };
@@ -55,9 +77,17 @@ export class StripeWebhookService {
     const bookingId = session.metadata?.bookingId;
     const intentId = idOf(session.payment_intent);
     if (!bookingId || !intentId || session.payment_status !== 'paid') return;
-    if (await this.prisma.payment.findUnique({ where: { stripePaymentIntentId: intentId } })) return;
-    if (session.metadata?.purpose === 'due') return this.duePaid(bookingId, intentId, session.amount_total ?? 0);
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    if (
+      await this.prisma.payment.findUnique({
+        where: { stripePaymentIntentId: intentId },
+      })
+    )
+      return;
+    if (session.metadata?.purpose === 'due')
+      return this.duePaid(bookingId, intentId, session.amount_total ?? 0);
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+    });
     if (!booking) return;
 
     const amount = session.amount_total ?? booking.total;
@@ -75,69 +105,150 @@ export class StripeWebhookService {
    * lapsed: all or none. If any slot was taken meanwhile (or its live index clashes) nothing is written
    * and this returns false, so the payment is refunded.
    */
-  private async confirm(booking: Booking, intentId: string, amount: number, cardLast4: string | null): Promise<boolean> {
-    const rows = await this.prisma.bookingSlot.findMany({ where: { bookingId: booking.id }, select: { id: true, slotId: true } });
+  private async confirm(
+    booking: Booking,
+    intentId: string,
+    amount: number,
+    cardLast4: string | null,
+  ): Promise<boolean> {
+    const rows = await this.prisma.bookingSlot.findMany({
+      where: { bookingId: booking.id },
+      select: { id: true, slotId: true },
+    });
     // A booking made by an older release (during a deploy) has no rows: its single slot.
-    const slotIds = rows.length > 0 ? rows.map((r) => r.slotId) : [booking.slotId];
+    const slotIds =
+      rows.length > 0 ? rows.map((r) => r.slotId) : [booking.slotId];
     try {
       return await this.prisma.$transaction(async (tx) => {
         const { count } = await tx.slot.updateMany({
-          where: { id: { in: slotIds }, OR: [{ status: 'held', heldByBookingId: booking.id }, { status: 'available' }] },
+          where: {
+            id: { in: slotIds },
+            OR: [
+              { status: 'held', heldByBookingId: booking.id },
+              { status: 'available' },
+            ],
+          },
           data: { status: 'booked', heldUntil: null, heldByBookingId: null },
         });
         // Throw, don't return: a return would commit the slots this update did book.
         if (count !== slotIds.length) throw new SlotsLostError();
         await tx.payment.create({
-          data: { bookingId: booking.id, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY, status: 'succeeded', receivedAt: new Date() },
+          data: {
+            bookingId: booking.id,
+            method: 'card',
+            stripePaymentIntentId: intentId,
+            cardLast4,
+            amount,
+            currency: env.CURRENCY,
+            status: 'succeeded',
+            receivedAt: new Date(),
+          },
         });
         for (const row of rows) {
-          await tx.bookingSlot.update({ where: { id: row.id }, data: { liveSlotId: row.slotId, cancelledAt: null } });
+          await tx.bookingSlot.update({
+            where: { id: row.id },
+            data: { liveSlotId: row.slotId, cancelledAt: null },
+          });
         }
         await tx.booking.update({
           where: { id: booking.id },
           data: {
-            status: 'confirmed', paymentStatus: 'paid', confirmedAt: new Date(), liveSlotId: booking.slotId,
-            cancelledAt: null, cancelReason: null, cancelledById: null,
+            status: 'confirmed',
+            paymentStatus: 'paid',
+            confirmedAt: new Date(),
+            liveSlotId: booking.slotId,
+            cancelledAt: null,
+            cancelReason: null,
+            cancelledById: null,
           },
         });
         await tx.bookingEvent.createMany({
           data: [
-            { bookingId: booking.id, type: 'payment_received', detail: `Paid ${amount} by card` },
-            { bookingId: booking.id, type: 'confirmed', detail: booking.status === 'cancelled' ? 'Paid after the hold lapsed; slot was still free' : 'Confirmed by payment' },
+            {
+              bookingId: booking.id,
+              type: 'payment_received',
+              detail: `Paid ${amount} by card`,
+            },
+            {
+              bookingId: booking.id,
+              type: 'confirmed',
+              detail:
+                booking.status === 'cancelled'
+                  ? 'Paid after the hold lapsed; slot was still free'
+                  : 'Confirmed by payment',
+            },
           ],
         });
         return true;
       });
     } catch (err) {
-      if (err instanceof SlotsLostError || LIVE_SLOT_INDEXES.includes(violatedUniqueIndex(err) ?? '')) return false;
+      if (
+        err instanceof SlotsLostError ||
+        LIVE_SLOT_INDEXES.includes(violatedUniqueIndex(err) ?? '')
+      )
+        return false;
       throw err;
     }
   }
 
   /** Paid, but someone else has a slot now: refund in full and tell the customer. Slots still held by this booking go free. */
-  private async refundLatePayment(booking: Booking, intentId: string, amount: number, cardLast4: string | null) {
+  private async refundLatePayment(
+    booking: Booking,
+    intentId: string,
+    amount: number,
+    cardLast4: string | null,
+  ) {
     const stripeRefundId = await this.stripe.refund(intentId);
     await this.prisma.$transaction(async (tx) => {
       await tx.payment.create({
         data: {
-          bookingId: booking.id, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY,
-          status: 'refunded', stripeRefundId, receivedAt: new Date(), refundedAt: new Date(),
+          bookingId: booking.id,
+          method: 'card',
+          stripePaymentIntentId: intentId,
+          cardLast4,
+          amount,
+          currency: env.CURRENCY,
+          status: 'refunded',
+          stripeRefundId,
+          receivedAt: new Date(),
+          refundedAt: new Date(),
         },
       });
-      await tx.booking.update({ where: { id: booking.id }, data: { status: 'cancelled', paymentStatus: 'refunded', liveSlotId: null } });
-      await tx.bookingSlot.updateMany({ where: { bookingId: booking.id, cancelledAt: null }, data: { liveSlotId: null, cancelledAt: new Date() } });
+      await tx.booking.update({
+        where: { id: booking.id },
+        data: {
+          status: 'cancelled',
+          paymentStatus: 'refunded',
+          liveSlotId: null,
+        },
+      });
+      await tx.bookingSlot.updateMany({
+        where: { bookingId: booking.id, cancelledAt: null },
+        data: { liveSlotId: null, cancelledAt: new Date() },
+      });
       await tx.slot.updateMany({
-        where: { status: 'held', heldByBookingId: booking.id }, data: { status: 'available', heldUntil: null, heldByBookingId: null },
+        where: { status: 'held', heldByBookingId: booking.id },
+        data: { status: 'available', heldUntil: null, heldByBookingId: null },
       });
       await tx.bookingEvent.createMany({
         data: [
-          { bookingId: booking.id, type: 'payment_received', detail: `Paid ${amount} by card after the hold lapsed` },
-          { bookingId: booking.id, type: 'refunded', detail: `Refunded ${amount}: the slot was taken meanwhile` },
+          {
+            bookingId: booking.id,
+            type: 'payment_received',
+            detail: `Paid ${amount} by card after the hold lapsed`,
+          },
+          {
+            bookingId: booking.id,
+            type: 'refunded',
+            detail: `Refunded ${amount}: the slot was taken meanwhile`,
+          },
         ],
       });
     });
     await this.notifier.cancelled(booking.id, {
-      reason: 'The slot was taken by someone else while your payment was being completed', refunded: amount,
+      reason:
+        'The slot was taken by someone else while your payment was being completed',
+      refunded: amount,
     });
   }
 
@@ -147,43 +258,100 @@ export class StripeWebhookService {
    * or paid another way) is refunded in full.
    */
   private async duePaid(bookingId: string, intentId: string, amount: number) {
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId }, include: { payments: { where: { deletedAt: null } } } });
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+      include: { payments: { where: { deletedAt: null } } },
+    });
     if (!booking) return;
     const cardLast4 = await this.stripe.cardLast4(intentId);
-    if (booking.status === 'cancelled' || amount > dueOf(booking, booking.payments)) {
+    if (
+      booking.status === 'cancelled' ||
+      amount > dueOf(booking, booking.payments)
+    ) {
       return this.refundUnneeded(booking.id, intentId, amount, cardLast4);
     }
-    const payments = [...booking.payments, { amount, status: 'succeeded' as const }];
+    const payments = [
+      ...booking.payments,
+      { amount, status: 'succeeded' as const },
+    ];
     const paymentStatus = paymentStatusOf(booking.total, payments);
     const confirmNow = booking.status === 'pending' && paymentStatus === 'paid';
     await this.prisma.$transaction(async (tx) => {
       await tx.payment.create({
-        data: { bookingId, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY, status: 'succeeded', receivedAt: new Date() },
+        data: {
+          bookingId,
+          method: 'card',
+          stripePaymentIntentId: intentId,
+          cardLast4,
+          amount,
+          currency: env.CURRENCY,
+          status: 'succeeded',
+          receivedAt: new Date(),
+        },
       });
-      await tx.booking.update({ where: { id: bookingId }, data: { paymentStatus, ...(confirmNow && { status: 'confirmed', confirmedAt: new Date() }) } });
+      await tx.booking.update({
+        where: { id: bookingId },
+        data: {
+          paymentStatus,
+          ...(confirmNow && { status: 'confirmed', confirmedAt: new Date() }),
+        },
+      });
       await tx.bookingEvent.createMany({
         data: [
-          { bookingId, type: 'payment_received', detail: `Paid ${amount} by card online` },
-          ...(confirmNow ? [{ bookingId, type: 'confirmed' as const, detail: 'Confirmed by online payment' }] : []),
+          {
+            bookingId,
+            type: 'payment_received',
+            detail: `Paid ${amount} by card online`,
+          },
+          ...(confirmNow
+            ? [
+                {
+                  bookingId,
+                  type: 'confirmed' as const,
+                  detail: 'Confirmed by online payment',
+                },
+              ]
+            : []),
         ],
       });
     });
     if (confirmNow) await this.notifier.confirmed(bookingId);
   }
 
-  private async refundUnneeded(bookingId: string, intentId: string, amount: number, cardLast4: string | null) {
+  private async refundUnneeded(
+    bookingId: string,
+    intentId: string,
+    amount: number,
+    cardLast4: string | null,
+  ) {
     const stripeRefundId = await this.stripe.refund(intentId);
     await this.prisma.$transaction([
       this.prisma.payment.create({
         data: {
-          bookingId, method: 'card', stripePaymentIntentId: intentId, cardLast4, amount, currency: env.CURRENCY,
-          status: 'refunded', stripeRefundId, receivedAt: new Date(), refundedAt: new Date(),
+          bookingId,
+          method: 'card',
+          stripePaymentIntentId: intentId,
+          cardLast4,
+          amount,
+          currency: env.CURRENCY,
+          status: 'refunded',
+          stripeRefundId,
+          receivedAt: new Date(),
+          refundedAt: new Date(),
         },
       }),
       this.prisma.bookingEvent.createMany({
         data: [
-          { bookingId, type: 'payment_received', detail: `Paid ${amount} by card online` },
-          { bookingId, type: 'refunded', detail: `Refunded ${amount}: nothing was due any more` },
+          {
+            bookingId,
+            type: 'payment_received',
+            detail: `Paid ${amount} by card online`,
+          },
+          {
+            bookingId,
+            type: 'refunded',
+            detail: `Refunded ${amount}: nothing was due any more`,
+          },
         ],
       }),
     ]);
@@ -192,29 +360,60 @@ export class StripeWebhookService {
 
   private async expired(session: Stripe.Checkout.Session) {
     const bookingId = session.metadata?.bookingId;
-    const booking = bookingId ? await this.prisma.booking.findUnique({ where: { id: bookingId } }) : null;
-    if (booking?.status !== 'pending' || session.metadata?.purpose === 'due') return;
-    await this.cancellation.cancel(booking.id, { actorId: null, reason: 'Payment not completed in time', refund: false, notify: false, unpaidOnly: true });
+    const booking = bookingId
+      ? await this.prisma.booking.findUnique({ where: { id: bookingId } })
+      : null;
+    if (booking?.status !== 'pending' || session.metadata?.purpose === 'due')
+      return;
+    await this.cancellation.cancel(booking.id, {
+      actorId: null,
+      reason: 'Payment not completed in time',
+      refund: false,
+      notify: false,
+      unpaidOnly: true,
+    });
   }
 
   /** The customer can retry inside the same Checkout page, so the hold stays until it lapses. */
   private async failed(intent: Stripe.PaymentIntent) {
     const bookingId = intent.metadata?.bookingId;
     if (!bookingId) return;
-    await this.prisma.booking.updateMany({ where: { id: bookingId, status: 'pending' }, data: { paymentStatus: 'failed' } });
+    await this.prisma.booking.updateMany({
+      where: { id: bookingId, status: 'pending' },
+      data: { paymentStatus: 'failed' },
+    });
   }
 
   /** A refund made in the Stripe dashboard: record it so the booking shows the truth. */
   private async refundedInStripe(charge: Stripe.Charge) {
     const intentId = idOf(charge.payment_intent);
     if (!intentId || !charge.refunded) return;
-    const payment = await this.prisma.payment.findUnique({ where: { stripePaymentIntentId: intentId }, include: { booking: { include: { payments: true } } } });
+    const payment = await this.prisma.payment.findUnique({
+      where: { stripePaymentIntentId: intentId },
+      include: { booking: { include: { payments: true } } },
+    });
     if (!payment || payment.status === 'refunded') return;
     await this.prisma.$transaction(async (tx) => {
-      await tx.payment.update({ where: { id: payment.id }, data: { status: 'refunded', refundedAt: new Date() } });
-      const payments = payment.booking.payments.map((p) => (p.id === payment.id ? { ...p, status: 'refunded' as const } : p));
-      await tx.booking.update({ where: { id: payment.bookingId }, data: { paymentStatus: paymentStatusOf(payment.booking.total, payments) } });
-      await tx.bookingEvent.create({ data: { bookingId: payment.bookingId, type: 'refunded', detail: `Refunded ${payment.amount} in Stripe` } });
+      await tx.payment.update({
+        where: { id: payment.id },
+        data: { status: 'refunded', refundedAt: new Date() },
+      });
+      const payments = payment.booking.payments.map((p) =>
+        p.id === payment.id ? { ...p, status: 'refunded' as const } : p,
+      );
+      await tx.booking.update({
+        where: { id: payment.bookingId },
+        data: {
+          paymentStatus: paymentStatusOf(payment.booking.total, payments),
+        },
+      });
+      await tx.bookingEvent.create({
+        data: {
+          bookingId: payment.bookingId,
+          type: 'refunded',
+          detail: `Refunded ${payment.amount} in Stripe`,
+        },
+      });
     });
   }
 }

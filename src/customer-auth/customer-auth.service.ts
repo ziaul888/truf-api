@@ -5,9 +5,14 @@ import { upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SmsVerifyService } from '../sms/sms-verify.service.js';
 import type { CustomerProfileInput } from './customer-auth.schemas.js';
-import { toCustomerSession, type CustomerJwtPayload, type CustomerSession } from './customer-auth.types.js';
+import {
+  toCustomerSession,
+  type CustomerJwtPayload,
+  type CustomerSession,
+} from './customer-auth.types.js';
 
-const unauthenticated = () => new AppError('Please sign in', 401, 'UNAUTHENTICATED');
+const unauthenticated = () =>
+  new AppError('Please sign in', 401, 'UNAUTHENTICATED');
 
 /**
  * Customer sign-in by SMS code. The session is keyed on the verified phone, so it shows every
@@ -28,37 +33,62 @@ export class CustomerAuthService {
   }
 
   /** `profile`: name and email for a number with no customer record yet; ignored otherwise. */
-  async verify(phone: string, code: string, profile?: CustomerProfileInput): Promise<{ session: CustomerSession; token: string }> {
+  async verify(
+    phone: string,
+    code: string,
+    profile?: CustomerProfileInput,
+  ): Promise<{ session: CustomerSession; token: string }> {
     if (!(await this.sms.check(phone, code))) {
-      throw new AppError('That code is wrong or has expired', 400, 'INVALID_CODE');
+      throw new AppError(
+        'That code is wrong or has expired',
+        400,
+        'INVALID_CODE',
+      );
     }
     let customer = await this.prisma.customer.findUnique({ where: { phone } });
     if (profile && (!customer || customer.deletedAt)) {
       await upsertCustomerByPhone(this.prisma, { phone, ...profile }, true);
       customer = await this.prisma.customer.findUnique({ where: { phone } });
     }
-    const payload: CustomerJwtPayload = { sub: phone, ver: customer?.sessionVersion ?? 0 };
-    return { session: toCustomerSession(phone, customer), token: await this.jwt.signAsync(payload) };
+    const payload: CustomerJwtPayload = {
+      sub: phone,
+      ver: customer?.sessionVersion ?? 0,
+    };
+    return {
+      session: toCustomerSession(phone, customer),
+      token: await this.jwt.signAsync(payload),
+    };
   }
 
   /** Resolves the cookie to the signed-in customer, or throws 401. */
   async authenticate(token: string | undefined): Promise<CustomerSession> {
     const payload = await this.verifyToken(token);
     if (!payload) throw unauthenticated();
-    const customer = await this.prisma.customer.findUnique({ where: { phone: payload.sub } });
-    if ((customer?.sessionVersion ?? 0) !== payload.ver) throw unauthenticated();
+    const customer = await this.prisma.customer.findUnique({
+      where: { phone: payload.sub },
+    });
+    if ((customer?.sessionVersion ?? 0) !== payload.ver)
+      throw unauthenticated();
     return toCustomerSession(payload.sub, customer);
   }
 
   /** Creates the signed-in customer's record, or updates their name and email (a blank email keeps the stored one). */
-  async saveProfile(phone: string, profile: CustomerProfileInput): Promise<CustomerSession> {
+  async saveProfile(
+    phone: string,
+    profile: CustomerProfileInput,
+  ): Promise<CustomerSession> {
     await upsertCustomerByPhone(this.prisma, { phone, ...profile }, true);
-    return toCustomerSession(phone, await this.prisma.customer.findUnique({ where: { phone } }));
+    return toCustomerSession(
+      phone,
+      await this.prisma.customer.findUnique({ where: { phone } }),
+    );
   }
 
   /** For public routes that behave differently when a customer is signed in. */
   optional(token: string | undefined): Promise<CustomerSession | null> {
-    return token ? this.authenticate(token).catch(() => null) : Promise.resolve(null);
+    return token
+      ? this.authenticate(token).catch(() => null)
+      : Promise.resolve(null);
   }
 
   /** Signs the customer out on every device. A missing or invalid token is a no-op. */
@@ -71,7 +101,9 @@ export class CustomerAuthService {
     });
   }
 
-  private async verifyToken(token: string | undefined): Promise<CustomerJwtPayload | null> {
+  private async verifyToken(
+    token: string | undefined,
+  ): Promise<CustomerJwtPayload | null> {
     if (!token) return null;
     return this.jwt.verifyAsync<CustomerJwtPayload>(token).catch(() => null);
   }

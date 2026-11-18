@@ -11,6 +11,20 @@ export interface UserDto {
   updatedAt: Date;
 }
 
-export const toUserDto = ({ id, email, name, role, isActive, createdAt, updatedAt }: User): UserDto => ({
-  id, email, name, role, isActive, createdAt, updatedAt,
+export const toUserDto = ({
+  id,
+  email,
+  name,
+  role,
+  isActive,
+  createdAt,
+  updatedAt,
+}: User): UserDto => ({
+  id,
+  email,
+  name,
+  role,
+  isActive,
+  createdAt,
+  updatedAt,
 });

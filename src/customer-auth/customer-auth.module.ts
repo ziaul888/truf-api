@@ -15,7 +15,11 @@ import { CustomerAuthService } from './customer-auth.service.js';
     SmsModule,
     JwtModule.register({
       secret: `${env.JWT_SECRET}:customer`,
-      signOptions: { expiresIn: env.CUSTOMER_SESSION_DAYS * 24 * 60 * 60, algorithm: 'HS256', audience: 'customer' },
+      signOptions: {
+        expiresIn: env.CUSTOMER_SESSION_DAYS * 24 * 60 * 60,
+        algorithm: 'HS256',
+        audience: 'customer',
+      },
       verifyOptions: { algorithms: ['HS256'], audience: 'customer' },
     }),
   ],

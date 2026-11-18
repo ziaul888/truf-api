@@ -1,4 +1,10 @@
-import { Injectable, SetMetadata, createParamDecorator, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import {
+  Injectable,
+  SetMetadata,
+  createParamDecorator,
+  type CanActivate,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AppError } from '../common/app-error.js';
 import type { UserRole } from '../generated/prisma/client.js';
@@ -33,12 +39,16 @@ export class AuthGuard implements CanActivate {
     const user = await this.auth.authenticate(req.cookies?.[AUTH_COOKIE]);
     req.user = user;
 
-    const roles = this.reflector.getAllAndOverride<UserRole[] | undefined>(ROLES_KEY, [
-      ctx.getHandler(),
-      ctx.getClass(),
-    ]);
+    const roles = this.reflector.getAllAndOverride<UserRole[] | undefined>(
+      ROLES_KEY,
+      [ctx.getHandler(), ctx.getClass()],
+    );
     if (roles && !roles.includes(user.role)) {
-      throw new AppError('You do not have permission to do that', 403, 'FORBIDDEN');
+      throw new AppError(
+        'You do not have permission to do that',
+        403,
+        'FORBIDDEN',
+      );
     }
     return true;
   }

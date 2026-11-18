@@ -18,7 +18,11 @@ const admin = { email: `admin${DOMAIN}`, password: 'e2e-password-123' };
 
 const now = venueNow();
 const hourNow = Math.floor(now.minutes / 60);
-const customer = { name: 'Walk In', phone: '01799200001', email: 'walkin@example.com' };
+const customer = {
+  name: 'Walk In',
+  phone: '01799200001',
+  email: 'walkin@example.com',
+};
 
 describe('Walk-in bookings (e2e)', () => {
   let app: INestApplication<App>;
@@ -26,13 +30,24 @@ describe('Walk-in bookings (e2e)', () => {
   let groundId: string;
 
   const cleanup = async () => {
-    const grounds = await prisma.ground.findMany({ where: { name: { startsWith: PREFIX } }, select: { id: true } });
+    const grounds = await prisma.ground.findMany({
+      where: { name: { startsWith: PREFIX } },
+      select: { id: true },
+    });
     const ids = grounds.map((g) => g.id);
-    await prisma.bookingEvent.deleteMany({ where: { booking: { groundId: { in: ids } } } });
-    await prisma.payment.deleteMany({ where: { booking: { groundId: { in: ids } } } });
-    await prisma.bookingSlot.deleteMany({ where: { booking: { groundId: { in: ids } } } });
+    await prisma.bookingEvent.deleteMany({
+      where: { booking: { groundId: { in: ids } } },
+    });
+    await prisma.payment.deleteMany({
+      where: { booking: { groundId: { in: ids } } },
+    });
+    await prisma.bookingSlot.deleteMany({
+      where: { booking: { groundId: { in: ids } } },
+    });
     await prisma.booking.deleteMany({ where: { groundId: { in: ids } } });
-    await prisma.customer.deleteMany({ where: { phone: { startsWith: PHONE } } });
+    await prisma.customer.deleteMany({
+      where: { phone: { startsWith: PHONE } },
+    });
     await prisma.slot.deleteMany({ where: { groundId: { in: ids } } });
     await prisma.ground.deleteMany({ where: { id: { in: ids } } });
     await prisma.user.deleteMany({ where: { email: { endsWith: DOMAIN } } });
@@ -41,12 +56,28 @@ describe('Walk-in bookings (e2e)', () => {
   beforeAll(async () => {
     prisma = new PrismaService();
     await cleanup();
-    await prisma.user.create({ data: { email: admin.email, name: 'Admin', role: 'admin', passwordHash: await hashPassword(admin.password) } });
-    groundId = (await prisma.ground.create({
-      data: { name: `${PREFIX} Main`, sport: 'football', hourlyPrice: 1000, openingHour: 0, closingHour: 24 },
-    })).id;
+    await prisma.user.create({
+      data: {
+        email: admin.email,
+        name: 'Admin',
+        role: 'admin',
+        passwordHash: await hashPassword(admin.password),
+      },
+    });
+    groundId = (
+      await prisma.ground.create({
+        data: {
+          name: `${PREFIX} Main`,
+          sport: 'football',
+          hourlyPrice: 1000,
+          openingHour: 0,
+          closingHour: 24,
+        },
+      })
+    ).id;
     const moduleRef = await Test.createTestingModule({ imports: [AppModule] })
-      .overrideProvider(EmailService).useValue({ send: vi.fn(async () => true) })
+      .overrideProvider(EmailService)
+      .useValue({ send: vi.fn(async () => true) })
       .compile();
     app = configureApp(moduleRef.createNestApplication());
     await app.init();
@@ -63,23 +94,47 @@ describe('Walk-in bookings (e2e)', () => {
     await agent.post(`${API}/admin/auth/login`).send(admin).expect(200);
     return agent;
   };
-  const book = async (slotId: string) => (await signIn()).post(`${API}/admin/bookings`).send({
-    slotId, customer, payment: { type: 'full', method: 'cash' },
-  });
+  const book = async (slotId: string) =>
+    (await signIn()).post(`${API}/admin/bookings`).send({
+      slotId,
+      customer,
+      payment: { type: 'full', method: 'cash' },
+    });
 
   it('takes a walk-in on the slot running now, with the cash recorded', async () => {
-    const slot = await prisma.slot.create({ data: { groundId, date: toDbDate(now.date), startHour: hourNow, price: 1000 } });
+    const slot = await prisma.slot.create({
+      data: {
+        groundId,
+        date: toDbDate(now.date),
+        startHour: hourNow,
+        price: 1000,
+      },
+    });
     const res = await book(slot.id);
     expect(res.status).toBe(201);
-    expect(res.body.data).toMatchObject({ status: 'confirmed', paymentStatus: 'paid' });
-    expect(await prisma.slot.findUniqueOrThrow({ where: { id: slot.id } })).toMatchObject({ status: 'booked' });
+    expect(res.body.data).toMatchObject({
+      status: 'confirmed',
+      paymentStatus: 'paid',
+    });
+    expect(
+      await prisma.slot.findUniqueOrThrow({ where: { id: slot.id } }),
+    ).toMatchObject({ status: 'booked' });
   });
 
   it('refuses a slot that has ended, and leaves it free', async () => {
-    const slot = await prisma.slot.create({ data: { groundId, date: toDbDate(addDays(now.date, -1)), startHour: 22, price: 1000 } });
+    const slot = await prisma.slot.create({
+      data: {
+        groundId,
+        date: toDbDate(addDays(now.date, -1)),
+        startHour: 22,
+        price: 1000,
+      },
+    });
     const res = await book(slot.id);
     expect(res.status).toBe(400);
     expect(res.body.code).toBe('SLOT_IN_PAST');
-    expect(await prisma.slot.findUniqueOrThrow({ where: { id: slot.id } })).toMatchObject({ status: 'available' });
+    expect(
+      await prisma.slot.findUniqueOrThrow({ where: { id: slot.id } }),
+    ).toMatchObject({ status: 'available' });
   });
 });

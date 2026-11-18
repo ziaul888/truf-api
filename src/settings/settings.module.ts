@@ -15,7 +15,18 @@ import { WebsiteSettingsService } from './website-settings.service.js';
 
 @Module({
   imports: [AuthModule, SettingsCoreModule, SlotSettingsModule, EmailModule],
-  controllers: [AdminSiteSettingsController, AdminNotificationsController, AdminSystemController, PublicSettingsController],
-  providers: [VenueSettingsService, WebsiteSettingsService, NotificationSettingsService, SystemStatusService, SettingsResetService],
+  controllers: [
+    AdminSiteSettingsController,
+    AdminNotificationsController,
+    AdminSystemController,
+    PublicSettingsController,
+  ],
+  providers: [
+    VenueSettingsService,
+    WebsiteSettingsService,
+    NotificationSettingsService,
+    SystemStatusService,
+    SettingsResetService,
+  ],
 })
 export class SettingsModule {}

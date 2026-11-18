@@ -14,23 +14,41 @@ const DEPOSIT_FIELDS = ['depositMethod', 'reference', 'payerNumber'] as const;
  * can't tell (it is static), so the service calls this with the settings read for the request.
  * Returns the deposit percent when a deposit is due, else null.
  */
-export function assertCashDepositInput(input: CheckoutInput, settings: SlotSettings): number | null {
+export function assertCashDepositInput(
+  input: CheckoutInput,
+  settings: SlotSettings,
+): number | null {
   if (input.paymentMethod !== 'cash') return null;
   const percent = cashDepositPercentOf(settings);
   if (percent === null) {
-    const details = DEPOSIT_FIELDS.filter((field) => input[field] !== undefined)
-      .map((field) => ({ field, message: 'Only for bKash and Nagad' }));
-    if (details.length > 0) throw new BadRequestException({ message: 'Some fields are invalid', code: 'VALIDATION_FAILED', details });
+    const details = DEPOSIT_FIELDS.filter(
+      (field) => input[field] !== undefined,
+    ).map((field) => ({ field, message: 'Only for bKash and Nagad' }));
+    if (details.length > 0)
+      throw new BadRequestException({
+        message: 'Some fields are invalid',
+        code: 'VALIDATION_FAILED',
+        details,
+      });
     return null;
   }
-  if (input.depositMethod === undefined || input.reference === undefined || input.payerNumber === undefined) {
+  if (
+    input.depositMethod === undefined ||
+    input.reference === undefined ||
+    input.payerNumber === undefined
+  ) {
     throw new AppError(
       `Paying cash at the venue needs a ${percent}% deposit by bKash or Nagad: send depositMethod, reference (TrxID) and payerNumber`,
-      400, 'CASH_DEPOSIT_REQUIRED',
+      400,
+      'CASH_DEPOSIT_REQUIRED',
     );
   }
   if (!portalWalletNumber(settings, input.depositMethod)) {
-    throw new AppError(`${methodName(input.depositMethod)} payment is not available right now`, 400, 'WALLET_NOT_AVAILABLE');
+    throw new AppError(
+      `${methodName(input.depositMethod)} payment is not available right now`,
+      400,
+      'WALLET_NOT_AVAILABLE',
+    );
   }
   return percent;
 }

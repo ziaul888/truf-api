@@ -2,7 +2,9 @@ import { csvCell, csvLine, csvMoney } from './csv.js';
 
 describe('csv', () => {
   it('quotes commas, quotes and newlines', () => {
-    expect(csvLine(['Hasan, Rakib', 'say "hi"', 'a\nb', null, 3])).toBe('"Hasan, Rakib","say ""hi""","a\nb",,3\r\n');
+    expect(csvLine(['Hasan, Rakib', 'say "hi"', 'a\nb', null, 3])).toBe(
+      '"Hasan, Rakib","say ""hi""","a\nb",,3\r\n',
+    );
   });
 
   it('defuses formulas but leaves numbers and phones alone', () => {

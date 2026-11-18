@@ -1,25 +1,47 @@
 import { AppError } from '../common/app-error.js';
 import {
-  bookingToken, dueOf, isValidBookingToken, newBookingNumber, noShowDetail, owedOf, paidOf, paymentStatusOf, pendingWalletPayment,
+  bookingToken,
+  dueOf,
+  isValidBookingToken,
+  newBookingNumber,
+  noShowDetail,
+  owedOf,
+  paidOf,
+  paymentStatusOf,
+  pendingWalletPayment,
   withBookingNumber,
 } from './booking-rules.js';
-import { customerCanCancel, customerCanPay, customerCanRequestCancel, type BookingRow } from './booking.dto.js';
+import {
+  customerCanCancel,
+  customerCanPay,
+  customerCanRequestCancel,
+  type BookingRow,
+} from './booking.dto.js';
 
 const clash = (index: string) =>
-  Object.assign(new Error('unique'), { code: 'P2002', meta: { driverAdapterError: { cause: { constraint: { index } } } } });
+  Object.assign(new Error('unique'), {
+    code: 'P2002',
+    meta: { driverAdapterError: { cause: { constraint: { index } } } },
+  });
 
 describe('booking rules', () => {
   it('makes readable booking numbers without look-alike characters', () => {
-    for (let i = 0; i < 50; i++) expect(newBookingNumber()).toMatch(/^CT-[A-HJKMNP-Z2-9]{5}$/);
+    for (let i = 0; i < 50; i++)
+      expect(newBookingNumber()).toMatch(/^CT-[A-HJKMNP-Z2-9]{5}$/);
   });
 
   it('retries a clashing booking number, and maps a live-slot clash to SLOT_NOT_AVAILABLE', async () => {
-    const write = vi.fn().mockRejectedValueOnce(clash('Booking_bookingNumber_key')).mockResolvedValueOnce('ok');
+    const write = vi
+      .fn()
+      .mockRejectedValueOnce(clash('Booking_bookingNumber_key'))
+      .mockResolvedValueOnce('ok');
     await expect(withBookingNumber(write)).resolves.toBe('ok');
     expect(write).toHaveBeenCalledTimes(2);
     expect(write.mock.calls[0]![0]).not.toBe(write.mock.calls[1]![0]);
 
-    const err = await withBookingNumber(() => Promise.reject(clash('Booking_liveSlotId_key'))).catch((e: unknown) => e);
+    const err = await withBookingNumber(() =>
+      Promise.reject(clash('Booking_liveSlotId_key')),
+    ).catch((e: unknown) => e);
     expect(err).toBeInstanceOf(AppError);
     expect(err).toMatchObject({ status: 409, code: 'SLOT_NOT_AVAILABLE' });
   });
@@ -44,16 +66,28 @@ describe('booking rules', () => {
   });
 
   it('writes off the due on a no-show: nothing owed, the advance still counts as paid', () => {
-    const payments = [{ amount: 400, status: 'succeeded' as const, method: 'cash' as const }];
+    const payments = [
+      { amount: 400, status: 'succeeded' as const, method: 'cash' as const },
+    ];
     expect(dueOf({ status: 'no_show', total: 1000 }, payments)).toBe(0);
     expect(owedOf({ status: 'no_show', total: 1000 }, payments)).toBe(0);
     expect(paidOf(payments)).toBe(400);
-    expect(customerCanPay({ status: 'no_show', source: 'staff', payAtVenue: false, total: 1000, payments } as unknown as BookingRow)).toBe(false);
+    expect(
+      customerCanPay({
+        status: 'no_show',
+        source: 'staff',
+        payAtVenue: false,
+        total: 1000,
+        payments,
+      } as unknown as BookingRow),
+    ).toBe(false);
   });
 
   it('no-show event details keep amounts in the smallest unit', () => {
     expect(noShowDetail(60000)).toBe('No-show: 60000 due written off');
-    expect(noShowDetail(60000, 'Phone off')).toBe('No-show: 60000 due written off: Phone off');
+    expect(noShowDetail(60000, 'Phone off')).toBe(
+      'No-show: 60000 due written off: Phone off',
+    );
     expect(noShowDetail(0)).toBe('No-show: no due written off');
   });
 
@@ -68,34 +102,81 @@ describe('booking rules', () => {
   });
 
   it('a duplicate TrxID while booking is 409 REFERENCE_ALREADY_USED', async () => {
-    await expect(withBookingNumber(async () => { throw clash('Payment_method_reference_key'); }))
-      .rejects.toMatchObject({ status: 409, code: 'REFERENCE_ALREADY_USED' });
+    await expect(
+      withBookingNumber(async () => {
+        throw clash('Payment_method_reference_key');
+      }),
+    ).rejects.toMatchObject({ status: 409, code: 'REFERENCE_ALREADY_USED' });
   });
 
   describe('bKash / Nagad awaiting verification', () => {
-    const wallet = (status: 'pending' | 'succeeded') => ({ method: 'bkash' as const, amount: 6000, status });
-    const row = (overrides: object) => ({ status: 'pending', source: 'portal', payAtVenue: false, total: 6000, payments: [], ...overrides }) as unknown as BookingRow;
+    const wallet = (status: 'pending' | 'succeeded') => ({
+      method: 'bkash' as const,
+      amount: 6000,
+      status,
+    });
+    const row = (overrides: object) =>
+      ({
+        status: 'pending',
+        source: 'portal',
+        payAtVenue: false,
+        total: 6000,
+        payments: [],
+        ...overrides,
+      }) as unknown as BookingRow;
 
     it('finds only a pending wallet payment', () => {
-      expect(pendingWalletPayment([wallet('pending')])).toMatchObject({ method: 'bkash' });
-      expect(pendingWalletPayment([wallet('succeeded'), { method: 'cash', amount: 1, status: 'pending' }])).toBeUndefined();
+      expect(pendingWalletPayment([wallet('pending')])).toMatchObject({
+        method: 'bkash',
+      });
+      expect(
+        pendingWalletPayment([
+          wallet('succeeded'),
+          { method: 'cash', amount: 1, status: 'pending' },
+        ]),
+      ).toBeUndefined();
     });
 
     it('is not money owed, and can only be asked to cancel (once, outside the cutoff)', () => {
       const now = { date: '2026-10-28', minutes: 600 } as never;
-      const slot = { id: 's-1', date: new Date('2026-10-29T00:00:00Z'), startHour: 18 };
-      const review = row({ payments: [wallet('pending')], slot, bookingSlots: [], cancelRequestedAt: null });
+      const slot = {
+        id: 's-1',
+        date: new Date('2026-10-29T00:00:00Z'),
+        startHour: 18,
+      };
+      const review = row({
+        payments: [wallet('pending')],
+        slot,
+        bookingSlots: [],
+        cancelRequestedAt: null,
+      });
       expect(owedOf(review, review.payments)).toBe(0);
       expect(owedOf(row({ payments: [] }), [])).toBe(6000);
       expect(customerCanCancel(review, now, 2)).toBe(false);
       expect(customerCanRequestCancel(review, now, 2)).toBe(true);
-      expect(customerCanRequestCancel(row({ ...review, cancelRequestedAt: new Date() }), now, 2)).toBe(false);
+      expect(
+        customerCanRequestCancel(
+          row({ ...review, cancelRequestedAt: new Date() }),
+          now,
+          2,
+        ),
+      ).toBe(false);
       expect(customerCanRequestCancel(review, now, 40)).toBe(false);
     });
 
     it('offers no "Pay now" while the venue verifies, but does for the rest after a bKash advance', () => {
-      expect(customerCanPay(row({ payments: [wallet('pending')] }))).toBe(false);
-      expect(customerCanPay(row({ status: 'confirmed', source: 'staff', payments: [{ ...wallet('succeeded'), amount: 2000 }] }))).toBe(true);
+      expect(customerCanPay(row({ payments: [wallet('pending')] }))).toBe(
+        false,
+      );
+      expect(
+        customerCanPay(
+          row({
+            status: 'confirmed',
+            source: 'staff',
+            payments: [{ ...wallet('succeeded'), amount: 2000 }],
+          }),
+        ),
+      ).toBe(true);
     });
   });
 });

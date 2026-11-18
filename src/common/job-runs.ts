@@ -1,5 +1,6 @@
 /** Background jobs whose last run the System page shows. */
-export type JobName = 'slotGeneration' | 'holdExpiry' | 'completion' | 'dueReminders' | 'dueDigest';
+export type JobName =
+  'slotGeneration' | 'holdExpiry' | 'completion' | 'dueReminders' | 'dueDigest';
 
 export interface JobRun {
   lastRunAt: Date;
@@ -12,15 +13,23 @@ export interface JobRun {
 const runs = new Map<JobName, JobRun>();
 
 /** Runs a job and remembers when it ran and whether it threw (it still throws). */
-export async function trackJob<T>(name: JobName, job: () => Promise<T>): Promise<T> {
+export async function trackJob<T>(
+  name: JobName,
+  job: () => Promise<T>,
+): Promise<T> {
   try {
     const result = await job();
     runs.set(name, { lastRunAt: new Date(), ok: true });
     return result;
   } catch (err) {
-    runs.set(name, { lastRunAt: new Date(), ok: false, error: err instanceof Error ? err.message : String(err) });
+    runs.set(name, {
+      lastRunAt: new Date(),
+      ok: false,
+      error: err instanceof Error ? err.message : String(err),
+    });
     throw err;
   }
 }
 
-export const lastJobRun = (name: JobName): JobRun | null => runs.get(name) ?? null;
+export const lastJobRun = (name: JobName): JobRun | null =>
+  runs.get(name) ?? null;

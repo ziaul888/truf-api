@@ -1,6 +1,8 @@
 interface UniqueViolation {
   code?: string;
-  meta?: { driverAdapterError?: { cause?: { constraint?: { index?: string } } } };
+  meta?: {
+    driverAdapterError?: { cause?: { constraint?: { index?: string } } };
+  };
 }
 
 /** The unique index a write violated (e.g. "Booking_liveSlotId_key"), or null if it wasn't a unique violation. */

@@ -17,7 +17,11 @@ export interface ApiError {
 
 export const success = <T>(data: T): ApiSuccess<T> => ({ success: true, data });
 
-export const failure = (error: string, code?: string, details?: ApiFieldError[]): ApiError => ({
+export const failure = (
+  error: string,
+  code?: string,
+  details?: ApiFieldError[],
+): ApiError => ({
   success: false,
   error,
   ...(code && { code }),

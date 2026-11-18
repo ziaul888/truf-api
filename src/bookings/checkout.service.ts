@@ -2,30 +2,63 @@ import { randomUUID } from 'node:crypto';
 import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import { env } from '../config/env.js';
-import { contactEmailOf, upsertCustomerByPhone } from '../customers/customer-upsert.js';
+import {
+  contactEmailOf,
+  upsertCustomerByPhone,
+} from '../customers/customer-upsert.js';
 import type { Ground, Slot } from '../generated/prisma/client.js';
 import { VISIBLE_GROUND } from '../grounds/ground-rules.js';
-import { cardPaymentsEnabled, StripeService } from '../payments/stripe.service.js';
+import {
+  cardPaymentsEnabled,
+  StripeService,
+} from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
-import { assertDayOpen, groundNotFound, slotInPast } from '../slots/slot-rules.js';
+import {
+  assertDayOpen,
+  groundNotFound,
+  slotInPast,
+} from '../slots/slot-rules.js';
 import type { SlotSettings } from '../slots/slots.schemas.js';
 import { slotHour } from '../slots/slot-time.js';
-import { addDays, hasStarted, minutesUntil, venueNow } from '../slots/venue-time.js';
+import {
+  addDays,
+  hasStarted,
+  minutesUntil,
+  venueNow,
+} from '../slots/venue-time.js';
 import { BookingCancellationService } from './booking-cancellation.service.js';
 import { slotLimitOf } from './booking-limits.js';
 import { BookingNotifier } from './booking-notifier.service.js';
 import { BOOKING_INCLUDE, customerCanPay } from './booking.dto.js';
 import {
-  bookingNotFound, bookingNotPending, dueOf, bookingToken, confirmationUrl, isUnderReview, isValidBookingToken, isWalletMethod, methodName,
-  paymentUnderReview, slotNotAvailable, withBookingNumber, type WalletMethod,
+  bookingNotFound,
+  bookingNotPending,
+  dueOf,
+  bookingToken,
+  confirmationUrl,
+  isUnderReview,
+  isValidBookingToken,
+  isWalletMethod,
+  methodName,
+  paymentUnderReview,
+  slotNotAvailable,
+  withBookingNumber,
+  type WalletMethod,
 } from './booking-rules.js';
 import { spanOf, sumPrice, windowTimes } from './booking-slots.js';
 import type { CheckoutInput } from './bookings.schemas.js';
 import { assertCanBookUnpaid } from './checkout-limits.js';
 import { claimSlots, requestedStarts, resolveSlots } from './checkout-slots.js';
 import { assertCashDepositInput } from './cash-deposit.js';
-import { cashDepositPercentOf, depositOf, portalCardOn, portalCashOn, portalWalletNumber, portalWallets } from './portal-methods.js';
+import {
+  cashDepositPercentOf,
+  depositOf,
+  portalCardOn,
+  portalCashOn,
+  portalWalletNumber,
+  portalWallets,
+} from './portal-methods.js';
 
 export interface CheckoutResult {
   bookingId: string;
@@ -56,9 +89,14 @@ export interface CheckoutOptions {
   cashDepositPercent: number | null;
 }
 
-const outsideWindow = (message: string) => new AppError(message, 400, 'OUTSIDE_BOOKING_WINDOW');
+const outsideWindow = (message: string) =>
+  new AppError(message, 400, 'OUTSIDE_BOOKING_WINDOW');
 const emailRequired = () =>
-  new AppError('Enter your email: your booking link is sent there. Or sign in with your phone', 400, 'EMAIL_REQUIRED');
+  new AppError(
+    'Enter your email: your booking link is sent there. Or sign in with your phone',
+    400,
+    'EMAIL_REQUIRED',
+  );
 
 /**
  * Portal checkout.
@@ -89,8 +127,14 @@ export class CheckoutService {
     const settings = await this.settings.get();
     const { serviceFee, holdMinutes } = settings;
     return {
-      cardEnabled: portalCardOn(settings), cashEnabled: portalCashOn(settings), wallets: portalWallets(settings), serviceFee,
-      currency: env.CURRENCY, holdMinutes, maxSlotsPerBooking: slotLimitOf(settings), cashDepositPercent: cashDepositPercentOf(settings),
+      cardEnabled: portalCardOn(settings),
+      cashEnabled: portalCashOn(settings),
+      wallets: portalWallets(settings),
+      serviceFee,
+      currency: env.CURRENCY,
+      holdMinutes,
+      maxSlotsPerBooking: slotLimitOf(settings),
+      cashDepositPercent: cashDepositPercentOf(settings),
     };
   }
 
@@ -100,43 +144,87 @@ export class CheckoutService {
    * is optional only when signed in (blank: their stored one, else none); a guest card checkout
    * needs one, as the booking link only reaches them by email (`400 EMAIL_REQUIRED`).
    */
-  async start(body: CheckoutInput, verifiedPhone?: string): Promise<CheckoutResult> {
-    const input = verifiedPhone ? { ...body, customerPhone: verifiedPhone } : body;
+  async start(
+    body: CheckoutInput,
+    verifiedPhone?: string,
+  ): Promise<CheckoutResult> {
+    const input = verifiedPhone
+      ? { ...body, customerPhone: verifiedPhone }
+      : body;
     const settings = await this.settings.get();
     assertMethodAvailable(input.paymentMethod, settings);
     assertCashDepositInput(input, settings);
     await assertCanBookUnpaid(this.prisma, input.paymentMethod, verifiedPhone);
     if (!verifiedPhone && !input.customerEmail) throw emailRequired();
-    const ground = await this.prisma.ground.findFirst({ where: { id: input.groundId, ...VISIBLE_GROUND } });
+    const ground = await this.prisma.ground.findFirst({
+      where: { id: input.groundId, ...VISIBLE_GROUND },
+    });
     if (!ground) throw groundNotFound();
-    const slots = await resolveSlots(this.prisma, ground.id, input.date, requestedStarts(input, slotLimitOf(settings)));
+    const slots = await resolveSlots(
+      this.prisma,
+      ground.id,
+      input.date,
+      requestedStarts(input, slotLimitOf(settings)),
+    );
     for (const slot of slots) assertBookable(slot, input.date, settings);
     assertDayOpen(ground, input.date);
 
-    const bookingId = await this.reserve(input, ground, slots, settings, Boolean(verifiedPhone));
+    const bookingId = await this.reserve(
+      input,
+      ground,
+      slots,
+      settings,
+      Boolean(verifiedPhone),
+    );
     if (input.paymentMethod !== 'card') {
       await this.notifier.received(bookingId);
       await this.notifier.newBookingToAdmins(bookingId);
-      return { bookingId, paymentMethod: input.paymentMethod, checkoutUrl: null, confirmationUrl: confirmationUrl(bookingId) };
+      return {
+        bookingId,
+        paymentMethod: input.paymentMethod,
+        checkoutUrl: null,
+        confirmationUrl: confirmationUrl(bookingId),
+      };
     }
     return this.startCard(bookingId, input, ground, slots, settings);
   }
 
   /** Opens the Stripe session for a held booking; if that fails the slots go back straight away. */
-  private async startCard(bookingId: string, input: CheckoutInput, ground: Ground, slots: Slot[], settings: SlotSettings): Promise<CheckoutResult> {
+  private async startCard(
+    bookingId: string,
+    input: CheckoutInput,
+    ground: Ground,
+    slots: Slot[],
+    settings: SlotSettings,
+  ): Promise<CheckoutResult> {
     const { startTime, endTime } = windowTimes(spanOf(slots));
     try {
       const session = await this.stripe.createCheckoutSession({
-        bookingId, total: sumPrice(slots) + settings.serviceFee, customerEmail: input.customerEmail,
+        bookingId,
+        total: sumPrice(slots) + settings.serviceFee,
+        customerEmail: input.customerEmail,
         description: `${ground.name}, ${input.date} ${startTime}–${endTime}`,
         successUrl: `${env.PUBLIC_APP_URL}/confirmation/${bookingId}?token=${bookingToken(bookingId)}`,
         cancelUrl: `${env.PUBLIC_APP_URL}/grounds/${ground.id}`,
       });
-      await this.prisma.booking.update({ where: { id: bookingId }, data: { stripeCheckoutSessionId: session.id } });
-      return { bookingId, paymentMethod: 'card', checkoutUrl: session.url, confirmationUrl: confirmationUrl(bookingId) };
+      await this.prisma.booking.update({
+        where: { id: bookingId },
+        data: { stripeCheckoutSessionId: session.id },
+      });
+      return {
+        bookingId,
+        paymentMethod: 'card',
+        checkoutUrl: session.url,
+        confirmationUrl: confirmationUrl(bookingId),
+      };
     } catch (err) {
       // No way to pay: give every slot back straight away.
-      await this.cancellation.cancel(bookingId, { actorId: null, reason: 'Payment could not be started', refund: false, notify: false });
+      await this.cancellation.cancel(bookingId, {
+        actorId: null,
+        reason: 'Payment could not be started',
+        refund: false,
+        notify: false,
+      });
       throw err;
     }
   }
@@ -145,40 +233,75 @@ export class CheckoutService {
    * "Complete payment" on a pending booking: the open Stripe link while the hold lasts. Needs only the
    * Stripe keys: a checkout already under way can finish after the admin switches card off.
    */
-  async resume(bookingId: string, token: string | undefined): Promise<CheckoutResult> {
+  async resume(
+    bookingId: string,
+    token: string | undefined,
+  ): Promise<CheckoutResult> {
     if (!cardPaymentsEnabled()) throw cardNotAvailable();
     if (!isValidBookingToken(bookingId, token)) throw bookingNotFound();
-    const booking = await this.prisma.booking.findUnique({ where: { id: bookingId } });
+    const booking = await this.prisma.booking.findUnique({
+      where: { id: bookingId },
+    });
     if (!booking) throw bookingNotFound();
-    const url = booking.status === 'pending' && booking.stripeCheckoutSessionId
-      ? await this.stripe.openSessionUrl(booking.stripeCheckoutSessionId)
-      : null;
-    if (!url) throw bookingNotPending('This booking is no longer waiting for payment');
-    return { bookingId, paymentMethod: 'card', checkoutUrl: url, confirmationUrl: confirmationUrl(bookingId) };
+    const url =
+      booking.status === 'pending' && booking.stripeCheckoutSessionId
+        ? await this.stripe.openSessionUrl(booking.stripeCheckoutSessionId)
+        : null;
+    if (!url)
+      throw bookingNotPending('This booking is no longer waiting for payment');
+    return {
+      bookingId,
+      paymentMethod: 'card',
+      checkoutUrl: url,
+      confirmationUrl: confirmationUrl(bookingId),
+    };
   }
 
   /**
    * "Pay now" on the customer's booking page: a Stripe Checkout Session for what's still due
    * (pay-at-venue, unpaid staff bookings, or the rest after an advance). The webhook records it.
    */
-  async payDue(bookingId: string, token: string | undefined): Promise<DuePaymentResult> {
+  async payDue(
+    bookingId: string,
+    token: string | undefined,
+  ): Promise<DuePaymentResult> {
     if (!portalCardOn(await this.settings.get())) throw cardNotAvailable();
     if (!isValidBookingToken(bookingId, token)) throw bookingNotFound();
-    const booking = await this.prisma.booking.findFirst({ where: { id: bookingId, deletedAt: null }, include: BOOKING_INCLUDE });
+    const booking = await this.prisma.booking.findFirst({
+      where: { id: bookingId, deletedAt: null },
+      include: BOOKING_INCLUDE,
+    });
     if (!booking) throw bookingNotFound();
-    if (isUnderReview(booking, booking.payments)) throw paymentUnderReview('The venue is still verifying your payment');
+    if (isUnderReview(booking, booking.payments))
+      throw paymentUnderReview('The venue is still verifying your payment');
     // A card checkout still in progress: hand back its open Stripe page.
-    if (booking.source === 'portal' && !booking.payAtVenue && booking.status === 'pending') return this.resume(bookingId, token);
-    if (!customerCanPay(booking)) throw new AppError('Nothing is due on this booking', 409, 'NOTHING_DUE');
+    if (
+      booking.source === 'portal' &&
+      !booking.payAtVenue &&
+      booking.status === 'pending'
+    )
+      return this.resume(bookingId, token);
+    if (!customerCanPay(booking))
+      throw new AppError('Nothing is due on this booking', 409, 'NOTHING_DUE');
 
     const due = dueOf(booking, booking.payments);
     const link = confirmationUrl(bookingId);
     const session = await this.stripe.createCheckoutSession({
-      bookingId, purpose: 'due', total: due, customerEmail: booking.contactEmail,
+      bookingId,
+      purpose: 'due',
+      total: due,
+      customerEmail: booking.contactEmail,
       description: `Booking ${booking.bookingNumber}: ${booking.ground.name}`,
-      successUrl: link, cancelUrl: link,
+      successUrl: link,
+      cancelUrl: link,
     });
-    return { bookingId, paymentMethod: 'card', checkoutUrl: session.url, confirmationUrl: link, amount: due };
+    return {
+      bookingId,
+      paymentMethod: 'card',
+      checkoutUrl: session.url,
+      confirmationUrl: link,
+      amount: due,
+    };
   }
 
   /**
@@ -187,44 +310,104 @@ export class CheckoutService {
    * conditional update takes all of them, so a slot taken meanwhile rolls the whole booking back
    * (409 SLOT_NOT_AVAILABLE), as does a TrxID already used (409 REFERENCE_ALREADY_USED).
    */
-  private reserve(input: CheckoutInput, ground: Ground, slots: Slot[], settings: SlotSettings, verified: boolean): Promise<string> {
+  private reserve(
+    input: CheckoutInput,
+    ground: Ground,
+    slots: Slot[],
+    settings: SlotSettings,
+    verified: boolean,
+  ): Promise<string> {
     const bookingId = randomUUID();
     const amount = sumPrice(slots);
     const total = amount + settings.serviceFee;
     const primary = slots[0]!;
-    const slotData = input.paymentMethod !== 'card'
-      ? { status: 'booked' as const }
-      : { status: 'held' as const, heldUntil: new Date(Date.now() + settings.holdMinutes * 60_000), heldByBookingId: bookingId };
-    return withBookingNumber((bookingNumber) => this.prisma.$transaction(async (tx) => {
-      await claimSlots(tx, slots, slotData);
-      const contact = { name: input.customerName, email: input.customerEmail, phone: input.customerPhone };
-      const customerId = await upsertCustomerByPhone(tx, contact, verified);
-      const contactEmail = await contactEmailOf(tx, customerId, contact.email);
-      await tx.booking.create({
-        data: {
-          id: bookingId, bookingNumber, source: 'portal', groundId: ground.id, slotId: primary.id, liveSlotId: primary.id,
-          customerId, contactName: contact.name, contactEmail, contactPhone: contact.phone,
-          amount, serviceFee: settings.serviceFee, total, payAtVenue: input.paymentMethod === 'cash',
-          bookingSlots: { create: slots.map((s) => ({ slotId: s.id, liveSlotId: s.id, price: s.price })) },
-          payments: walletPaymentOf(input, total, cashDepositPercentOf(settings)),
-          events: { create: { type: 'created', detail: createdDetail(input) } },
-        },
-      });
-      return bookingId;
-    }));
+    const slotData =
+      input.paymentMethod !== 'card'
+        ? { status: 'booked' as const }
+        : {
+            status: 'held' as const,
+            heldUntil: new Date(Date.now() + settings.holdMinutes * 60_000),
+            heldByBookingId: bookingId,
+          };
+    return withBookingNumber((bookingNumber) =>
+      this.prisma.$transaction(async (tx) => {
+        await claimSlots(tx, slots, slotData);
+        const contact = {
+          name: input.customerName,
+          email: input.customerEmail,
+          phone: input.customerPhone,
+        };
+        const customerId = await upsertCustomerByPhone(tx, contact, verified);
+        const contactEmail = await contactEmailOf(
+          tx,
+          customerId,
+          contact.email,
+        );
+        await tx.booking.create({
+          data: {
+            id: bookingId,
+            bookingNumber,
+            source: 'portal',
+            groundId: ground.id,
+            slotId: primary.id,
+            liveSlotId: primary.id,
+            customerId,
+            contactName: contact.name,
+            contactEmail,
+            contactPhone: contact.phone,
+            amount,
+            serviceFee: settings.serviceFee,
+            total,
+            payAtVenue: input.paymentMethod === 'cash',
+            bookingSlots: {
+              create: slots.map((s) => ({
+                slotId: s.id,
+                liveSlotId: s.id,
+                price: s.price,
+              })),
+            },
+            payments: walletPaymentOf(
+              input,
+              total,
+              cashDepositPercentOf(settings),
+            ),
+            events: {
+              create: { type: 'created', detail: createdDetail(input) },
+            },
+          },
+        });
+        return bookingId;
+      }),
+    );
   }
 }
 
-const cardNotAvailable = () => new AppError('Card payment is not available right now', 400, 'CARD_NOT_AVAILABLE');
+const cardNotAvailable = () =>
+  new AppError(
+    'Card payment is not available right now',
+    400,
+    'CARD_NOT_AVAILABLE',
+  );
 
 /** Each payment method only while the portal offers it (`portal-methods.ts`). */
-function assertMethodAvailable(method: CheckoutInput['paymentMethod'], settings: SlotSettings) {
+function assertMethodAvailable(
+  method: CheckoutInput['paymentMethod'],
+  settings: SlotSettings,
+) {
   if (method === 'card' && !portalCardOn(settings)) throw cardNotAvailable();
   if (method === 'cash' && !portalCashOn(settings)) {
-    throw new AppError('Paying at the venue is not available right now. Please pay by card', 400, 'CASH_NOT_AVAILABLE');
+    throw new AppError(
+      'Paying at the venue is not available right now. Please pay by card',
+      400,
+      'CASH_NOT_AVAILABLE',
+    );
   }
   if (isWalletMethod(method) && !portalWalletNumber(settings, method)) {
-    throw new AppError(`${methodName(method)} payment is not available right now`, 400, 'WALLET_NOT_AVAILABLE');
+    throw new AppError(
+      `${methodName(method)} payment is not available right now`,
+      400,
+      'WALLET_NOT_AVAILABLE',
+    );
   }
 }
 
@@ -232,16 +415,29 @@ function assertMethodAvailable(method: CheckoutInput['paymentMethod'], settings:
  * bKash / Nagad: the money the customer says they sent, pending until staff verify it. For a bKash / Nagad
  * booking that is the whole total; for cash with a deposit (`depositPercent`, already validated) just the deposit.
  */
-function walletPaymentOf(input: CheckoutInput, total: number, depositPercent: number | null) {
+function walletPaymentOf(
+  input: CheckoutInput,
+  total: number,
+  depositPercent: number | null,
+) {
   const wallet = isWalletMethod(input.paymentMethod)
     ? { method: input.paymentMethod, amount: total }
-    : input.paymentMethod === 'cash' && input.depositMethod && depositPercent !== null
-      ? { method: input.depositMethod, amount: depositOf(total, depositPercent) }
+    : input.paymentMethod === 'cash' &&
+        input.depositMethod &&
+        depositPercent !== null
+      ? {
+          method: input.depositMethod,
+          amount: depositOf(total, depositPercent),
+        }
       : null;
   if (!wallet) return undefined;
   return {
     create: {
-      ...wallet, currency: env.CURRENCY, status: 'pending' as const, reference: input.reference!, payerNumber: input.payerNumber!,
+      ...wallet,
+      currency: env.CURRENCY,
+      status: 'pending' as const,
+      reference: input.reference!,
+      payerNumber: input.payerNumber!,
     },
   };
 }
@@ -262,9 +458,16 @@ function assertBookable(slot: Slot, date: string, settings: SlotSettings) {
   if (hasStarted(now, date, slotHour(slot))) throw slotInPast();
   if (slot.status !== 'available') throw slotNotAvailable();
   if (date > addDays(now.date, settings.advanceBookingDays)) {
-    throw outsideWindow(`Bookings open ${settings.advanceBookingDays} days ahead`);
+    throw outsideWindow(
+      `Bookings open ${settings.advanceBookingDays} days ahead`,
+    );
   }
-  if (minutesUntil(now, date, slotHour(slot)) <= settings.cancellationCutoffHours * 60) {
-    throw outsideWindow(`Online bookings close ${settings.cancellationCutoffHours} hours before the start`);
+  if (
+    minutesUntil(now, date, slotHour(slot)) <=
+    settings.cancellationCutoffHours * 60
+  ) {
+    throw outsideWindow(
+      `Online bookings close ${settings.cancellationCutoffHours} hours before the start`,
+    );
   }
 }

@@ -1,21 +1,64 @@
 import { Injectable } from '@nestjs/common';
 import { owedOf } from '../bookings/booking-rules.js';
-import type { Closure, Prisma, SlotStatus, Sport } from '../generated/prisma/client.js';
+import type {
+  Closure,
+  Prisma,
+  SlotStatus,
+  Sport,
+} from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { loadMoney, moneyTotals, type MoneyEvent } from '../reports/report-data.js';
-import { endMinutesOf, slotHour, slotTimes, type SlotTimes } from '../slots/slot-time.js';
-import { minutesUntil, toDbDate, venueNow, type IsoDate, type VenueNow } from '../slots/venue-time.js';
+import {
+  loadMoney,
+  moneyTotals,
+  type MoneyEvent,
+} from '../reports/report-data.js';
+import {
+  endMinutesOf,
+  slotHour,
+  slotTimes,
+  type SlotTimes,
+} from '../slots/slot-time.js';
+import {
+  minutesUntil,
+  toDbDate,
+  venueNow,
+  type IsoDate,
+  type VenueNow,
+} from '../slots/venue-time.js';
 
 const LIVE_BOOKING_SELECT = {
-  id: true, bookingNumber: true, contactName: true, status: true, total: true,
-  payments: { where: { deletedAt: null }, select: { amount: true, status: true, method: true } },
+  id: true,
+  bookingNumber: true,
+  contactName: true,
+  status: true,
+  total: true,
+  payments: {
+    where: { deletedAt: null },
+    select: { amount: true, status: true, method: true },
+  },
 } satisfies Prisma.BookingSelect;
 
 const TODAY_SLOT_SELECT = {
-  groundId: true, startHour: true, startMinute: true, durationMinutes: true, status: true, closureId: true,
+  groundId: true,
+  startHour: true,
+  startMinute: true,
+  durationMinutes: true,
+  status: true,
+  closureId: true,
   // The live booking through its BookingSlot (any slot of a multi-slot booking); `bookings` finds one an older release made without it.
-  bookingSlots: { where: { liveSlotId: { not: null }, booking: { status: { not: 'cancelled' } } }, take: 1, select: { booking: { select: LIVE_BOOKING_SELECT } } },
-  bookings: { where: { liveSlotId: { not: null } }, take: 1, select: LIVE_BOOKING_SELECT },
+  bookingSlots: {
+    where: {
+      liveSlotId: { not: null },
+      booking: { status: { not: 'cancelled' } },
+    },
+    take: 1,
+    select: { booking: { select: LIVE_BOOKING_SELECT } },
+  },
+  bookings: {
+    where: { liveSlotId: { not: null } },
+    take: 1,
+    select: LIVE_BOOKING_SELECT,
+  },
 } satisfies Prisma.SlotSelect;
 
 type TodaySlot = Prisma.SlotGetPayload<{ select: typeof TODAY_SLOT_SELECT }>;
@@ -50,12 +93,22 @@ export interface DashboardToday {
   grounds: GroundToday[];
 }
 
-type Ground = { id: string; name: string; sport: Sport; format: string | null; openingHour: number; closingHour: number };
+type Ground = {
+  id: string;
+  name: string;
+  sport: Sport;
+  format: string | null;
+  openingHour: number;
+  closingHour: number;
+};
 
 const endOf = (s: TodaySlot) => endMinutesOf(s) / 60;
-const liveBookingOf = (s: TodaySlot) => s.bookingSlots[0]?.booking ?? s.bookings[0];
+const liveBookingOf = (s: TodaySlot) =>
+  s.bookingSlots[0]?.booking ?? s.bookings[0];
 const playing = (s: TodaySlot): PlayingBooking => ({
-  bookingId: liveBookingOf(s)!.id, bookingNumber: liveBookingOf(s)!.bookingNumber, customerName: liveBookingOf(s)!.contactName,
+  bookingId: liveBookingOf(s)!.id,
+  bookingNumber: liveBookingOf(s)!.bookingNumber,
+  customerName: liveBookingOf(s)!.contactName,
   ...slotTimes(s),
 });
 
@@ -69,42 +122,98 @@ export class DashboardTodayService {
     const date = toDbDate(now.date);
     const [grounds, slots, closures, money] = await Promise.all([
       this.prisma.ground.findMany({
-        where: { isActive: true }, orderBy: { name: 'asc' },
-        select: { id: true, name: true, sport: true, format: true, openingHour: true, closingHour: true },
+        where: { isActive: true },
+        orderBy: { name: 'asc' },
+        select: {
+          id: true,
+          name: true,
+          sport: true,
+          format: true,
+          openingHour: true,
+          closingHour: true,
+        },
       }),
-      this.prisma.slot.findMany({ where: { date, ground: { isActive: true } }, orderBy: [{ startHour: 'asc' }, { startMinute: 'asc' }], select: TODAY_SLOT_SELECT }),
-      this.prisma.closure.findMany({ where: { liftedAt: null, fromDate: { lte: date }, toDate: { gte: date } } }),
+      this.prisma.slot.findMany({
+        where: { date, ground: { isActive: true } },
+        orderBy: [{ startHour: 'asc' }, { startMinute: 'asc' }],
+        select: TODAY_SLOT_SELECT,
+      }),
+      this.prisma.closure.findMany({
+        where: {
+          liftedAt: null,
+          fromDate: { lte: date },
+          toDate: { gte: date },
+        },
+      }),
       loadMoney(this.prisma, { from: now.date, to: now.date }),
     ]);
     return {
-      date: now.date, nowHour: Math.floor(now.minutes / 60),
+      date: now.date,
+      nowHour: Math.floor(now.minutes / 60),
       grounds: grounds.map((g) => groundToday(g, slots, closures, money, now)),
     };
   }
 }
 
 /** One ground's day. Exported for tests. */
-export function groundToday(g: Ground, all: TodaySlot[], closures: Closure[], money: MoneyEvent[], now: VenueNow): GroundToday {
-  const closure = closures.find((c) => c.groundIds.length === 0 || c.groundIds.includes(g.id));
+export function groundToday(
+  g: Ground,
+  all: TodaySlot[],
+  closures: Closure[],
+  money: MoneyEvent[],
+  now: VenueNow,
+): GroundToday {
+  const closure = closures.find(
+    (c) => c.groundIds.length === 0 || c.groundIds.includes(g.id),
+  );
   // A closure's own blocks aren't shown; a booking it had to skip still is.
-  const slots = all.filter((s) => s.groundId === g.id && !(closure && s.closureId));
-  const counts = { total: slots.length, available: 0, held: 0, booked: 0, blocked: 0 };
+  const slots = all.filter(
+    (s) => s.groundId === g.id && !(closure && s.closureId),
+  );
+  const counts = {
+    total: slots.length,
+    available: 0,
+    held: 0,
+    booked: 0,
+    blocked: 0,
+  };
   for (const s of slots) counts[s.status] += 1;
-  const hours = (list: TodaySlot[]) => list.reduce((sum, s) => sum + s.durationMinutes / 60, 0);
+  const hours = (list: TodaySlot[]) =>
+    list.reduce((sum, s) => sum + s.durationMinutes / 60, 0);
   const started = (hour: number) => minutesUntil(now, now.date, hour) <= 0;
-  const booked = slots.filter((s) => s.status === 'booked' && liveBookingOf(s) !== undefined);
-  const current = booked.find((s) => started(slotHour(s)) && !started(endOf(s)));
+  const booked = slots.filter(
+    (s) => s.status === 'booked' && liveBookingOf(s) !== undefined,
+  );
+  const current = booked.find(
+    (s) => started(slotHour(s)) && !started(endOf(s)),
+  );
   const next = booked.find((s) => !started(slotHour(s)));
   return {
-    groundId: g.id, groundName: g.name, sport: g.sport, format: g.format, openingHour: g.openingHour, closingHour: g.closingHour,
-    closedReason: closure ? (closure.publicLabel ?? 'Closed') : slots.length === 0 ? 'Not open today' : null,
+    groundId: g.id,
+    groundName: g.name,
+    sport: g.sport,
+    format: g.format,
+    openingHour: g.openingHour,
+    closingHour: g.closingHour,
+    closedReason: closure
+      ? (closure.publicLabel ?? 'Closed')
+      : slots.length === 0
+        ? 'Not open today'
+        : null,
     slots: counts,
     bookedHours: hours(slots.filter((s) => s.status === 'booked')),
-    remainingFreeHours: hours(slots.filter((s) => s.status === 'available' && !started(slotHour(s)))),
+    remainingFreeHours: hours(
+      slots.filter((s) => s.status === 'available' && !started(slotHour(s))),
+    ),
     revenueToday: moneyTotals(money.filter((e) => e.groundId === g.id)).revenue,
     current: current ? playing(current) : null,
     // A bKash / Nagad payment being verified is not "due": no Collect button for it.
-    next: next ? { ...playing(next), due: owedOf(liveBookingOf(next)!, liveBookingOf(next)!.payments) } : null,
+    next: next
+      ? {
+          ...playing(next),
+          due: owedOf(liveBookingOf(next)!, liveBookingOf(next)!.payments),
+        }
+      : null,
     timeline: slots.map((s) => ({ ...slotTimes(s), status: s.status })),
   };
 }

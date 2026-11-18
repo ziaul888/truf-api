@@ -10,6 +10,8 @@ async function bootstrap() {
   if (env.TRUST_PROXY_HOPS > 0) app.set('trust proxy', env.TRUST_PROXY_HOPS);
   configureApp(app);
   await app.listen(env.PORT);
-  new Logger('Bootstrap').log(`API ready on http://localhost:${env.PORT}/api/v1`);
+  new Logger('Bootstrap').log(
+    `API ready on http://localhost:${env.PORT}/api/v1`,
+  );
 }
 await bootstrap();

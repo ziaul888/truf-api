@@ -18,4 +18,9 @@ export interface JwtPayload {
 
 export type AuthedRequest = Request & { user?: AuthUser };
 
-export const toAuthUser = ({ id, email, name, role }: User): AuthUser => ({ id, email, name, role });
+export const toAuthUser = ({ id, email, name, role }: User): AuthUser => ({
+  id,
+  email,
+  name,
+  role,
+});

@@ -5,13 +5,25 @@ import { AuthGuard, Roles } from './auth.guard.js';
 import type { AuthService } from './auth.service.js';
 import type { AuthedRequest, AuthUser } from './auth.types.js';
 
-const manager: AuthUser = { id: 'u1', email: 'm@turf.test', name: 'M', role: 'manager' };
+const manager: AuthUser = {
+  id: 'u1',
+  email: 'm@turf.test',
+  name: 'M',
+  role: 'manager',
+};
 
-class OpenController { handler() {} }
-class AdminController { handler() {} }
+class OpenController {
+  handler() {}
+}
+class AdminController {
+  handler() {}
+}
 Roles('admin')(AdminController);
 
-function run(controller: new () => { handler(): void }, authenticate: AuthService['authenticate']) {
+function run(
+  controller: new () => { handler(): void },
+  authenticate: AuthService['authenticate'],
+) {
   const req = { cookies: { admin_token: 'tok' } } as unknown as AuthedRequest;
   const ctx = {
     switchToHttp: () => ({ getRequest: () => req }),
@@ -40,13 +52,23 @@ describe('AuthGuard', () => {
   });
 
   it('allows the role the route asks for', async () => {
-    const { result } = run(AdminController, vi.fn().mockResolvedValue({ ...manager, role: 'admin' }));
+    const { result } = run(
+      AdminController,
+      vi.fn().mockResolvedValue({ ...manager, role: 'admin' }),
+    );
     await expect(result).resolves.toBe(true);
   });
 
   it('passes on the 401 when the user is not signed in', async () => {
-    const unauthenticated = new AppError('Please sign in', 401, 'UNAUTHENTICATED');
-    const { result } = run(OpenController, vi.fn().mockRejectedValue(unauthenticated));
+    const unauthenticated = new AppError(
+      'Please sign in',
+      401,
+      'UNAUTHENTICATED',
+    );
+    const { result } = run(
+      OpenController,
+      vi.fn().mockRejectedValue(unauthenticated),
+    );
     await expect(result).rejects.toBe(unauthenticated);
   });
 });

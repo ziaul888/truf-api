@@ -1,19 +1,47 @@
 import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
-import type { Prisma, Slot, SlotEventAction } from '../generated/prisma/client.js';
+import type {
+  Prisma,
+  Slot,
+  SlotEventAction,
+} from '../generated/prisma/client.js';
 import { isOpenOn } from '../grounds/ground-schedule.js';
 import { BookingCancellationService } from '../bookings/booking-cancellation.service.js';
-import { liveSlots, windowHasStarted, windowOf } from '../bookings/booking-slots.js';
+import {
+  liveSlots,
+  windowHasStarted,
+  windowOf,
+} from '../bookings/booking-slots.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SlotSettingsService } from './slot-settings.service.js';
 import { SLOT_INCLUDE, toSlotDto, type SlotDto } from './slot.dto.js';
 import { SlotGeneratorService } from './slot-generator.service.js';
 import {
-  assertRange, eventRows, groundClosed, groundNotFound, slotInPast, slotNotFound, UNBLOCK_DATA,
+  assertRange,
+  eventRows,
+  groundClosed,
+  groundNotFound,
+  slotInPast,
+  slotNotFound,
+  UNBLOCK_DATA,
 } from './slot-rules.js';
-import type { BlockSlotInput, BulkBlockInput, BulkSlotsInput, BulkUnblockInput } from './slots.schemas.js';
+import type {
+  BlockSlotInput,
+  BulkBlockInput,
+  BulkSlotsInput,
+  BulkUnblockInput,
+} from './slots.schemas.js';
 import { slotHour } from './slot-time.js';
-import { datesBetween, fromDbDate, hasStarted, toDbDate, venueNow, weekdayOf, type IsoDate, type VenueNow } from './venue-time.js';
+import {
+  datesBetween,
+  fromDbDate,
+  hasStarted,
+  toDbDate,
+  venueNow,
+  weekdayOf,
+  type IsoDate,
+  type VenueNow,
+} from './venue-time.js';
 
 /** A recurring block may run at most a year. */
 export const MAX_RECURRING_DAYS = 366;
@@ -37,17 +65,40 @@ export interface BulkBlockResult {
 }
 
 const hasBooking = () =>
-  new AppError('This slot is booked. Send cancelBooking: true to cancel and refund the booking', 409, 'SLOT_HAS_BOOKING');
+  new AppError(
+    'This slot is booked. Send cancelBooking: true to cancel and refund the booking',
+    409,
+    'SLOT_HAS_BOOKING',
+  );
 const bookingInProgress = () =>
-  new AppError('This booking has several slots and has already started. Blocking one slot would cancel and refund the whole booking', 409, 'BOOKING_IN_PROGRESS');
-const SLOT_CLOCK = { id: true, date: true, startHour: true, startMinute: true, durationMinutes: true } as const;
-const slotHeld = () => new AppError('A customer is paying for this slot right now. Try again in a few minutes', 409, 'SLOT_NOT_AVAILABLE');
+  new AppError(
+    'This booking has several slots and has already started. Blocking one slot would cancel and refund the whole booking',
+    409,
+    'BOOKING_IN_PROGRESS',
+  );
+const SLOT_CLOCK = {
+  id: true,
+  date: true,
+  startHour: true,
+  startMinute: true,
+  durationMinutes: true,
+} as const;
+const slotHeld = () =>
+  new AppError(
+    'A customer is paying for this slot right now. Try again in a few minutes',
+    409,
+    'SLOT_NOT_AVAILABLE',
+  );
 
 /** Reason and note of a block (the cancelBooking flag only applies to blocking one slot). */
 type BlockFields = Pick<BlockSlotInput, 'reason' | 'note'>;
 
 const blockData = (actorId: string, { reason, note }: BlockFields) => ({
-  status: 'blocked' as const, blockReason: reason, blockNote: note ?? null, blockedById: actorId, blockedAt: new Date(),
+  status: 'blocked' as const,
+  blockReason: reason,
+  blockNote: note ?? null,
+  blockedById: actorId,
+  blockedAt: new Date(),
 });
 @Injectable()
 export class SlotBlocksService {
@@ -58,14 +109,24 @@ export class SlotBlocksService {
     private readonly settings: SlotSettingsService,
   ) {}
 
-  async block(actorId: string, id: string, input: Omit<BlockSlotInput, 'cancelBooking'> & { cancelBooking?: boolean }): Promise<BlockResult> {
+  async block(
+    actorId: string,
+    id: string,
+    input: Omit<BlockSlotInput, 'cancelBooking'> & { cancelBooking?: boolean },
+  ): Promise<BlockResult> {
     const current = await this.upcomingSlot(this.prisma, id);
-    if (current.status === 'booked' && input.cancelBooking) return this.blockOverBooking(actorId, current, input);
+    if (current.status === 'booked' && input.cancelBooking)
+      return this.blockOverBooking(actorId, current, input);
     await this.prisma.$transaction(async (tx) => {
       const slot = await this.upcomingSlot(tx, id);
       if (slot.status === 'booked') throw hasBooking();
       if (slot.status === 'held') throw slotHeld();
-      if (slot.status === 'blocked') throw new AppError('This slot is already blocked', 409, 'SLOT_ALREADY_BLOCKED');
+      if (slot.status === 'blocked')
+        throw new AppError(
+          'This slot is already blocked',
+          409,
+          'SLOT_ALREADY_BLOCKED',
+        );
       await this.apply(tx, [slot], 'block', actorId, input);
     });
     return { slot: await this.dto(id), cancelledBooking: false };
@@ -75,14 +136,22 @@ export class SlotBlocksService {
    * Cancels the live booking with a full refund (emailing the customer if notifyCustomerOnBlock), and blocks the slot.
    * A booking is cancelled whole: if it holds other slots too, they are released (available), only this one is blocked.
    */
-  private async blockOverBooking(actorId: string, slot: Slot, input: BlockFields): Promise<BlockResult> {
+  private async blockOverBooking(
+    actorId: string,
+    slot: Slot,
+    input: BlockFields,
+  ): Promise<BlockResult> {
     const bookingId = await this.liveBookingIdOf(slot.id);
     if (!bookingId) throw hasBooking();
     await this.assertNotInProgress(bookingId);
     const { notifyCustomerOnBlock } = await this.settings.get();
     await this.cancellation.cancel(bookingId, {
-      actorId, reason: `Slot blocked (${input.reason})`, refund: true, notify: notifyCustomerOnBlock,
-      blockSlot: { reason: input.reason, note: input.note }, blockSlotId: slot.id,
+      actorId,
+      reason: `Slot blocked (${input.reason})`,
+      refund: true,
+      notify: notifyCustomerOnBlock,
+      blockSlot: { reason: input.reason, note: input.note },
+      blockSlotId: slot.id,
     });
     return { slot: await this.dto(slot.id), cancelledBooking: true };
   }
@@ -91,119 +160,227 @@ export class SlotBlocksService {
   private async assertNotInProgress(bookingId: string) {
     const booking = await this.prisma.booking.findUnique({
       where: { id: bookingId },
-      select: { slot: { select: SLOT_CLOCK }, amount: true, cancelledAt: true, bookingSlots: { select: { price: true, cancelledAt: true, slot: { select: SLOT_CLOCK } } } },
+      select: {
+        slot: { select: SLOT_CLOCK },
+        amount: true,
+        cancelledAt: true,
+        bookingSlots: {
+          select: {
+            price: true,
+            cancelledAt: true,
+            slot: { select: SLOT_CLOCK },
+          },
+        },
+      },
     });
-    if (booking && liveSlots(booking).length > 1 && windowHasStarted(venueNow(), windowOf(booking))) throw bookingInProgress();
+    if (
+      booking &&
+      liveSlots(booking).length > 1 &&
+      windowHasStarted(venueNow(), windowOf(booking))
+    )
+      throw bookingInProgress();
   }
 
   /** The live booking holding the slot: through its BookingSlot, or (made by an older release without one) its primary slot. */
   private async liveBookingIdOf(slotId: string): Promise<string | null> {
-    const link = await this.prisma.bookingSlot.findFirst({ where: { liveSlotId: slotId, booking: { status: { not: 'cancelled' } } }, select: { bookingId: true } });
+    const link = await this.prisma.bookingSlot.findFirst({
+      where: { liveSlotId: slotId, booking: { status: { not: 'cancelled' } } },
+      select: { bookingId: true },
+    });
     if (link) return link.bookingId;
-    return (await this.prisma.booking.findFirst({ where: { liveSlotId: slotId }, select: { id: true } }))?.id ?? null;
+    return (
+      (
+        await this.prisma.booking.findFirst({
+          where: { liveSlotId: slotId },
+          select: { id: true },
+        })
+      )?.id ?? null
+    );
   }
 
   /** Back to `available`. A booking cancelled by the block is not restored. */
   async unblock(actorId: string, id: string): Promise<SlotDto> {
     await this.prisma.$transaction(async (tx) => {
       const slot = await this.upcomingSlot(tx, id);
-      if (slot.status !== 'blocked') throw new AppError('This slot is not blocked', 409, 'SLOT_NOT_BLOCKED');
+      if (slot.status !== 'blocked')
+        throw new AppError('This slot is not blocked', 409, 'SLOT_NOT_BLOCKED');
       await this.apply(tx, [slot], 'unblock', actorId);
     });
     return this.dto(id);
   }
 
   /** Blocks or unblocks each id on its own, with the single-slot rules; reports failures per id. */
-  async bulkById(actorId: string, { ids, action, reason, note }: BulkSlotsInput): Promise<BulkByIdResult> {
+  async bulkById(
+    actorId: string,
+    { ids, action, reason, note }: BulkSlotsInput,
+  ): Promise<BulkByIdResult> {
     const result: BulkByIdResult = { done: 0, failed: [] };
     for (const id of ids) {
       try {
-        if (action === 'block') await this.block(actorId, id, { reason: reason!, note });
+        if (action === 'block')
+          await this.block(actorId, id, { reason: reason!, note });
         else await this.unblock(actorId, id);
         result.done++;
       } catch (err) {
         if (!(err instanceof AppError)) throw err;
-        result.failed.push({ id, code: err.code ?? 'ERROR', error: err.message });
+        result.failed.push({
+          id,
+          code: err.code ?? 'ERROR',
+          error: err.message,
+        });
       }
     }
     return result;
   }
 
   /** `single` behaves like blocking one slot; `fullDay` and `recurringWeekly` skip booked and started slots. */
-  async bulkBlock(actorId: string, input: BulkBlockInput): Promise<BulkBlockResult> {
+  async bulkBlock(
+    actorId: string,
+    input: BulkBlockInput,
+  ): Promise<BulkBlockResult> {
     const now = venueNow();
-    const ground = await this.prisma.ground.findUnique({ where: { id: input.groundId } });
+    const ground = await this.prisma.ground.findUnique({
+      where: { id: input.groundId },
+    });
     if (!ground) throw groundNotFound();
-    const dates = targetDates(input).filter((date) => isOpenOn(ground, weekdayOf(date)));
+    const dates = targetDates(input).filter((date) =>
+      isOpenOn(ground, weekdayOf(date)),
+    );
     if (dates.length === 0) throw groundClosed();
-    if (input.type !== 'recurringWeekly' && dates[0]! < now.date) throw slotInPast();
+    if (input.type !== 'recurringWeekly' && dates[0]! < now.date)
+      throw slotInPast();
 
-    return this.prisma.$transaction(async (tx) => {
-      await this.generator.fillDates(tx, ground.id, dates);
-      const slots = await tx.slot.findMany({
-        where: {
-          groundId: ground.id, date: { in: dates.map(toDbDate) },
-          // Minute only with an hour: a whole-day recurring block leaves both out.
-          ...(input.type !== 'fullDay' && input.startHour !== undefined && { startHour: input.startHour, startMinute: input.startMinute }),
-        },
-      });
-      if (input.type === 'single') return this.blockSingle(tx, slots[0], now, actorId, input);
-      const free = slots.filter((s) => s.status === 'available' && !hasStarted(now, fromDbDate(s.date), slotHour(s)));
-      const blocked = await this.apply(tx, free, 'block', actorId, input);
-      return { blocked, skippedBooked: slots.filter((s) => s.status === 'booked').length, cancelledBookings: 0 };
-    }, { timeout: 20_000 });
+    return this.prisma.$transaction(
+      async (tx) => {
+        await this.generator.fillDates(tx, ground.id, dates);
+        const slots = await tx.slot.findMany({
+          where: {
+            groundId: ground.id,
+            date: { in: dates.map(toDbDate) },
+            // Minute only with an hour: a whole-day recurring block leaves both out.
+            ...(input.type !== 'fullDay' &&
+              input.startHour !== undefined && {
+                startHour: input.startHour,
+                startMinute: input.startMinute,
+              }),
+          },
+        });
+        if (input.type === 'single')
+          return this.blockSingle(tx, slots[0], now, actorId, input);
+        const free = slots.filter(
+          (s) =>
+            s.status === 'available' &&
+            !hasStarted(now, fromDbDate(s.date), slotHour(s)),
+        );
+        const blocked = await this.apply(tx, free, 'block', actorId, input);
+        return {
+          blocked,
+          skippedBooked: slots.filter((s) => s.status === 'booked').length,
+          cancelledBookings: 0,
+        };
+      },
+      { timeout: 20_000 },
+    );
   }
 
   /** Unblocks every upcoming blocked slot on that date (the "Unblock all today" button). */
-  async bulkUnblock(actorId: string, { groundId, date }: BulkUnblockInput): Promise<{ unblocked: number }> {
+  async bulkUnblock(
+    actorId: string,
+    { groundId, date }: BulkUnblockInput,
+  ): Promise<{ unblocked: number }> {
     const now = venueNow();
     return this.prisma.$transaction(async (tx) => {
-      const slots = await tx.slot.findMany({ where: { ...(groundId && { groundId }), date: toDbDate(date), status: 'blocked' } });
+      const slots = await tx.slot.findMany({
+        where: {
+          ...(groundId && { groundId }),
+          date: toDbDate(date),
+          status: 'blocked',
+        },
+      });
       const upcoming = slots.filter((s) => !hasStarted(now, date, slotHour(s)));
       return { unblocked: await this.apply(tx, upcoming, 'unblock', actorId) };
     });
   }
 
   private async blockSingle(
-    tx: Prisma.TransactionClient, slot: Slot | undefined, now: VenueNow, actorId: string, input: BlockFields,
+    tx: Prisma.TransactionClient,
+    slot: Slot | undefined,
+    now: VenueNow,
+    actorId: string,
+    input: BlockFields,
   ): Promise<BulkBlockResult> {
     if (!slot) throw slotNotFound();
-    if (hasStarted(now, fromDbDate(slot.date), slotHour(slot))) throw slotInPast();
+    if (hasStarted(now, fromDbDate(slot.date), slotHour(slot)))
+      throw slotInPast();
     if (slot.status === 'booked') throw hasBooking();
     if (slot.status === 'held') throw slotHeld();
-    if (slot.status === 'blocked') throw new AppError('This slot is already blocked', 409, 'SLOT_ALREADY_BLOCKED');
-    return { blocked: await this.apply(tx, [slot], 'block', actorId, input), skippedBooked: 0, cancelledBookings: 0 };
+    if (slot.status === 'blocked')
+      throw new AppError(
+        'This slot is already blocked',
+        409,
+        'SLOT_ALREADY_BLOCKED',
+      );
+    return {
+      blocked: await this.apply(tx, [slot], 'block', actorId, input),
+      skippedBooked: 0,
+      cancelledBookings: 0,
+    };
   }
 
   /** Changes status only where it is still what we read (so a slot booked meanwhile is left alone), and logs it. */
   private async apply(
-    tx: Prisma.TransactionClient, slots: Slot[], action: SlotEventAction, actorId: string, block?: BlockFields,
+    tx: Prisma.TransactionClient,
+    slots: Slot[],
+    action: SlotEventAction,
+    actorId: string,
+    block?: BlockFields,
   ): Promise<number> {
     if (slots.length === 0) return 0;
     const ids = slots.map((s) => s.id);
     const { count } = await tx.slot.updateMany({
-      where: { id: { in: ids }, status: action === 'block' ? 'available' : 'blocked' },
+      where: {
+        id: { in: ids },
+        status: action === 'block' ? 'available' : 'blocked',
+      },
       data: action === 'block' ? blockData(actorId, block!) : UNBLOCK_DATA,
     });
-    if (count !== ids.length) throw new AppError('Some slots changed while saving; try again', 409, 'SLOT_NOT_AVAILABLE');
-    await tx.slotEvent.createMany({ data: eventRows(slots, action, actorId, block) });
+    if (count !== ids.length)
+      throw new AppError(
+        'Some slots changed while saving; try again',
+        409,
+        'SLOT_NOT_AVAILABLE',
+      );
+    await tx.slotEvent.createMany({
+      data: eventRows(slots, action, actorId, block),
+    });
     return count;
   }
 
-  private async upcomingSlot(tx: Prisma.TransactionClient | PrismaService, id: string): Promise<Slot> {
+  private async upcomingSlot(
+    tx: Prisma.TransactionClient | PrismaService,
+    id: string,
+  ): Promise<Slot> {
     const slot = await tx.slot.findUnique({ where: { id } });
     if (!slot) throw slotNotFound();
-    if (hasStarted(venueNow(), fromDbDate(slot.date), slotHour(slot))) throw slotInPast();
+    if (hasStarted(venueNow(), fromDbDate(slot.date), slotHour(slot)))
+      throw slotInPast();
     return slot;
   }
 
   private async dto(id: string): Promise<SlotDto> {
-    return toSlotDto(await this.prisma.slot.findUniqueOrThrow({ where: { id }, include: SLOT_INCLUDE }));
+    return toSlotDto(
+      await this.prisma.slot.findUniqueOrThrow({
+        where: { id },
+        include: SLOT_INCLUDE,
+      }),
+    );
   }
 }
 
 function targetDates(input: BulkBlockInput): IsoDate[] {
   if (input.type !== 'recurringWeekly') return [input.date];
   assertRange(input.date, input.untilDate, MAX_RECURRING_DAYS);
-  return datesBetween(input.date, input.untilDate).filter((date) => input.weekdays.includes(weekdayOf(date)));
+  return datesBetween(input.date, input.untilDate).filter((date) =>
+    input.weekdays.includes(weekdayOf(date)),
+  );
 }

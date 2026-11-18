@@ -37,12 +37,10 @@ describe('Owner activation and account boundary', () => {
     const platform = await app
         .get(PlatformAuthService)
         .login(platformCredentials),
-      staff = await app
-        .get(AuthService)
-        .login({
-          ...platformCredentials,
-          email: 'staff@owner-activation-e2e.test',
-        });
+      staff = await app.get(AuthService).login({
+        ...platformCredentials,
+        email: 'staff@owner-activation-e2e.test',
+      });
     state = {
       db,
       app,

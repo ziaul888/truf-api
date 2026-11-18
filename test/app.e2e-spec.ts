@@ -18,13 +18,23 @@ describe('API foundation (e2e)', () => {
   });
 
   it('GET /api/v1/health wraps data in the success envelope', async () => {
-    const res = await request(app.getHttpServer()).get('/api/v1/health').expect(200);
-    expect(res.body).toEqual({ success: true, data: { status: 'ok', uptime: expect.any(Number) } });
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/health')
+      .expect(200);
+    expect(res.body).toEqual({
+      success: true,
+      data: { status: 'ok', uptime: expect.any(Number) },
+    });
   });
 
   it('unknown routes return the error envelope', async () => {
-    const res = await request(app.getHttpServer()).get('/api/v1/nope').expect(404);
-    expect(res.body).toMatchObject({ success: false, error: expect.any(String) });
+    const res = await request(app.getHttpServer())
+      .get('/api/v1/nope')
+      .expect(404);
+    expect(res.body).toMatchObject({
+      success: false,
+      error: expect.any(String),
+    });
   });
 
   it('routes outside /api/v1 are not served', async () => {

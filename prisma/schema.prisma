@@ -28,6 +28,12 @@ enum TenantMembershipRole {
   manager
 }
 
+enum OwnerApplicationStatus {
+  pending
+  activated
+  rejected
+}
+
 enum UserRole {
   admin
   manager
@@ -161,11 +167,12 @@ model User {
   createdAt         DateTime @default(now())
   updatedAt         DateTime @updatedAt
 
-  tenantMemberships      TenantMembership[]
-  platformGrant          PlatformGrant?
-  platformAuditEvents    PlatformAuditEvent[]
-  platformReceipts       PlatformReceipt[]
-  ownerInvitationsIssued OwnerInvitation[]    @relation("OwnerInvitationIssuer")
+  tenantMemberships         TenantMembership[]
+  platformGrant             PlatformGrant?
+  platformAuditEvents       PlatformAuditEvent[]
+  platformReceipts          PlatformReceipt[]
+  ownerInvitationsIssued    OwnerInvitation[]    @relation("OwnerInvitationIssuer")
+  ownerApplicationsReviewed OwnerApplication[]   @relation("OwnerApplicationReviewer")
 
   blockedSlots      Slot[]
   slotEvents        SlotEvent[]
@@ -209,6 +216,7 @@ model Tenant {
   platformInvoices      PlatformInvoice[]
   platformReceipts      PlatformReceipt[]
   platformAuditEvents   PlatformAuditEvent[]
+  ownerApplication      OwnerApplication?
 }
 
 /// Business authority is explicit; User.role never implies membership or platform access.
@@ -231,6 +239,38 @@ model TenantMembership {
   @@unique([id, tenantId, userId])
   @@unique([tenantId, userId])
   @@index([userId, isActive])
+}
+
+/// Public turf-owner applications. Password hashes are cleared after review.
+/// Pending email and handle uniqueness are enforced by partial indexes in the owner-application migration.
+model OwnerApplication {
+  id              String                   @id @default(uuid())
+  requestId       String                   @unique
+  inputHash       String
+  turfName        String
+  slug            String
+  ownerName       String
+  ownerEmail      String
+  passwordHash    String?
+  timezone        String                   @default("Asia/Dhaka")
+  currency        String                   @default("bdt")
+  planVersionId   String?
+  billingInterval PlatformBillingInterval?
+  status          OwnerApplicationStatus   @default(pending)
+  reviewedAt      DateTime?
+  reviewedById    String?
+  tenantId        String?                  @unique
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
+
+  reviewedBy  User?                @relation("OwnerApplicationReviewer", fields: [reviewedById], references: [id], onDelete: Restrict)
+  tenant      Tenant?              @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  planVersion PlatformPlanVersion? @relation(fields: [planVersionId], references: [id], onDelete: Restrict)
+
+  @@index([status, createdAt])
+  @@index([ownerEmail, status])
+  @@index([slug, status])
+  @@index([planVersionId])
 }
 
 model Ground {
@@ -721,6 +761,8 @@ enum PlatformAuditAction {
   subscription_cancelled
   owner_invited
   owner_activated
+  application_activated
+  application_rejected
 }
 
 model PlatformPlan {
@@ -737,15 +779,16 @@ model PlatformPlan {
 /// Immutable prices; subscriptions retain the version they agreed to.
 /// Positive BDT amount checks are in 20261117120000_platform_onboarding_billing.
 model PlatformPlanVersion {
-  id            String                 @id @default(uuid())
-  planId        String
-  version       Int
-  currency      String                 @default("bdt")
-  monthlyAmount Int
-  yearlyAmount  Int
-  createdAt     DateTime               @default(now())
-  plan          PlatformPlan           @relation(fields: [planId], references: [id], onDelete: Restrict)
-  subscriptions PlatformSubscription[]
+  id                String                 @id @default(uuid())
+  planId            String
+  version           Int
+  currency          String                 @default("bdt")
+  monthlyAmount     Int
+  yearlyAmount      Int
+  createdAt         DateTime               @default(now())
+  plan              PlatformPlan           @relation(fields: [planId], references: [id], onDelete: Restrict)
+  subscriptions     PlatformSubscription[]
+  ownerApplications OwnerApplication[]
 
   @@unique([planId, version])
 }

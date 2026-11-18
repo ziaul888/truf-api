@@ -1,34 +1,76 @@
 import { AppError } from '../common/app-error.js';
-import type { BlockReason, Closure, Prisma, Slot, SlotEventAction } from '../generated/prisma/client.js';
-import { isOpenOn, slotPrice, slotStarts, type GroundDays, type GroundSchedule } from '../grounds/ground-schedule.js';
+import type {
+  BlockReason,
+  Closure,
+  Prisma,
+  Slot,
+  SlotEventAction,
+} from '../generated/prisma/client.js';
+import {
+  isOpenOn,
+  slotPrice,
+  slotStarts,
+  type GroundDays,
+  type GroundSchedule,
+} from '../grounds/ground-schedule.js';
 import { endMinutesOf, slotHour, startMinutesOf } from './slot-time.js';
-import { daysBetween, fromDbDate, hasStarted, toDbDate, weekdayOf, type IsoDate, type VenueNow } from './venue-time.js';
+import {
+  daysBetween,
+  fromDbDate,
+  hasStarted,
+  toDbDate,
+  weekdayOf,
+  type IsoDate,
+  type VenueNow,
+} from './venue-time.js';
 
-export const slotNotFound = () => new AppError('Slot not found', 404, 'SLOT_NOT_FOUND');
-export const groundNotFound = () => new AppError('Ground not found', 404, 'GROUND_NOT_FOUND');
-export const slotInPast = () => new AppError('This slot has already started', 400, 'SLOT_IN_PAST');
-export const slotEnded = () => new AppError('This slot has already ended', 400, 'SLOT_IN_PAST');
-export const groundClosed = (message = 'The ground is closed on that day') => new AppError(message, 400, 'GROUND_CLOSED');
+export const slotNotFound = () =>
+  new AppError('Slot not found', 404, 'SLOT_NOT_FOUND');
+export const groundNotFound = () =>
+  new AppError('Ground not found', 404, 'GROUND_NOT_FOUND');
+export const slotInPast = () =>
+  new AppError('This slot has already started', 400, 'SLOT_IN_PAST');
+export const slotEnded = () =>
+  new AppError('This slot has already ended', 400, 'SLOT_IN_PAST');
+export const groundClosed = (message = 'The ground is closed on that day') =>
+  new AppError(message, 400, 'GROUND_CLOSED');
 
 /** Whether the ground opens on that date. About the day alone: an inactive ground still has its days. */
-export const isOpenDay = ({ availableDays, customDays }: Omit<GroundDays, 'isActive'>, date: IsoDate) =>
-  isOpenOn({ isActive: true, availableDays, customDays }, weekdayOf(date));
+export const isOpenDay = (
+  { availableDays, customDays }: Omit<GroundDays, 'isActive'>,
+  date: IsoDate,
+) => isOpenOn({ isActive: true, availableDays, customDays }, weekdayOf(date));
 
 /** New bookings only: existing ones on a closed day stay honoured. Each booking path has its own rule for inactive grounds. */
-export function assertDayOpen(ground: Omit<GroundDays, 'isActive'>, date: IsoDate) {
+export function assertDayOpen(
+  ground: Omit<GroundDays, 'isActive'>,
+  date: IsoDate,
+) {
   if (!isOpenDay(ground, date)) throw groundClosed();
 }
 
 /** `from` must not be after `to`, and the range (both ends included) at most `maxDays` long. */
 export function assertRange(from: IsoDate, to: IsoDate, maxDays: number) {
-  if (from > to) throw new AppError('Start date must not be after end date', 400, 'INVALID_DATE_RANGE');
+  if (from > to)
+    throw new AppError(
+      'Start date must not be after end date',
+      400,
+      'INVALID_DATE_RANGE',
+    );
   if (daysBetween(from, to) + 1 > maxDays) {
-    throw new AppError(`Pick a range of at most ${maxDays} days`, 400, 'INVALID_DATE_RANGE');
+    throw new AppError(
+      `Pick a range of at most ${maxDays} days`,
+      400,
+      'INVALID_DATE_RANGE',
+    );
   }
 }
 
 /** `date` between `from` and `to` (both optional together). */
-export const dateWhere = (from?: IsoDate, to?: IsoDate): Prisma.SlotWhereInput =>
+export const dateWhere = (
+  from?: IsoDate,
+  to?: IsoDate,
+): Prisma.SlotWhereInput =>
   from && to ? { date: { gte: toDbDate(from), lte: toDbDate(to) } } : {};
 
 /** Slots that have not started yet, in venue time (to the minute: at 16:10 the 16:30 slot is still upcoming). */
@@ -38,7 +80,11 @@ export const upcomingWhere = (now: VenueNow): Prisma.SlotWhereInput => {
     OR: [
       { date: { gt: toDbDate(now.date) } },
       { date: toDbDate(now.date), startHour: { gt: hour } },
-      { date: toDbDate(now.date), startHour: hour, startMinute: { gt: now.minutes % 60 } },
+      {
+        date: toDbDate(now.date),
+        startHour: hour,
+        startMinute: { gt: now.minutes % 60 },
+      },
     ],
   };
 };
@@ -63,12 +109,21 @@ export interface DayPlan {
  * overlaps a stored one (a kept booking, or a slot of the old length) or has already started.
  * Closed days plan nothing.
  */
-export function planDay(ground: GroundForSlots, date: IsoDate, existing: SlotSpan[], now: VenueNow): DayPlan {
+export function planDay(
+  ground: GroundForSlots,
+  date: IsoDate,
+  existing: SlotSpan[],
+  now: VenueNow,
+): DayPlan {
   if (!isOpenOn(ground, weekdayOf(date))) return { create: [], skipped: 0 };
   const plan: DayPlan = { create: [], skipped: 0 };
   for (const start of slotStarts(ground)) {
     const span = { ...start, durationMinutes: ground.slotDurationMinutes };
-    const overlaps = existing.some((e) => startMinutesOf(span) < endMinutesOf(e) && startMinutesOf(e) < endMinutesOf(span));
+    const overlaps = existing.some(
+      (e) =>
+        startMinutesOf(span) < endMinutesOf(e) &&
+        startMinutesOf(e) < endMinutesOf(span),
+    );
     if (overlaps || hasStarted(now, date, slotHour(span))) {
       plan.skipped++;
       continue;
@@ -87,20 +142,38 @@ export function planDay(ground: GroundForSlots, date: IsoDate, existing: SlotSpa
 
 /** Clears a block, including the closure that made it. */
 export const UNBLOCK_DATA = {
-  status: 'available' as const, blockReason: null, blockNote: null, blockedById: null, blockedAt: null, closureId: null,
+  status: 'available' as const,
+  blockReason: null,
+  blockNote: null,
+  blockedById: null,
+  blockedAt: null,
+  closureId: null,
 };
 
 /** One audit row per slot; keeps ground, date and hour so it outlives the slot. */
 export const eventRows = (
-  slots: Slot[], action: SlotEventAction, userId: string | null, block?: { reason: BlockReason; note?: string | null },
+  slots: Slot[],
+  action: SlotEventAction,
+  userId: string | null,
+  block?: { reason: BlockReason; note?: string | null },
 ): Prisma.SlotEventCreateManyInput[] =>
   slots.map((s) => ({
-    slotId: s.id, groundId: s.groundId, date: s.date, startHour: s.startHour, action, userId,
-    reason: block?.reason ?? null, note: block?.note ?? null,
+    slotId: s.id,
+    groundId: s.groundId,
+    date: s.date,
+    startHour: s.startHour,
+    action,
+    userId,
+    reason: block?.reason ?? null,
+    note: block?.note ?? null,
   }));
 
 /** Closures not lifted that overlap `from`–`to`, for one ground (closures with no groundIds cover every ground). */
-export const activeClosuresWhere = (groundId: string, from: IsoDate, to: IsoDate): Prisma.ClosureWhereInput => ({
+export const activeClosuresWhere = (
+  groundId: string,
+  from: IsoDate,
+  to: IsoDate,
+): Prisma.ClosureWhereInput => ({
   liftedAt: null,
   fromDate: { lte: toDbDate(to) },
   toDate: { gte: toDbDate(from) },
@@ -108,9 +181,16 @@ export const activeClosuresWhere = (groundId: string, from: IsoDate, to: IsoDate
 });
 
 export const closureOn = (closures: Closure[], date: IsoDate) =>
-  closures.find((c) => fromDbDate(c.fromDate) <= date && date <= fromDbDate(c.toDate));
+  closures.find(
+    (c) => fromDbDate(c.fromDate) <= date && date <= fromDbDate(c.toDate),
+  );
 
 /** The block fields a closure puts on its slots. */
 export const closureBlock = (c: Closure) => ({
-  status: 'blocked' as const, blockReason: c.reason, blockNote: c.note, blockedById: c.createdById, blockedAt: new Date(), closureId: c.id,
+  status: 'blocked' as const,
+  blockReason: c.reason,
+  blockNote: c.note,
+  blockedById: c.createdById,
+  blockedAt: new Date(),
+  closureId: c.id,
 });

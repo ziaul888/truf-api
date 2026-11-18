@@ -23,13 +23,15 @@ export interface CheckoutSession {
 /** Stripe can't expire a Checkout Session sooner than 30 minutes; the hold sweep expires it earlier itself. */
 const MIN_SESSION_SECONDS = 30 * 60 + 60;
 
-const providerError = (message: string) => new AppError(message, 502, 'PAYMENT_PROVIDER_ERROR');
+const providerError = (message: string) =>
+  new AppError(message, 502, 'PAYMENT_PROVIDER_ERROR');
 
 /**
  * Whether customers can pay by card. Needs the webhook secret too: without it a customer would be
  * charged, but the payment would never reach the booking.
  */
-export const cardPaymentsEnabled = () => Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
+export const cardPaymentsEnabled = () =>
+  Boolean(env.STRIPE_SECRET_KEY && env.STRIPE_WEBHOOK_SECRET);
 
 /**
  * The only place that talks to Stripe. Tests replace it with a mock.
@@ -40,33 +42,54 @@ export class StripeService {
   private client?: Stripe;
 
   private get stripe(): Stripe {
-    if (!env.STRIPE_SECRET_KEY) throw providerError("Online payment isn't set up yet");
+    if (!env.STRIPE_SECRET_KEY)
+      throw providerError("Online payment isn't set up yet");
     this.client ??= new Stripe(env.STRIPE_SECRET_KEY);
     return this.client;
   }
 
-  async createCheckoutSession(input: CheckoutSessionInput): Promise<CheckoutSession> {
+  async createCheckoutSession(
+    input: CheckoutSessionInput,
+  ): Promise<CheckoutSession> {
     const purpose = input.purpose ?? 'booking';
-    const session = await this.call(() => this.stripe.checkout.sessions.create({
-      mode: 'payment',
-      line_items: [{
-        quantity: 1,
-        price_data: { currency: env.CURRENCY, unit_amount: input.total, product_data: { name: input.description } },
-      }],
-      ...(input.customerEmail && { customer_email: input.customerEmail }),
-      success_url: input.successUrl,
-      cancel_url: input.cancelUrl,
-      metadata: { bookingId: input.bookingId, purpose },
-      payment_intent_data: { metadata: { bookingId: input.bookingId, purpose } },
-      expires_at: Math.floor(Date.now() / 1000) + MIN_SESSION_SECONDS,
-    }, purpose === 'booking' ? { idempotencyKey: `checkout-${input.bookingId}` } : undefined));
-    if (!session.url) throw providerError('Stripe did not return a checkout link');
+    const session = await this.call(() =>
+      this.stripe.checkout.sessions.create(
+        {
+          mode: 'payment',
+          line_items: [
+            {
+              quantity: 1,
+              price_data: {
+                currency: env.CURRENCY,
+                unit_amount: input.total,
+                product_data: { name: input.description },
+              },
+            },
+          ],
+          ...(input.customerEmail && { customer_email: input.customerEmail }),
+          success_url: input.successUrl,
+          cancel_url: input.cancelUrl,
+          metadata: { bookingId: input.bookingId, purpose },
+          payment_intent_data: {
+            metadata: { bookingId: input.bookingId, purpose },
+          },
+          expires_at: Math.floor(Date.now() / 1000) + MIN_SESSION_SECONDS,
+        },
+        purpose === 'booking'
+          ? { idempotencyKey: `checkout-${input.bookingId}` }
+          : undefined,
+      ),
+    );
+    if (!session.url)
+      throw providerError('Stripe did not return a checkout link');
     return { id: session.id, url: session.url };
   }
 
   /** The session's link while it can still be paid, else null. */
   async openSessionUrl(sessionId: string): Promise<string | null> {
-    const session = await this.call(() => this.stripe.checkout.sessions.retrieve(sessionId));
+    const session = await this.call(() =>
+      this.stripe.checkout.sessions.retrieve(sessionId),
+    );
     return session.status === 'open' ? session.url : null;
   }
 
@@ -88,16 +111,25 @@ export class StripeService {
       );
       return refund.id;
     } catch {
-      throw new AppError('The refund could not be processed. Try again or refund from the Stripe dashboard', 502, 'REFUND_FAILED');
+      throw new AppError(
+        'The refund could not be processed. Try again or refund from the Stripe dashboard',
+        502,
+        'REFUND_FAILED',
+      );
     }
   }
 
   /** Last 4 digits of the card, for the receipt line; null if unavailable. */
   async cardLast4(paymentIntentId: string): Promise<string | null> {
     try {
-      const intent = await this.stripe.paymentIntents.retrieve(paymentIntentId, { expand: ['latest_charge'] });
+      const intent = await this.stripe.paymentIntents.retrieve(
+        paymentIntentId,
+        { expand: ['latest_charge'] },
+      );
       const charge = intent.latest_charge;
-      return typeof charge === 'object' && charge ? (charge.payment_method_details?.card?.last4 ?? null) : null;
+      return typeof charge === 'object' && charge
+        ? (charge.payment_method_details?.card?.last4 ?? null)
+        : null;
     } catch {
       return null;
     }
@@ -105,9 +137,14 @@ export class StripeService {
 
   /** Verifies the signature and parses a webhook. 400 INVALID_SIGNATURE when it doesn't match. */
   parseWebhook(rawBody: Buffer, signature: string | undefined): Stripe.Event {
-    if (!env.STRIPE_WEBHOOK_SECRET) throw providerError('Stripe webhooks are not set up');
+    if (!env.STRIPE_WEBHOOK_SECRET)
+      throw providerError('Stripe webhooks are not set up');
     try {
-      return this.stripe.webhooks.constructEvent(rawBody, signature ?? '', env.STRIPE_WEBHOOK_SECRET);
+      return this.stripe.webhooks.constructEvent(
+        rawBody,
+        signature ?? '',
+        env.STRIPE_WEBHOOK_SECRET,
+      );
     } catch {
       throw new AppError('Invalid Stripe signature', 400, 'INVALID_SIGNATURE');
     }
@@ -118,7 +155,9 @@ export class StripeService {
       return await fn();
     } catch (err) {
       if (err instanceof AppError) throw err;
-      throw providerError('The payment provider is unavailable. Try again in a moment');
+      throw providerError(
+        'The payment provider is unavailable. Try again in a moment',
+      );
     }
   }
 }

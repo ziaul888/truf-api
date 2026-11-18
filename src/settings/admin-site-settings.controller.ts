@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, Post, Put, UploadedFile, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  Param,
+  Post,
+  Put,
+  UploadedFile,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { AuthGuard, CurrentUser, Roles } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -6,11 +17,17 @@ import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import type { UploadedImage } from './settings-images.js';
 import { UpdateVenueSchema, type UpdateVenueInput } from './venue.schemas.js';
 import { VenueSettingsService } from './venue-settings.service.js';
-import { UpdateWebsiteSchema, WebsiteImageParamSchema, type UpdateWebsiteInput, type WebsiteImageSlot } from './website.schemas.js';
+import {
+  UpdateWebsiteSchema,
+  WebsiteImageParamSchema,
+  type UpdateWebsiteInput,
+  type WebsiteImageSlot,
+} from './website.schemas.js';
 import { WebsiteSettingsService } from './website-settings.service.js';
 
 // Multer's own caps. Files between the real limit and these get a clear 400; bigger ones a 413.
-const upload = (field: string, maxBytes: number) => FileInterceptor(field, { limits: { fileSize: maxBytes, files: 1 } });
+const upload = (field: string, maxBytes: number) =>
+  FileInterceptor(field, { limits: { fileSize: maxBytes, files: 1 } });
 
 /** Settings → General (the venue profile) and Website. Admins and managers read; admins save. */
 @Controller('admin/settings')
@@ -28,7 +45,10 @@ export class AdminSiteSettingsController {
 
   @Put('venue')
   @Roles('admin')
-  updateVenue(@Body(new ZodValidationPipe(UpdateVenueSchema)) body: UpdateVenueInput, @CurrentUser() user: AuthUser) {
+  updateVenue(
+    @Body(new ZodValidationPipe(UpdateVenueSchema)) body: UpdateVenueInput,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.venue.update(body, user.id);
   }
 
@@ -36,7 +56,10 @@ export class AdminSiteSettingsController {
   @Post('venue/logo')
   @Roles('admin')
   @UseInterceptors(upload('logo', 1024 * 1024))
-  uploadLogo(@UploadedFile() file: UploadedImage | undefined, @CurrentUser() user: AuthUser) {
+  uploadLogo(
+    @UploadedFile() file: UploadedImage | undefined,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.venue.uploadLogo(file, user.id);
   }
 
@@ -53,7 +76,10 @@ export class AdminSiteSettingsController {
 
   @Put('website')
   @Roles('admin')
-  updateWebsite(@Body(new ZodValidationPipe(UpdateWebsiteSchema)) body: UpdateWebsiteInput, @CurrentUser() user: AuthUser) {
+  updateWebsite(
+    @Body(new ZodValidationPipe(UpdateWebsiteSchema)) body: UpdateWebsiteInput,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.website.update(body, user.id);
   }
 
@@ -62,7 +88,8 @@ export class AdminSiteSettingsController {
   @Roles('admin')
   @UseInterceptors(upload('image', 5 * 1024 * 1024))
   uploadImage(
-    @Param(new ZodValidationPipe(WebsiteImageParamSchema)) { slot }: { slot: WebsiteImageSlot },
+    @Param(new ZodValidationPipe(WebsiteImageParamSchema))
+    { slot }: { slot: WebsiteImageSlot },
     @UploadedFile() file: UploadedImage | undefined,
     @CurrentUser() user: AuthUser,
   ) {

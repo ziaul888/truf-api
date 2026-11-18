@@ -1,11 +1,27 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard, CurrentUser, Roles } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
 import {
-  CreateUserSchema, ListUsersQuerySchema, ResetPasswordSchema, UpdateUserSchema,
-  type CreateUserInput, type ListUsersQuery, type ResetPasswordInput, type UpdateUserInput,
+  CreateUserSchema,
+  ListUsersQuerySchema,
+  ResetPasswordSchema,
+  UpdateUserSchema,
+  type CreateUserInput,
+  type ListUsersQuery,
+  type ResetPasswordInput,
+  type UpdateUserInput,
 } from './users.schemas.js';
 import { UsersService } from './users.service.js';
 
@@ -17,7 +33,9 @@ export class UsersController {
   constructor(private readonly users: UsersService) {}
 
   @Get()
-  list(@Query(new ZodValidationPipe(ListUsersQuerySchema)) query: ListUsersQuery) {
+  list(
+    @Query(new ZodValidationPipe(ListUsersQuerySchema)) query: ListUsersQuery,
+  ) {
     return this.users.list(query);
   }
 

@@ -18,7 +18,12 @@ export function configureApp(app: INestApplication) {
   app.use(helmet());
   app.use(cookieParser());
   app.use(
-    ['/api/v1/platform', '/api/v1/owner', '/api/v1/admin/auth'],
+    [
+      '/api/v1/platform',
+      '/api/v1/owner',
+      '/api/v1/owner-applications',
+      '/api/v1/admin/auth',
+    ],
     (_req: Request, res: Response, next: NextFunction) => {
       res.setHeader('Cache-Control', 'private, no-store');
       next();

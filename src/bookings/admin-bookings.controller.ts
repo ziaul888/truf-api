@@ -1,17 +1,44 @@
-import { Body, Controller, Get, HttpCode, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard, CurrentUser } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
 import { BookingQueriesService } from './booking-queries.service.js';
 import {
-  CancelBookingSchema, ConfirmBookingSchema, CreateStaffBookingSchema, ListBookingsQuerySchema, NoShowSchema, RecordPaymentSchema,
-  RefundSentSchema, UpcomingQuerySchema, UpdateBookingSchema, type CancelBookingInput, type ConfirmBookingInput, type CreateStaffBookingInput,
-  type ListBookingsQuery, type NoShowInput, type RecordPaymentInput, type RefundSentInput,
-  type UpcomingQuery, type UpdateBookingInput,
+  CancelBookingSchema,
+  ConfirmBookingSchema,
+  CreateStaffBookingSchema,
+  ListBookingsQuerySchema,
+  NoShowSchema,
+  RecordPaymentSchema,
+  RefundSentSchema,
+  UpcomingQuerySchema,
+  UpdateBookingSchema,
+  type CancelBookingInput,
+  type ConfirmBookingInput,
+  type CreateStaffBookingInput,
+  type ListBookingsQuery,
+  type NoShowInput,
+  type RecordPaymentInput,
+  type RefundSentInput,
+  type UpcomingQuery,
+  type UpdateBookingInput,
 } from './bookings.schemas.js';
 import { StaffBookingsService } from './staff-bookings.service.js';
-import { ListRefundBookingsQuerySchema, type ListRefundBookingsQuery } from './refund-bookings.schemas.js';
+import {
+  ListRefundBookingsQuerySchema,
+  type ListRefundBookingsQuery,
+} from './refund-bookings.schemas.js';
 
 /**
  * Dashboard bookings, for admins and managers. Status changes go through the actions
@@ -26,17 +53,25 @@ export class AdminBookingsController {
   ) {}
 
   @Get()
-  list(@Query(new ZodValidationPipe(ListBookingsQuerySchema)) query: ListBookingsQuery) {
+  list(
+    @Query(new ZodValidationPipe(ListBookingsQuerySchema))
+    query: ListBookingsQuery,
+  ) {
     return this.queries.list(query);
   }
 
   @Get('upcoming')
-  upcoming(@Query(new ZodValidationPipe(UpcomingQuerySchema)) { limit }: UpcomingQuery) {
+  upcoming(
+    @Query(new ZodValidationPipe(UpcomingQuerySchema)) { limit }: UpcomingQuery,
+  ) {
     return this.queries.upcoming(limit);
   }
 
   @Get('refunds')
-  refunds(@Query(new ZodValidationPipe(ListRefundBookingsQuerySchema)) query: ListRefundBookingsQuery) {
+  refunds(
+    @Query(new ZodValidationPipe(ListRefundBookingsQuerySchema))
+    query: ListRefundBookingsQuery,
+  ) {
     return this.queries.refunds(query);
   }
 
@@ -46,7 +81,11 @@ export class AdminBookingsController {
   }
 
   @Post()
-  create(@CurrentUser() user: AuthUser, @Body(new ZodValidationPipe(CreateStaffBookingSchema)) body: CreateStaffBookingInput) {
+  create(
+    @CurrentUser() user: AuthUser,
+    @Body(new ZodValidationPipe(CreateStaffBookingSchema))
+    body: CreateStaffBookingInput,
+  ) {
     return this.staff.create(user.id, body);
   }
 
@@ -55,7 +94,8 @@ export class AdminBookingsController {
   confirm(
     @CurrentUser() user: AuthUser,
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Body(new ZodValidationPipe(ConfirmBookingSchema)) body: ConfirmBookingInput,
+    @Body(new ZodValidationPipe(ConfirmBookingSchema))
+    body: ConfirmBookingInput,
   ) {
     return this.staff.confirm(user.id, id, body);
   }
@@ -95,7 +135,10 @@ export class AdminBookingsController {
 
   @Post(':id/undo-no-show')
   @HttpCode(200)
-  undoNoShow(@CurrentUser() user: AuthUser, @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam) {
+  undoNoShow(
+    @CurrentUser() user: AuthUser,
+    @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
+  ) {
     return this.staff.undoNoShow(user.id, id);
   }
 

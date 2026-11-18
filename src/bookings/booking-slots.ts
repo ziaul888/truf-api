@@ -1,8 +1,20 @@
 import { AppError } from '../common/app-error.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import { upcomingWhere } from '../slots/slot-rules.js';
-import { endMinutesOf, slotTimes, startMinutesOf, type SlotClock, type SlotTimes } from '../slots/slot-time.js';
-import { fromDbDate, hasEnded, hasStarted, type IsoDate, type VenueNow } from '../slots/venue-time.js';
+import {
+  endMinutesOf,
+  slotTimes,
+  startMinutesOf,
+  type SlotClock,
+  type SlotTimes,
+} from '../slots/slot-time.js';
+import {
+  fromDbDate,
+  hasEnded,
+  hasStarted,
+  type IsoDate,
+  type VenueNow,
+} from '../slots/venue-time.js';
 
 // A booking holds 1 to 4 slots of one ground and one date (`BookingSlot` rows). `Booking.slot` is the
 // earliest ("primary") one. Cancelling is all or nothing, so a booking's slots are all live or all cancelled.
@@ -35,23 +47,42 @@ export interface BookingWindow {
   endMinutes: number;
 }
 
-export const tooManySlots = (max: number) => new AppError(`A booking can hold at most ${max} slots`, 400, 'TOO_MANY_SLOTS');
+export const tooManySlots = (max: number) =>
+  new AppError(
+    `A booking can hold at most ${max} slots`,
+    400,
+    'TOO_MANY_SLOTS',
+  );
 export const slotsMustShareGroundDate = () =>
-  new AppError('All the slots of a booking must be on the same ground and the same date', 400, 'SLOTS_MUST_SHARE_GROUND_DATE');
+  new AppError(
+    'All the slots of a booking must be on the same ground and the same date',
+    400,
+    'SLOTS_MUST_SHARE_GROUND_DATE',
+  );
 
-const byStart = (a: BookingSlotRef, b: BookingSlotRef) => a.slot.date.getTime() - b.slot.date.getTime() || startMinutesOf(a.slot) - startMinutesOf(b.slot);
+const byStart = (a: BookingSlotRef, b: BookingSlotRef) =>
+  a.slot.date.getTime() - b.slot.date.getTime() ||
+  startMinutesOf(a.slot) - startMinutesOf(b.slot);
 
 /**
  * Every slot of the booking, earliest first. A booking made by an older release (during a deploy) has
  * no `BookingSlot` rows yet: its single `slot` stands in, at the booking's amount.
  */
 export function slotRowsOf(b: BookingSlotsSource): BookingSlotRef[] {
-  if (b.bookingSlots.length === 0) return [{ cancelledAt: b.cancelledAt ?? null, price: b.amount ?? 0, slot: b.slot }];
+  if (b.bookingSlots.length === 0)
+    return [
+      {
+        cancelledAt: b.cancelledAt ?? null,
+        price: b.amount ?? 0,
+        slot: b.slot,
+      },
+    ];
   return [...b.bookingSlots].sort(byStart);
 }
 
 /** The slots still in the booking (not cancelled), earliest first. */
-export const liveSlots = (b: BookingSlotsSource): BookingSlotRef[] => slotRowsOf(b).filter((s) => s.cancelledAt === null);
+export const liveSlots = (b: BookingSlotsSource): BookingSlotRef[] =>
+  slotRowsOf(b).filter((s) => s.cancelledAt === null);
 
 /** The live slots; a cancelled booking has none, so all its slots. For anything shown or measured on a booking whatever its state. */
 export const currentSlots = (b: BookingSlotsSource): BookingSlotRef[] => {
@@ -73,18 +104,26 @@ export const spanOf = (slots: SlotRef[]): BookingWindow => ({
 });
 
 /** The span of the live slots (a cancelled booking: of all its slots). */
-export const windowOf = (b: BookingSlotsSource): BookingWindow => spanOf(currentSlots(b).map((s) => s.slot));
+export const windowOf = (b: BookingSlotsSource): BookingWindow =>
+  spanOf(currentSlots(b).map((s) => s.slot));
 
 /** The window as the start and end times every response carries. */
 export const windowTimes = (w: BookingWindow): SlotTimes =>
-  slotTimes({ startHour: Math.floor(w.startMinutes / 60), startMinute: w.startMinutes % 60, durationMinutes: w.endMinutes - w.startMinutes });
+  slotTimes({
+    startHour: Math.floor(w.startMinutes / 60),
+    startMinute: w.startMinutes % 60,
+    durationMinutes: w.endMinutes - w.startMinutes,
+  });
 
-export const windowHasStarted = (now: VenueNow, w: BookingWindow) => hasStarted(now, w.date, w.startMinutes / 60);
+export const windowHasStarted = (now: VenueNow, w: BookingWindow) =>
+  hasStarted(now, w.date, w.startMinutes / 60);
 
-export const windowHasEnded = (now: VenueNow, w: BookingWindow) => hasEnded(now, w.date, w.startMinutes / 60, w.endMinutes - w.startMinutes);
+export const windowHasEnded = (now: VenueNow, w: BookingWindow) =>
+  hasEnded(now, w.date, w.startMinutes / 60, w.endMinutes - w.startMinutes);
 
 /** Hours played: the live slots' durations (a cancelled booking: all its slots'). */
-export const hoursOf = (b: BookingSlotsSource): number => currentSlots(b).reduce((sum, s) => sum + s.slot.durationMinutes, 0) / 60;
+export const hoursOf = (b: BookingSlotsSource): number =>
+  currentSlots(b).reduce((sum, s) => sum + s.slot.durationMinutes, 0) / 60;
 
 /**
  * A booking with a slot that has not started yet: its primary slot, or any live BookingSlot (the primary is
@@ -92,7 +131,10 @@ export const hoursOf = (b: BookingSlotsSource): number => currentSlots(b).reduce
  * bookings written without BookingSlot rows (older release) working.
  */
 export const hasUpcomingSlot = (now: VenueNow): Prisma.BookingWhereInput => ({
-  OR: [{ slot: upcomingWhere(now) }, { bookingSlots: { some: { cancelledAt: null, slot: upcomingWhere(now) } } }],
+  OR: [
+    { slot: upcomingWhere(now) },
+    { bookingSlots: { some: { cancelledAt: null, slot: upcomingWhere(now) } } },
+  ],
 });
 
 /**
@@ -100,16 +142,34 @@ export const hasUpcomingSlot = (now: VenueNow): Prisma.BookingWhereInput => ({
  * during a deploy) cancels bookings without knowing BookingSlot, which would wedge the slot with a unique clash.
  * Run in the same transaction, before creating BookingSlot rows.
  */
-export const releaseStaleBookingSlots = (tx: Prisma.TransactionClient, slotIds: string[]) =>
+export const releaseStaleBookingSlots = (
+  tx: Prisma.TransactionClient,
+  slotIds: string[],
+) =>
   tx.bookingSlot.updateMany({
-    where: { slotId: { in: slotIds }, liveSlotId: { not: null }, booking: { status: 'cancelled' } },
+    where: {
+      slotId: { in: slotIds },
+      liveSlotId: { not: null },
+      booking: { status: 'cancelled' },
+    },
     data: { liveSlotId: null, cancelledAt: new Date() },
   });
 
-export const sumPrice = (slots: { price: number }[]) => slots.reduce((sum, s) => sum + s.price, 0);
+export const sumPrice = (slots: { price: number }[]) =>
+  slots.reduce((sum, s) => sum + s.price, 0);
 
 /** Throws 400 SLOTS_MUST_SHARE_GROUND_DATE unless every slot is on one ground and one date. */
-export function assertSameGroundDate(slots: { groundId: string; date: Date }[]) {
+export function assertSameGroundDate(
+  slots: { groundId: string; date: Date }[],
+) {
   const first = slots[0];
-  if (first && slots.some((s) => s.groundId !== first.groundId || s.date.getTime() !== first.date.getTime())) throw slotsMustShareGroundDate();
+  if (
+    first &&
+    slots.some(
+      (s) =>
+        s.groundId !== first.groundId ||
+        s.date.getTime() !== first.date.getTime(),
+    )
+  )
+    throw slotsMustShareGroundDate();
 }

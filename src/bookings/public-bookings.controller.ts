@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Headers, HttpCode, Param, Post, Query, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Headers,
+  HttpCode,
+  Param,
+  Post,
+  Query,
+  Req,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request } from 'express';
 import { AppError } from '../common/app-error.js';
@@ -8,7 +19,12 @@ import { CustomerAuthService } from '../customer-auth/customer-auth.service.js';
 import { CUSTOMER_COOKIE } from '../customer-auth/customer-cookie.js';
 import { BookingQueriesService } from './booking-queries.service.js';
 import { CancelRequestService } from './cancel-request.service.js';
-import { BookingTokenQuerySchema, CheckoutSchema, type BookingTokenQuery, type CheckoutInput } from './bookings.schemas.js';
+import {
+  BookingTokenQuerySchema,
+  CheckoutSchema,
+  type BookingTokenQuery,
+  type CheckoutInput,
+} from './bookings.schemas.js';
 import { CheckoutThrottlerGuard } from './checkout-throttler.guard.js';
 import { CheckoutService } from './checkout.service.js';
 import { StripeWebhookService } from './stripe-webhook.service.js';
@@ -41,8 +57,13 @@ export class PublicBookingsController {
   @Post('checkout')
   @UseGuards(CheckoutThrottlerGuard)
   @Throttle({ default: { limit: 5, ttl: 10 * 60_000 } })
-  async start(@Body(new ZodValidationPipe(CheckoutSchema)) body: CheckoutInput, @Req() req: Request) {
-    const customer = await this.customerAuth.optional(req.cookies?.[CUSTOMER_COOKIE]);
+  async start(
+    @Body(new ZodValidationPipe(CheckoutSchema)) body: CheckoutInput,
+    @Req() req: Request,
+  ) {
+    const customer = await this.customerAuth.optional(
+      req.cookies?.[CUSTOMER_COOKIE],
+    );
     return this.checkout.start(body, customer?.phone);
   }
 
@@ -50,7 +71,8 @@ export class PublicBookingsController {
   @HttpCode(200)
   resume(
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Query(new ZodValidationPipe(BookingTokenQuerySchema)) { token }: BookingTokenQuery,
+    @Query(new ZodValidationPipe(BookingTokenQuerySchema))
+    { token }: BookingTokenQuery,
   ) {
     return this.checkout.resume(id, token);
   }
@@ -60,7 +82,8 @@ export class PublicBookingsController {
   @HttpCode(200)
   pay(
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Query(new ZodValidationPipe(BookingTokenQuerySchema)) { token }: BookingTokenQuery,
+    @Query(new ZodValidationPipe(BookingTokenQuerySchema))
+    { token }: BookingTokenQuery,
   ) {
     return this.checkout.payDue(id, token);
   }
@@ -68,7 +91,8 @@ export class PublicBookingsController {
   @Get('bookings/:id')
   get(
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Query(new ZodValidationPipe(BookingTokenQuerySchema)) { token }: BookingTokenQuery,
+    @Query(new ZodValidationPipe(BookingTokenQuerySchema))
+    { token }: BookingTokenQuery,
   ) {
     return this.queries.getPublic(id, token);
   }
@@ -77,7 +101,8 @@ export class PublicBookingsController {
   @HttpCode(200)
   cancel(
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Query(new ZodValidationPipe(BookingTokenQuerySchema)) { token }: BookingTokenQuery,
+    @Query(new ZodValidationPipe(BookingTokenQuerySchema))
+    { token }: BookingTokenQuery,
   ) {
     return this.queries.cancelPublic(id, token);
   }
@@ -90,7 +115,8 @@ export class PublicBookingsController {
   @HttpCode(200)
   async requestCancel(
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Query(new ZodValidationPipe(BookingTokenQuerySchema)) { token }: BookingTokenQuery,
+    @Query(new ZodValidationPipe(BookingTokenQuerySchema))
+    { token }: BookingTokenQuery,
   ) {
     await this.cancelRequests.request(id, token);
     return this.queries.getPublic(id, token);
@@ -99,8 +125,16 @@ export class PublicBookingsController {
   /** The raw body is kept for this route only (see app.setup.ts), for the signature check. */
   @Post('stripe/webhook')
   @HttpCode(200)
-  stripeWebhook(@Headers('stripe-signature') signature: string | undefined, @Body() body: unknown) {
-    if (!Buffer.isBuffer(body)) throw new AppError('Expected the raw Stripe payload', 400, 'INVALID_SIGNATURE');
+  stripeWebhook(
+    @Headers('stripe-signature') signature: string | undefined,
+    @Body() body: unknown,
+  ) {
+    if (!Buffer.isBuffer(body))
+      throw new AppError(
+        'Expected the raw Stripe payload',
+        400,
+        'INVALID_SIGNATURE',
+      );
     return this.webhook.handle(body, signature);
   }
 }

@@ -9,7 +9,11 @@ import { GroundsService } from './grounds.service.js';
 
 @Module({
   imports: [AuthModule, SlotsModule],
-  controllers: [GroundsController, AdminGroundsController, AdminGroundPhotosController],
+  controllers: [
+    GroundsController,
+    AdminGroundsController,
+    AdminGroundPhotosController,
+  ],
   providers: [GroundsService, GroundPhotosService],
   exports: [GroundsService],
 })

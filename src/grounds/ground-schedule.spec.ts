@@ -1,4 +1,10 @@
-import { isOpenOn, isPeakSlot, slotPrice, slotStarts, type GroundSchedule } from './ground-schedule.js';
+import {
+  isOpenOn,
+  isPeakSlot,
+  slotPrice,
+  slotStarts,
+  type GroundSchedule,
+} from './ground-schedule.js';
 
 const base: GroundSchedule = {
   openingHour: 6,
@@ -10,20 +16,36 @@ const base: GroundSchedule = {
 };
 
 const times = (schedule: GroundSchedule) =>
-  slotStarts(schedule).map(({ startHour, startMinute }) => `${startHour}:${String(startMinute).padStart(2, '0')}`);
+  slotStarts(schedule).map(
+    ({ startHour, startMinute }) =>
+      `${startHour}:${String(startMinute).padStart(2, '0')}`,
+  );
 
 describe('slotStarts', () => {
   it('makes one slot per hour by default', () => {
-    expect(times({ ...base, openingHour: 8, closingHour: 12 })).toEqual(['8:00', '9:00', '10:00', '11:00']);
+    expect(times({ ...base, openingHour: 8, closingHour: 12 })).toEqual([
+      '8:00',
+      '9:00',
+      '10:00',
+      '11:00',
+    ]);
   });
 
   it('steps by two hours and drops a slot that would overrun closing', () => {
-    expect(slotStarts({ ...base, slotDurationMinutes: 120 }).map((s) => s.startHour)).toEqual([6, 8, 10, 12, 14, 16, 18, 20]);
+    expect(
+      slotStarts({ ...base, slotDurationMinutes: 120 }).map((s) => s.startHour),
+    ).toEqual([6, 8, 10, 12, 14, 16, 18, 20]);
   });
 
   it('steps by 90 minutes, on the half hour, with the last slot ending by closing', () => {
-    expect(times({ ...base, openingHour: 15, closingHour: 24, slotDurationMinutes: 90 }))
-      .toEqual(['15:00', '16:30', '18:00', '19:30', '21:00', '22:30']);
+    expect(
+      times({
+        ...base,
+        openingHour: 15,
+        closingHour: 24,
+        slotDurationMinutes: 90,
+      }),
+    ).toEqual(['15:00', '16:30', '18:00', '19:30', '21:00', '22:30']);
     // 6–23: 11 slots, the last 21:00–22:30; one at 22:30 would run past closing.
     const day = times({ ...base, slotDurationMinutes: 90 });
     expect(day).toHaveLength(11);
@@ -32,7 +54,11 @@ describe('slotStarts', () => {
 });
 
 describe('slotPrice', () => {
-  const peak = { ...base, peakPrice: 1500, peakRanges: [{ fromHour: 17, toHour: 22 }] };
+  const peak = {
+    ...base,
+    peakPrice: 1500,
+    peakRanges: [{ fromHour: 17, toHour: 22 }],
+  };
 
   it('uses the hourly price without peak pricing', () => {
     expect(slotPrice(base, 18)).toBe(1000);
@@ -52,7 +78,11 @@ describe('slotPrice', () => {
   });
 
   it('prices 90 minutes as one and a half hours, per half hour across a peak edge', () => {
-    const ninety = { ...peak, slotDurationMinutes: 90, peakRanges: [{ fromHour: 18, toHour: 22 }] };
+    const ninety = {
+      ...peak,
+      slotDurationMinutes: 90,
+      peakRanges: [{ fromHour: 18, toHour: 22 }],
+    };
     expect(slotPrice(ninety, 15)).toBe(1500);
     expect(slotPrice(ninety, 16, 30)).toBe(1500);
     // 17:30–18:00 off-peak (500) + 18:00–19:00 peak (1500)
@@ -62,11 +92,17 @@ describe('slotPrice', () => {
   });
 
   it('rounds an odd price over 90 minutes to the nearest unit', () => {
-    expect(slotPrice({ ...base, hourlyPrice: 1001, slotDurationMinutes: 90 }, 8)).toBe(1502);
+    expect(
+      slotPrice({ ...base, hourlyPrice: 1001, slotDurationMinutes: 90 }, 8),
+    ).toBe(1502);
   });
 
   it('flags a slot as peak when any half hour is peak', () => {
-    const ninety = { ...peak, slotDurationMinutes: 90, peakRanges: [{ fromHour: 18, toHour: 22 }] };
+    const ninety = {
+      ...peak,
+      slotDurationMinutes: 90,
+      peakRanges: [{ fromHour: 18, toHour: 22 }],
+    };
     expect(isPeakSlot(ninety, 16, 30)).toBe(false);
     expect(isPeakSlot(ninety, 17, 30)).toBe(true);
     expect(isPeakSlot(peak, 16)).toBe(false);
@@ -75,8 +111,10 @@ describe('slotPrice', () => {
 });
 
 describe('isOpenOn', () => {
-  const days = (availableDays: 'everyday' | 'weekdays' | 'weekends' | 'custom', customDays: ('mon' | 'sat')[] = []) =>
-    ({ isActive: true, availableDays, customDays });
+  const days = (
+    availableDays: 'everyday' | 'weekdays' | 'weekends' | 'custom',
+    customDays: ('mon' | 'sat')[] = [],
+  ) => ({ isActive: true, availableDays, customDays });
 
   it('treats Fri–Sat as the weekend and Sun–Thu as weekdays', () => {
     expect(isOpenOn(days('weekends'), 'fri')).toBe(true);
@@ -88,6 +126,8 @@ describe('isOpenOn', () => {
     expect(isOpenOn(days('weekdays'), 'fri')).toBe(false);
     expect(isOpenOn(days('weekdays'), 'sat')).toBe(false);
     expect(isOpenOn(days('custom', ['mon']), 'mon')).toBe(true);
-    expect(isOpenOn({ ...days('everyday'), isActive: false }, 'mon')).toBe(false);
+    expect(isOpenOn({ ...days('everyday'), isActive: false }, 'mon')).toBe(
+      false,
+    );
   });
 });

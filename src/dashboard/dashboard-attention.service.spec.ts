@@ -6,12 +6,17 @@ function setup(refundDue: number) {
     booking: {
       findMany: vi.fn(async (): Promise<object[]> => []),
       // Which count is which is told apart by its filter: wallets under review vs refunds still to send.
-      count: vi.fn(async ({ where }: { where: { status?: string } }) => (where.status === 'cancelled' ? refundDue : 0)),
+      count: vi.fn(async ({ where }: { where: { status?: string } }) =>
+        where.status === 'cancelled' ? refundDue : 0,
+      ),
       groupBy: vi.fn(async () => []),
     },
     slot: { findMany: vi.fn(async () => []) },
   };
-  return { service: new DashboardAttentionService(prisma as unknown as PrismaService), prisma };
+  return {
+    service: new DashboardAttentionService(prisma as unknown as PrismaService),
+    prisma,
+  };
 }
 
 describe('DashboardAttentionService', () => {
@@ -23,8 +28,16 @@ describe('DashboardAttentionService', () => {
     expect(attention).toHaveProperty('needsOutcome');
     expect(prisma.booking.count).toHaveBeenCalledWith({
       where: {
-        deletedAt: null, status: 'cancelled',
-        payments: { some: { deletedAt: null, status: 'refunded', method: { in: ['bkash', 'nagad'] }, refundSentAt: null } },
+        deletedAt: null,
+        status: 'cancelled',
+        payments: {
+          some: {
+            deletedAt: null,
+            status: 'refunded',
+            method: { in: ['bkash', 'nagad'] },
+            refundSentAt: null,
+          },
+        },
       },
     });
   });

@@ -7,18 +7,33 @@ import { releaseStaleBookingSlots, tooManySlots } from './booking-slots.js';
 import type { CheckoutInput } from './bookings.schemas.js';
 
 /** The start times a checkout asks for: `slots`, or the single `startHour` / `startMinute`. Earliest first; at most `max` (400 TOO_MANY_SLOTS), the limit from the slot settings. */
-export function requestedStarts(input: Pick<CheckoutInput, 'slots' | 'startHour' | 'startMinute'>, max: number): SlotStart[] {
-  const starts = input.slots ?? [{ startHour: input.startHour!, startMinute: input.startMinute }];
+export function requestedStarts(
+  input: Pick<CheckoutInput, 'slots' | 'startHour' | 'startMinute'>,
+  max: number,
+): SlotStart[] {
+  const starts = input.slots ?? [
+    { startHour: input.startHour!, startMinute: input.startMinute },
+  ];
   if (starts.length > max) throw tooManySlots(max);
   return [...starts].sort((a, b) => startMinutesOf(a) - startMinutesOf(b));
 }
 
 /** The stored slots at those start times, earliest first, in one query. Any missing: 409 SLOT_NOT_AVAILABLE. */
 export async function resolveSlots(
-  db: Pick<PrismaService, 'slot'>, groundId: string, date: IsoDate, starts: SlotStart[],
+  db: Pick<PrismaService, 'slot'>,
+  groundId: string,
+  date: IsoDate,
+  starts: SlotStart[],
 ): Promise<Slot[]> {
   const found = await db.slot.findMany({
-    where: { groundId, date: toDbDate(date), OR: starts.map(({ startHour, startMinute }) => ({ startHour, startMinute })) },
+    where: {
+      groundId,
+      date: toDbDate(date),
+      OR: starts.map(({ startHour, startMinute }) => ({
+        startHour,
+        startMinute,
+      })),
+    },
   });
   if (found.length !== starts.length) throw slotNotAvailable();
   return found.sort((a, b) => startMinutesOf(a) - startMinutesOf(b));
@@ -29,8 +44,18 @@ export async function resolveSlots(
  * count is short and this throws 409, so the surrounding transaction rolls back and nothing stays claimed.
  * First frees stale BookingSlot live indexes left by cancelled bookings (see `releaseStaleBookingSlots`).
  */
-export async function claimSlots(tx: Prisma.TransactionClient, slots: { id: string }[], data: Prisma.SlotUpdateManyMutationInput) {
-  await releaseStaleBookingSlots(tx, slots.map((s) => s.id));
-  const { count } = await tx.slot.updateMany({ where: { id: { in: slots.map((s) => s.id) }, status: 'available' }, data });
+export async function claimSlots(
+  tx: Prisma.TransactionClient,
+  slots: { id: string }[],
+  data: Prisma.SlotUpdateManyMutationInput,
+) {
+  await releaseStaleBookingSlots(
+    tx,
+    slots.map((s) => s.id),
+  );
+  const { count } = await tx.slot.updateMany({
+    where: { id: { in: slots.map((s) => s.id) }, status: 'available' },
+    data,
+  });
   if (count !== slots.length) throw slotNotAvailable();
 }

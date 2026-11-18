@@ -17,8 +17,27 @@ import { StaffBookingsService } from './staff-bookings.service.js';
 import { StripeWebhookService } from './stripe-webhook.service.js';
 
 @Module({
-  imports: [AuthModule, CustomerAuthModule, SlotSettingsModule, BookingCoreModule, SettingsCoreModule],
-  controllers: [AdminBookingsController, AdminBookingEventsController, PublicBookingsController, CustomerBookingsController],
-  providers: [BookingQueriesService, BookingEventsService, StaffBookingsService, CheckoutService, StripeWebhookService, BookingJobs, CancelRequestService],
+  imports: [
+    AuthModule,
+    CustomerAuthModule,
+    SlotSettingsModule,
+    BookingCoreModule,
+    SettingsCoreModule,
+  ],
+  controllers: [
+    AdminBookingsController,
+    AdminBookingEventsController,
+    PublicBookingsController,
+    CustomerBookingsController,
+  ],
+  providers: [
+    BookingQueriesService,
+    BookingEventsService,
+    StaffBookingsService,
+    CheckoutService,
+    StripeWebhookService,
+    BookingJobs,
+    CancelRequestService,
+  ],
 })
 export class BookingsModule {}

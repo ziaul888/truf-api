@@ -6,8 +6,16 @@ import { DEFAULT_VENUE } from './venue.schemas.js';
 
 describe('settings helpers', () => {
   it('lists changed leaf paths; arrays count as one field', () => {
-    const before = { hero: { headline: 'A', badge: 'B' }, items: [1, 2], social: { facebook: '' } };
-    const after = { hero: { headline: 'A2', badge: 'B' }, items: [1, 3], social: { facebook: '' } };
+    const before = {
+      hero: { headline: 'A', badge: 'B' },
+      items: [1, 2],
+      social: { facebook: '' },
+    };
+    const after = {
+      hero: { headline: 'A2', badge: 'B' },
+      items: [1, 3],
+      social: { facebook: '' },
+    };
     expect(changedFields(before, after)).toEqual(['hero.headline', 'items']);
     expect(changedFields(before, before)).toEqual([]);
   });
@@ -17,7 +25,11 @@ describe('settings helpers', () => {
   });
 
   it('a stored section that no longer fits its schema falls back to the defaults', async () => {
-    const prisma = { settingsSection: { findUnique: vi.fn(async () => ({ key: 'venue', data: { name: 1 } })) } };
+    const prisma = {
+      settingsSection: {
+        findUnique: vi.fn(async () => ({ key: 'venue', data: { name: 1 } })),
+      },
+    };
     const store = new SettingsStore(prisma as unknown as PrismaService);
     expect(await store.get('venue')).toEqual(DEFAULT_VENUE);
   });

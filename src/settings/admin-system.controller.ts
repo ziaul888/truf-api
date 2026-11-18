@@ -1,8 +1,18 @@
-import { Body, Controller, Get, HttpCode, Post, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard, CurrentUser, Roles } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
-import { ResetSettingsSchema, type ResetSettingsInput } from './notifications.schemas.js';
+import {
+  ResetSettingsSchema,
+  type ResetSettingsInput,
+} from './notifications.schemas.js';
 import { SettingsResetService } from './settings-reset.service.js';
 import { SystemStatusService } from './system-status.service.js';
 
@@ -31,7 +41,11 @@ export class AdminSystemController {
   @Post('settings/reset')
   @HttpCode(200)
   @Roles('admin')
-  reset(@Body(new ZodValidationPipe(ResetSettingsSchema)) { sections }: ResetSettingsInput, @CurrentUser() user: AuthUser) {
+  reset(
+    @Body(new ZodValidationPipe(ResetSettingsSchema))
+    { sections }: ResetSettingsInput,
+    @CurrentUser() user: AuthUser,
+  ) {
     return this.resets.reset(sections, user.id);
   }
 }

@@ -11,7 +11,12 @@ export interface ActivityDto {
   detail: string | null;
   /** Null for automatic events (Stripe, jobs, portal checkouts). */
   user: { id: string; name: string } | null;
-  booking: { id: string; bookingNumber: string; customerName: string; groundName: string };
+  booking: {
+    id: string;
+    bookingNumber: string;
+    customerName: string;
+    groundName: string;
+  };
   createdAt: Date;
 }
 
@@ -27,17 +32,35 @@ export class BookingEventsService {
     };
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.bookingEvent.findMany({
-        where, orderBy: [{ createdAt: 'desc' }, { id: 'desc' }], skip: (q.page - 1) * q.limit, take: q.limit,
+        where,
+        orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+        skip: (q.page - 1) * q.limit,
+        take: q.limit,
         include: {
           user: { select: { id: true, name: true } },
-          booking: { select: { id: true, bookingNumber: true, contactName: true, ground: { select: { name: true } } } },
+          booking: {
+            select: {
+              id: true,
+              bookingNumber: true,
+              contactName: true,
+              ground: { select: { name: true } },
+            },
+          },
         },
       }),
       this.prisma.bookingEvent.count({ where }),
     ]);
     const data = rows.map((e) => ({
-      id: e.id, type: e.type, detail: e.detail, user: e.user,
-      booking: { id: e.booking.id, bookingNumber: e.booking.bookingNumber, customerName: e.booking.contactName, groundName: e.booking.ground.name },
+      id: e.id,
+      type: e.type,
+      detail: e.detail,
+      user: e.user,
+      booking: {
+        id: e.booking.id,
+        bookingNumber: e.booking.bookingNumber,
+        customerName: e.booking.contactName,
+        groundName: e.booking.ground.name,
+      },
       createdAt: e.createdAt,
     }));
     return { data, total, page: q.page, limit: q.limit };

@@ -1,7 +1,15 @@
-import { Injectable, createParamDecorator, type CanActivate, type ExecutionContext } from '@nestjs/common';
+import {
+  Injectable,
+  createParamDecorator,
+  type CanActivate,
+  type ExecutionContext,
+} from '@nestjs/common';
 import { CUSTOMER_COOKIE } from './customer-cookie.js';
 import { CustomerAuthService } from './customer-auth.service.js';
-import type { CustomerRequest, CustomerSession } from './customer-auth.types.js';
+import type {
+  CustomerRequest,
+  CustomerSession,
+} from './customer-auth.types.js';
 
 /** The signed-in customer, set by `CustomerAuthGuard`. */
 export const CurrentCustomer = createParamDecorator(

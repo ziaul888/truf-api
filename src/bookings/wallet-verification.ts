@@ -1,6 +1,11 @@
 import { AppError } from '../common/app-error.js';
 import type { PaymentStatus, Prisma } from '../generated/prisma/client.js';
-import { bookingNotPending, paidOf, pendingWalletPayment, receivedDetail } from './booking-rules.js';
+import {
+  bookingNotPending,
+  paidOf,
+  pendingWalletPayment,
+  receivedDetail,
+} from './booking-rules.js';
 import type { BookingRow } from './booking.dto.js';
 
 /**
@@ -9,21 +14,37 @@ import type { BookingRow } from './booking.dto.js';
  * already paid by other means (409, nothing changes), or when someone else handled the payment first.
  */
 export async function verifyWalletPayment(
-  tx: Prisma.TransactionClient, booking: BookingRow, actorId: string,
+  tx: Prisma.TransactionClient,
+  booking: BookingRow,
+  actorId: string,
 ): Promise<{ amount: number; status: PaymentStatus }[]> {
   const wallet = pendingWalletPayment(booking.payments)!;
   if (paidOf(booking.payments) + wallet.amount > booking.total) {
-    throw new AppError('Payments already cover this booking. Reject this payment instead of verifying it', 409, 'WALLET_PAYMENT_EXCEEDS_DUE');
+    throw new AppError(
+      'Payments already cover this booking. Reject this payment instead of verifying it',
+      409,
+      'WALLET_PAYMENT_EXCEEDS_DUE',
+    );
   }
   const { count } = await tx.payment.updateMany({
-    where: { id: wallet.id, status: 'pending' }, data: { status: 'succeeded', recordedById: actorId, receivedAt: new Date() },
+    where: { id: wallet.id, status: 'pending' },
+    data: {
+      status: 'succeeded',
+      recordedById: actorId,
+      receivedAt: new Date(),
+    },
   });
-  if (count === 0) throw bookingNotPending('This payment has already been handled');
+  if (count === 0)
+    throw bookingNotPending('This payment has already been handled');
   await tx.bookingEvent.create({
     data: {
-      bookingId: booking.id, type: 'payment_received', userId: actorId,
+      bookingId: booking.id,
+      type: 'payment_received',
+      userId: actorId,
       detail: `${receivedDetail(wallet.amount, wallet.method, wallet.reference)}, verified by staff`,
     },
   });
-  return booking.payments.map((p) => (p.id === wallet.id ? { ...p, status: 'succeeded' as const } : p));
+  return booking.payments.map((p) =>
+    p.id === wallet.id ? { ...p, status: 'succeeded' as const } : p,
+  );
 }

@@ -7,17 +7,23 @@ export const DEFAULT_WEBSITE: WebsiteStored = {
     headline: 'Welcome to',
     description:
       'See which slots are free right now and book your ground in a minute.',
-    imageUrl: 'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=1920',
+    imageUrl:
+      'https://images.unsplash.com/photo-1551958219-acbc608c6377?w=1920',
     videoUrl: '',
   },
   sections: {
     sportChips: { enabled: true, title: 'Browse by sport' },
-    featuredGrounds: { enabled: true, title: 'Our grounds', subtitle: 'Pick the field that fits your match' },
+    featuredGrounds: {
+      enabled: true,
+      title: 'Our grounds',
+      subtitle: 'Pick the field that fits your match',
+    },
     amenities: {
       // Example items only: off until the admin edits them to what the venue really has.
       enabled: false,
       title: 'More than just a pitch',
-      subtitle: 'Everything you need at the venue, included with every booking.',
+      subtitle:
+        'Everything you need at the venue, included with every booking.',
       items: [
         { icon: 'parking', label: 'Free parking' },
         { icon: 'showers', label: 'Showers' },
@@ -32,9 +38,18 @@ export const DEFAULT_WEBSITE: WebsiteStored = {
       badge: 'HOW IT WORKS',
       title: 'Three steps to your match',
       steps: [
-        { title: 'Pick a ground', body: 'Choose the ground and sport that fit your match.' },
-        { title: 'Pick a slot & pay', body: 'See open slots in real time and pay the way that suits you.' },
-        { title: 'Show up & play', body: 'Your booking link arrives by email. Use it to check your booking, or to cancel it before the cancellation cutoff.' },
+        {
+          title: 'Pick a ground',
+          body: 'Choose the ground and sport that fit your match.',
+        },
+        {
+          title: 'Pick a slot & pay',
+          body: 'See open slots in real time and pay the way that suits you.',
+        },
+        {
+          title: 'Show up & play',
+          body: 'Your booking link arrives by email. Use it to check your booking, or to cancel it before the cancellation cutoff.',
+        },
       ],
       buttonLabel: 'Browse our grounds',
     },
@@ -42,7 +57,8 @@ export const DEFAULT_WEBSITE: WebsiteStored = {
       enabled: true,
       badge: 'VISIT US',
       title: 'Come and play',
-      imageUrl: 'https://images.unsplash.com/photo-1486286701208-1d58e9338013?w=1200',
+      imageUrl:
+        'https://images.unsplash.com/photo-1486286701208-1d58e9338013?w=1200',
     },
   },
   social: { facebook: '', instagram: '', whatsapp: '' },

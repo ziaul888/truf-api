@@ -19,6 +19,10 @@ export class SystemStateService {
 
   async set(key: string, data: object): Promise<void> {
     const json = data as Prisma.InputJsonValue;
-    await this.prisma.systemState.upsert({ where: { key }, create: { key, data: json }, update: { data: json } });
+    await this.prisma.systemState.upsert({
+      where: { key },
+      create: { key, data: json },
+      update: { data: json },
+    });
   }
 }

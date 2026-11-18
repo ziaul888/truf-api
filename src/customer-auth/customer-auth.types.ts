@@ -22,7 +22,16 @@ export interface CustomerJwtPayload {
 
 export type CustomerRequest = Request & { customer?: CustomerSession };
 
-export const toCustomerSession = (phone: string, c: Customer | null): CustomerSession => {
+export const toCustomerSession = (
+  phone: string,
+  c: Customer | null,
+): CustomerSession => {
   const live = c && !c.deletedAt ? c : null;
-  return { phone, customerId: live?.id ?? null, name: live?.name ?? null, email: live?.email ?? null, needsProfile: !live };
+  return {
+    phone,
+    customerId: live?.id ?? null,
+    name: live?.name ?? null,
+    email: live?.email ?? null,
+    needsProfile: !live,
+  };
 };

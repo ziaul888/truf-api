@@ -1,8 +1,15 @@
 import { Injectable } from '@nestjs/common';
 import { BOOKING_INCLUDE } from '../bookings/booking.dto.js';
 import { owedOf, paidOf } from '../bookings/booking-rules.js';
-import { currentSlots, windowOf, windowTimes } from '../bookings/booking-slots.js';
-import { CUSTOMER_SUMMARY_INCLUDE, toCustomerDto } from '../customers/customer.dto.js';
+import {
+  currentSlots,
+  windowOf,
+  windowTimes,
+} from '../bookings/booking-slots.js';
+import {
+  CUSTOMER_SUMMARY_INCLUDE,
+  toCustomerDto,
+} from '../customers/customer.dto.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { venueNow } from '../slots/venue-time.js';
 import { csvLine, csvMoney } from './csv.js';
@@ -37,32 +44,79 @@ export class ReportExportService {
     if (range) assertReportRange(range);
     const suffix = range ? `${range.from}-to-${range.to}` : venueNow().date;
     const filename = `${q.type}-${suffix}.csv`;
-    if (q.type === 'revenue') return { filename, lines: this.revenue(range!, q.groupBy as GroupBy) };
-    if (q.type === 'bookings') return { filename, lines: this.bookings(range!) };
+    if (q.type === 'revenue')
+      return { filename, lines: this.revenue(range!, q.groupBy as GroupBy) };
+    if (q.type === 'bookings')
+      return { filename, lines: this.bookings(range!) };
     return { filename, lines: this.customers(range) };
   }
 
-  private async *revenue(r: ReportRange, groupBy: GroupBy): AsyncGenerator<string> {
+  private async *revenue(
+    r: ReportRange,
+    groupBy: GroupBy,
+  ): AsyncGenerator<string> {
     // bKash and Nagad came later: appended, so existing column positions don't move.
-    yield csvLine(['Period start', 'Period end', 'Received', 'Refunds', 'Net revenue', 'Card', 'Cash', 'Bank transfer', 'Bookings', 'bKash', 'Nagad']);
+    yield csvLine([
+      'Period start',
+      'Period end',
+      'Received',
+      'Refunds',
+      'Net revenue',
+      'Card',
+      'Cash',
+      'Bank transfer',
+      'Bookings',
+      'bKash',
+      'Nagad',
+    ]);
     for (const row of await this.reports.revenueRows(r, groupBy)) {
       yield csvLine([
-        row.period, row.end, csvMoney(row.received), csvMoney(row.refunds), csvMoney(row.revenue),
-        csvMoney(row.byMethod.card), csvMoney(row.byMethod.cash), csvMoney(row.byMethod.bank_transfer), row.bookings,
-        csvMoney(row.byMethod.bkash), csvMoney(row.byMethod.nagad),
+        row.period,
+        row.end,
+        csvMoney(row.received),
+        csvMoney(row.refunds),
+        csvMoney(row.revenue),
+        csvMoney(row.byMethod.card),
+        csvMoney(row.byMethod.cash),
+        csvMoney(row.byMethod.bank_transfer),
+        row.bookings,
+        csvMoney(row.byMethod.bkash),
+        csvMoney(row.byMethod.nagad),
       ]);
     }
   }
 
   private async *bookings(r: ReportRange): AsyncGenerator<string> {
     yield csvLine([
-      'Booking #', 'Customer', 'Phone', 'Ground', 'Date', 'Start', 'End', 'Amount', 'Service fee', 'Total', 'Paid', 'Due',
-      'Status', 'Payment status', 'Source', 'Created', 'Slots',
+      'Booking #',
+      'Customer',
+      'Phone',
+      'Ground',
+      'Date',
+      'Start',
+      'End',
+      'Amount',
+      'Service fee',
+      'Total',
+      'Paid',
+      'Due',
+      'Status',
+      'Payment status',
+      'Source',
+      'Created',
+      'Slots',
     ]);
     for (let cursor: string | undefined; ;) {
       const rows = await this.prisma.booking.findMany({
-        where: reportBookingsWhere(r), include: BOOKING_INCLUDE, take: BATCH,
-        orderBy: [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }, { id: 'asc' }],
+        where: reportBookingsWhere(r),
+        include: BOOKING_INCLUDE,
+        take: BATCH,
+        orderBy: [
+          { slot: { date: 'asc' } },
+          { slot: { startHour: 'asc' } },
+          { slot: { startMinute: 'asc' } },
+          { id: 'asc' },
+        ],
         ...(cursor && { cursor: { id: cursor }, skip: 1 }),
       });
       for (const b of rows) {
@@ -70,9 +124,23 @@ export class ReportExportService {
         const window = windowOf(b);
         const { startTime, endTime } = windowTimes(window);
         yield csvLine([
-          b.bookingNumber, b.contactName, b.contactPhone, b.ground.name, window.date, startTime, endTime,
-          csvMoney(b.amount), csvMoney(b.serviceFee), csvMoney(b.total), csvMoney(paidOf(b.payments)), csvMoney(owedOf(b, b.payments)),
-          b.status, b.paymentStatus, b.source, localTime(b.createdAt), currentSlots(b).length,
+          b.bookingNumber,
+          b.contactName,
+          b.contactPhone,
+          b.ground.name,
+          window.date,
+          startTime,
+          endTime,
+          csvMoney(b.amount),
+          csvMoney(b.serviceFee),
+          csvMoney(b.total),
+          csvMoney(paidOf(b.payments)),
+          csvMoney(owedOf(b, b.payments)),
+          b.status,
+          b.paymentStatus,
+          b.source,
+          localTime(b.createdAt),
+          currentSlots(b).length,
         ]);
       }
       if (rows.length < BATCH) return;
@@ -82,16 +150,36 @@ export class ReportExportService {
 
   /** All customers, or those created in the range. */
   private async *customers(r: ReportRange | null): AsyncGenerator<string> {
-    yield csvLine(['Name', 'Phone', 'Email', 'Customer since', 'Bookings', 'Total spent', 'Last booking', 'Due amount', 'Tag']);
+    yield csvLine([
+      'Name',
+      'Phone',
+      'Email',
+      'Customer since',
+      'Bookings',
+      'Total spent',
+      'Last booking',
+      'Due amount',
+      'Tag',
+    ]);
     for (let cursor: string | undefined; ;) {
       const rows = await this.prisma.customer.findMany({
-        where: { deletedAt: null, ...(r && { createdAt: instantsOf(r) }) }, include: CUSTOMER_SUMMARY_INCLUDE, take: BATCH,
+        where: { deletedAt: null, ...(r && { createdAt: instantsOf(r) }) },
+        include: CUSTOMER_SUMMARY_INCLUDE,
+        take: BATCH,
         orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
         ...(cursor && { cursor: { id: cursor }, skip: 1 }),
       });
       for (const c of rows.map(toCustomerDto)) {
         yield csvLine([
-          c.name, c.phone, c.email, venueNow(c.createdAt).date, c.bookings, csvMoney(c.totalSpent), c.lastBooking, csvMoney(c.dueAmount), c.tag,
+          c.name,
+          c.phone,
+          c.email,
+          venueNow(c.createdAt).date,
+          c.bookings,
+          csvMoney(c.totalSpent),
+          c.lastBooking,
+          csvMoney(c.dueAmount),
+          c.tag,
         ]);
       }
       if (rows.length < BATCH) return;

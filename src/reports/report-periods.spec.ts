@@ -1,8 +1,19 @@
-import { autoGroupBy, periodKeyOf, periodsOf, previousRange, trendOf, percent, venueDateOf } from './report-periods.js';
+import {
+  autoGroupBy,
+  periodKeyOf,
+  periodsOf,
+  previousRange,
+  trendOf,
+  percent,
+  venueDateOf,
+} from './report-periods.js';
 
 describe('report periods', () => {
   it('previous period is the same length immediately before', () => {
-    expect(previousRange({ from: '2026-10-02', to: '2026-10-31' })).toEqual({ from: '2026-09-02', to: '2026-10-01' });
+    expect(previousRange({ from: '2026-10-02', to: '2026-10-31' })).toEqual({
+      from: '2026-09-02',
+      to: '2026-10-01',
+    });
   });
 
   it('picks the grouping from the range length', () => {
@@ -20,17 +31,33 @@ describe('report periods', () => {
 
   it('weeks start on Saturday and are clipped to the range', () => {
     // 2026-10-24 is a Saturday.
-    expect(periodsOf({ from: '2026-10-22', to: '2026-11-02' }, 'week')).toEqual([
-      { period: '2026-10-22', end: '2026-10-23', label: '22 – 23 Oct' },
-      { period: '2026-10-24', end: '2026-10-30', label: '24 – 30 Oct' },
-      { period: '2026-10-31', end: '2026-11-02', label: '31 Oct – 2 Nov' },
-    ]);
-    expect(periodKeyOf('2026-10-29', { from: '2026-10-22', to: '2026-11-02' }, 'week')).toBe('2026-10-24');
-    expect(periodKeyOf('2026-10-23', { from: '2026-10-22', to: '2026-11-02' }, 'week')).toBe('2026-10-22');
+    expect(periodsOf({ from: '2026-10-22', to: '2026-11-02' }, 'week')).toEqual(
+      [
+        { period: '2026-10-22', end: '2026-10-23', label: '22 – 23 Oct' },
+        { period: '2026-10-24', end: '2026-10-30', label: '24 – 30 Oct' },
+        { period: '2026-10-31', end: '2026-11-02', label: '31 Oct – 2 Nov' },
+      ],
+    );
+    expect(
+      periodKeyOf(
+        '2026-10-29',
+        { from: '2026-10-22', to: '2026-11-02' },
+        'week',
+      ),
+    ).toBe('2026-10-24');
+    expect(
+      periodKeyOf(
+        '2026-10-23',
+        { from: '2026-10-22', to: '2026-11-02' },
+        'week',
+      ),
+    ).toBe('2026-10-22');
   });
 
   it('months, across a year end', () => {
-    expect(periodsOf({ from: '2026-12-15', to: '2027-01-10' }, 'month')).toEqual([
+    expect(
+      periodsOf({ from: '2026-12-15', to: '2027-01-10' }, 'month'),
+    ).toEqual([
       { period: '2026-12-15', end: '2026-12-31', label: 'Dec 2026' },
       { period: '2027-01-01', end: '2027-01-10', label: 'Jan 2027' },
     ]);

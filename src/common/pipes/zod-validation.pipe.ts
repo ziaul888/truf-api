@@ -7,7 +7,9 @@ import type { ApiFieldError } from '../api-response.js';
 z.config({
   customError: (issue) => {
     if (issue.code !== 'invalid_type') return undefined;
-    return issue.input === undefined ? 'This field is required' : `Must be a ${issue.expected}`;
+    return issue.input === undefined
+      ? 'This field is required'
+      : `Must be a ${issue.expected}`;
   },
 });
 
@@ -26,6 +28,10 @@ export class ZodValidationPipe<T> implements PipeTransform<unknown, T> {
       field: issue.path.join('.'),
       message: issue.message,
     }));
-    throw new BadRequestException({ message: 'Some fields are invalid', code: 'VALIDATION_FAILED', details });
+    throw new BadRequestException({
+      message: 'Some fields are invalid',
+      code: 'VALIDATION_FAILED',
+      details,
+    });
   }
 }

@@ -1,5 +1,8 @@
 import { Injectable } from '@nestjs/common';
-import { DEFAULT_SLOT_SETTINGS, SlotSettingsService } from '../slots/slot-settings.service.js';
+import {
+  DEFAULT_SLOT_SETTINGS,
+  SlotSettingsService,
+} from '../slots/slot-settings.service.js';
 import { NotificationSettingsService } from './notification-settings.service.js';
 import { SETTINGS_SECTIONS } from './notifications.schemas.js';
 import { SettingsStore } from './settings-store.service.js';
@@ -20,14 +23,18 @@ export class SettingsResetService {
     private readonly website: WebsiteSettingsService,
   ) {}
 
-  async reset(sections: readonly Section[] = SETTINGS_SECTIONS, userId: string) {
+  async reset(
+    sections: readonly Section[] = SETTINGS_SECTIONS,
+    userId: string,
+  ) {
     const result: Partial<Record<Section, unknown>> = {};
     // Slots first: a notifications reset also sets the two notify flags stored there.
     if (sections.includes('slots')) {
       result.slots = await this.slots.update(DEFAULT_SLOT_SETTINGS);
       await this.store.record('slots', ['*'], userId, 'reset');
     }
-    if (sections.includes('notifications')) result.notifications = await this.notifications.reset(userId);
+    if (sections.includes('notifications'))
+      result.notifications = await this.notifications.reset(userId);
     if (sections.includes('website')) {
       await this.store.reset('website', userId);
       result.website = await this.website.get();

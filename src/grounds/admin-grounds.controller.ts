@@ -1,10 +1,23 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+} from '@nestjs/common';
 import { AuthGuard, Roles } from '../auth/auth.guard.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
 import {
-  AdminListGroundsQuerySchema, CreateGroundSchema, UpdateGroundSchema,
-  type AdminListGroundsQuery, type CreateGroundInput, type UpdateGroundInput,
+  AdminListGroundsQuerySchema,
+  CreateGroundSchema,
+  UpdateGroundSchema,
+  type AdminListGroundsQuery,
+  type CreateGroundInput,
+  type UpdateGroundInput,
 } from './grounds.schemas.js';
 import { GroundsService } from './grounds.service.js';
 
@@ -15,7 +28,10 @@ export class AdminGroundsController {
   constructor(private readonly grounds: GroundsService) {}
 
   @Get()
-  list(@Query(new ZodValidationPipe(AdminListGroundsQuerySchema)) query: AdminListGroundsQuery) {
+  list(
+    @Query(new ZodValidationPipe(AdminListGroundsQuerySchema))
+    query: AdminListGroundsQuery,
+  ) {
     return this.grounds.list(query);
   }
 
@@ -26,7 +42,9 @@ export class AdminGroundsController {
 
   @Post()
   @Roles('admin')
-  create(@Body(new ZodValidationPipe(CreateGroundSchema)) body: CreateGroundInput) {
+  create(
+    @Body(new ZodValidationPipe(CreateGroundSchema)) body: CreateGroundInput,
+  ) {
     return this.grounds.create(body);
   }
 

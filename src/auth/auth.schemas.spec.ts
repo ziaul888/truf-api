@@ -12,8 +12,12 @@ describe('OptionalEmailSchema', () => {
   });
 
   it('trims and lowercases a real email, and refuses anything else', () => {
-    expect(schema.parse({ email: ' Rakib@Example.COM ' })).toEqual({ email: 'rakib@example.com' });
-    expect(schema.safeParse({ email: 'not-an-email' }).error?.issues[0]?.message).toBe('Enter a valid email');
+    expect(schema.parse({ email: ' Rakib@Example.COM ' })).toEqual({
+      email: 'rakib@example.com',
+    });
+    expect(
+      schema.safeParse({ email: 'not-an-email' }).error?.issues[0]?.message,
+    ).toBe('Enter a valid email');
     expect(schema.safeParse({ email: 42 }).success).toBe(false);
   });
 });

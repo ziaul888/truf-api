@@ -1,4 +1,8 @@
-import type { BookingSeriesStatus, BookingStatus, Prisma } from '../generated/prisma/client.js';
+import type {
+  BookingSeriesStatus,
+  BookingStatus,
+  Prisma,
+} from '../generated/prisma/client.js';
 import { dueOf, paidOf } from '../bookings/booking-rules.js';
 import { slotTimes } from '../slots/slot-time.js';
 import { fromDbDate, type IsoDate } from '../slots/venue-time.js';
@@ -12,15 +16,23 @@ export const SERIES_INCLUDE = {
     where: { deletedAt: null },
     orderBy: { slot: { date: 'asc' } },
     select: {
-      id: true, bookingNumber: true, status: true, total: true,
+      id: true,
+      bookingNumber: true,
+      status: true,
+      total: true,
       slot: { select: { date: true } },
-      payments: { where: { deletedAt: null }, select: { amount: true, status: true } },
+      payments: {
+        where: { deletedAt: null },
+        select: { amount: true, status: true },
+      },
     },
   },
   skips: { orderBy: { date: 'asc' } },
 } satisfies Prisma.BookingSeriesInclude;
 
-export type SeriesRow = Prisma.BookingSeriesGetPayload<{ include: typeof SERIES_INCLUDE }>;
+export type SeriesRow = Prisma.BookingSeriesGetPayload<{
+  include: typeof SERIES_INCLUDE;
+}>;
 
 export interface SeriesBookingDto {
   id: string;
@@ -76,7 +88,12 @@ export interface SeriesDto {
   skipped: { date: IsoDate; reason: SkipReason }[];
 }
 
-const emptySums = (): SeriesSums => ({ bookings: 0, total: 0, paid: 0, due: 0 });
+const emptySums = (): SeriesSums => ({
+  bookings: 0,
+  total: 0,
+  paid: 0,
+  due: 0,
+});
 
 function add(sums: SeriesSums, b: SeriesBookingDto) {
   sums.bookings++;
@@ -86,7 +103,10 @@ function add(sums: SeriesSums, b: SeriesBookingDto) {
 }
 
 /** Totals and per-month sums, months in order. Cancelled bookings only add to their month's `cancelled`. */
-export function summarise(bookings: SeriesBookingDto[]): { totals: SeriesSums; months: SeriesMonthDto[] } {
+export function summarise(bookings: SeriesBookingDto[]): {
+  totals: SeriesSums;
+  months: SeriesMonthDto[];
+} {
   const totals = emptySums();
   const months = new Map<string, SeriesMonthDto>();
   for (const b of bookings) {
@@ -100,27 +120,52 @@ export function summarise(bookings: SeriesBookingDto[]): { totals: SeriesSums; m
     add(sums, b);
     add(totals, b);
   }
-  return { totals, months: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)) };
+  return {
+    totals,
+    months: [...months.values()].sort((a, b) => a.month.localeCompare(b.month)),
+  };
 }
 
-const toSeriesBooking = (b: SeriesRow['bookings'][number]): SeriesBookingDto => ({
-  id: b.id, bookingNumber: b.bookingNumber, date: fromDbDate(b.slot.date), status: b.status,
-  total: b.total, paid: paidOf(b.payments), due: dueOf(b, b.payments),
+const toSeriesBooking = (
+  b: SeriesRow['bookings'][number],
+): SeriesBookingDto => ({
+  id: b.id,
+  bookingNumber: b.bookingNumber,
+  date: fromDbDate(b.slot.date),
+  status: b.status,
+  total: b.total,
+  paid: paidOf(b.payments),
+  due: dueOf(b, b.payments),
 });
 
 export function toSeriesDto(s: SeriesRow): SeriesDto {
   const bookings = s.bookings.map(toSeriesBooking);
   return {
-    id: s.id, status: s.status,
+    id: s.id,
+    status: s.status,
     ground: { id: s.ground.id, name: s.ground.name },
-    customer: { id: s.customer.id, name: s.customer.name, phone: s.customer.phone ?? s.contactPhone },
-    ...slotTimes({ startHour: s.startHour, startMinute: s.startMinute, durationMinutes: s.ground.slotDurationMinutes }),
+    customer: {
+      id: s.customer.id,
+      name: s.customer.name,
+      phone: s.customer.phone ?? s.contactPhone,
+    },
+    ...slotTimes({
+      startHour: s.startHour,
+      startMinute: s.startMinute,
+      durationMinutes: s.ground.slotDurationMinutes,
+    }),
     weekdays: s.weekdays,
-    fromDate: fromDbDate(s.fromDate), untilDate: s.untilDate ? fromDbDate(s.untilDate) : null,
+    fromDate: fromDbDate(s.fromDate),
+    untilDate: s.untilDate ? fromDbDate(s.untilDate) : null,
     bookedThrough: s.bookedThrough ? fromDbDate(s.bookedThrough) : null,
-    notes: s.notes, createdAt: s.createdAt, stoppedAt: s.stoppedAt,
+    notes: s.notes,
+    createdAt: s.createdAt,
+    stoppedAt: s.stoppedAt,
     ...summarise(bookings),
     bookings,
-    skipped: s.skips.map((k) => ({ date: fromDbDate(k.date), reason: k.reason as SkipReason })),
+    skipped: s.skips.map((k) => ({
+      date: fromDbDate(k.date),
+      reason: k.reason as SkipReason,
+    })),
   };
 }

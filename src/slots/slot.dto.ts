@@ -1,11 +1,24 @@
-import type { BlockReason, BookingPaymentStatus, Prisma, SlotStatus } from '../generated/prisma/client.js';
+import type {
+  BlockReason,
+  BookingPaymentStatus,
+  Prisma,
+  SlotStatus,
+} from '../generated/prisma/client.js';
 import { slotTimes, type SlotTimes } from './slot-time.js';
 import { fromDbDate, type IsoDate } from './venue-time.js';
 
 const LIVE_BOOKING_SELECT = {
-  id: true, bookingNumber: true, paymentStatus: true, total: true, contactName: true, contactPhone: true,
+  id: true,
+  bookingNumber: true,
+  paymentStatus: true,
+  total: true,
+  contactName: true,
+  contactPhone: true,
   _count: { select: { bookingSlots: true } },
-  payments: { where: { deletedAt: null }, select: { amount: true, status: true } },
+  payments: {
+    where: { deletedAt: null },
+    select: { amount: true, status: true },
+  },
 } satisfies Prisma.BookingSelect;
 
 /** Joins every admin slot query needs. */
@@ -13,9 +26,20 @@ export const SLOT_INCLUDE = {
   ground: { select: { name: true } },
   blockedBy: { select: { id: true, name: true } },
   /** The live booking (pending, confirmed or completed) holding this slot, if any: through its BookingSlot, so any slot of a multi-slot booking has it. */
-  bookingSlots: { where: { liveSlotId: { not: null }, booking: { status: { not: 'cancelled' } } }, take: 1, select: { booking: { select: LIVE_BOOKING_SELECT } } },
+  bookingSlots: {
+    where: {
+      liveSlotId: { not: null },
+      booking: { status: { not: 'cancelled' } },
+    },
+    take: 1,
+    select: { booking: { select: LIVE_BOOKING_SELECT } },
+  },
   /** Bookings made by an older release (during a deploy) have no BookingSlot yet: found through their primary slot. */
-  bookings: { where: { liveSlotId: { not: null } }, take: 1, select: LIVE_BOOKING_SELECT },
+  bookings: {
+    where: { liveSlotId: { not: null } },
+    take: 1,
+    select: LIVE_BOOKING_SELECT,
+  },
 } satisfies Prisma.SlotInclude;
 
 export type SlotRow = Prisma.SlotGetPayload<{ include: typeof SLOT_INCLUDE }>;
@@ -63,11 +87,19 @@ export interface PublicSlotDto extends SlotTimes {
 }
 
 /** The live booking holding the slot, if any. */
-export const liveBookingOf = (s: SlotRow) => s.bookingSlots[0]?.booking ?? s.bookings[0];
+export const liveBookingOf = (s: SlotRow) =>
+  s.bookingSlots[0]?.booking ?? s.bookings[0];
 
 function bookingOf(s: SlotRow): SlotBookingDto | null {
   const b = liveBookingOf(s);
-  return b ? { id: b.id, bookingNumber: b.bookingNumber, customerName: b.contactName, paymentStatus: b.paymentStatus } : null;
+  return b
+    ? {
+        id: b.id,
+        bookingNumber: b.bookingNumber,
+        customerName: b.contactName,
+        paymentStatus: b.paymentStatus,
+      }
+    : null;
 }
 
 export const toSlotDto = (s: SlotRow): SlotDto => ({
@@ -81,9 +113,15 @@ export const toSlotDto = (s: SlotRow): SlotDto => ({
   status: s.status,
   booking: bookingOf(s),
   heldUntil: s.status === 'held' ? s.heldUntil : null,
-  block: s.status === 'blocked' && s.blockReason && s.blockedAt
-    ? { reason: s.blockReason, note: s.blockNote, blockedBy: s.blockedBy, blockedAt: s.blockedAt }
-    : null,
+  block:
+    s.status === 'blocked' && s.blockReason && s.blockedAt
+      ? {
+          reason: s.blockReason,
+          note: s.blockNote,
+          blockedBy: s.blockedBy,
+          blockedAt: s.blockedAt,
+        }
+      : null,
   createdAt: s.createdAt,
   updatedAt: s.updatedAt,
 });

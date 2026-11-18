@@ -10,13 +10,29 @@ import { BookingNotifier } from './booking-notifier.service.js';
 import { loadOwing, matchesDue, type DueFilter } from './booking-due.js';
 import { hasUpcomingSlot } from './booking-slots.js';
 import { REFUND_DUE_BOOKING } from './refund-tracking.js';
-import { toRefundBookingDto, type RefundBookingDto } from './refund-bookings.dto.js';
-import type { ListRefundBookingsQuery } from './refund-bookings.schemas.js';
-import { ABANDONED_CHECKOUT, bookingNotFound, confirmationUrl, isValidBookingToken } from './booking-rules.js';
 import {
-  BOOKING_DETAIL_INCLUDE, BOOKING_INCLUDE, customerCanCancel, customerCanPay, customerCanRequestCancel, toBookingDetailDto, toBookingDto,
+  toRefundBookingDto,
+  type RefundBookingDto,
+} from './refund-bookings.dto.js';
+import type { ListRefundBookingsQuery } from './refund-bookings.schemas.js';
+import {
+  ABANDONED_CHECKOUT,
+  bookingNotFound,
+  confirmationUrl,
+  isValidBookingToken,
+} from './booking-rules.js';
+import {
+  BOOKING_DETAIL_INCLUDE,
+  BOOKING_INCLUDE,
+  customerCanCancel,
+  customerCanPay,
+  customerCanRequestCancel,
+  toBookingDetailDto,
+  toBookingDto,
   toPublicBookingDto,
-  type BookingDetailDto, type BookingDto, type PublicBookingDto,
+  type BookingDetailDto,
+  type BookingDto,
+  type PublicBookingDto,
 } from './booking.dto.js';
 import type { ListBookingsQuery, MyBookingsQuery } from './bookings.schemas.js';
 import { portalCardOn } from './portal-methods.js';
@@ -38,53 +54,118 @@ export class BookingQueriesService {
   ) {}
 
   /** `counts` ignore the status filter, for the stat cards. */
-  async list(q: ListBookingsQuery): Promise<Paginated<BookingDto> & { counts: BookingCounts }> {
-    const base: Prisma.BookingWhereInput = { ...listWhere(q), ...(q.due && { id: { in: await this.owingIds(q.due) } }), ...(q.refundDue && REFUND_DUE_BOOKING) };
-    const where: Prisma.BookingWhereInput = { ...base, ...(q.status && { status: q.status }) };
-    const orderBy: Prisma.BookingOrderByWithRelationInput[] = q.sort === 'slot'
-      ? [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }]
-      : [{ createdAt: 'desc' }];
+  async list(
+    q: ListBookingsQuery,
+  ): Promise<Paginated<BookingDto> & { counts: BookingCounts }> {
+    const base: Prisma.BookingWhereInput = {
+      ...listWhere(q),
+      ...(q.due && { id: { in: await this.owingIds(q.due) } }),
+      ...(q.refundDue && REFUND_DUE_BOOKING),
+    };
+    const where: Prisma.BookingWhereInput = {
+      ...base,
+      ...(q.status && { status: q.status }),
+    };
+    const orderBy: Prisma.BookingOrderByWithRelationInput[] =
+      q.sort === 'slot'
+        ? [
+            { slot: { date: 'asc' } },
+            { slot: { startHour: 'asc' } },
+            { slot: { startMinute: 'asc' } },
+          ]
+        : [{ createdAt: 'desc' }];
     const [rows, total, groups] = await this.prisma.$transaction([
-      this.prisma.booking.findMany({ where, include: BOOKING_INCLUDE, orderBy, skip: (q.page - 1) * q.limit, take: q.limit }),
+      this.prisma.booking.findMany({
+        where,
+        include: BOOKING_INCLUDE,
+        orderBy,
+        skip: (q.page - 1) * q.limit,
+        take: q.limit,
+      }),
       this.prisma.booking.count({ where }),
-      this.prisma.booking.groupBy({ by: ['status'], where: base, orderBy: { status: 'asc' }, _count: { _all: true } }),
+      this.prisma.booking.groupBy({
+        by: ['status'],
+        where: base,
+        orderBy: { status: 'asc' },
+        _count: { _all: true },
+      }),
     ]);
-    const counts: BookingCounts = { pending: 0, confirmed: 0, cancelled: 0, completed: 0, no_show: 0 };
-    for (const g of groups) counts[g.status] = (g._count as { _all: number })._all;
-    return { data: rows.map(toBookingDto), total, page: q.page, limit: q.limit, counts };
+    const counts: BookingCounts = {
+      pending: 0,
+      confirmed: 0,
+      cancelled: 0,
+      completed: 0,
+      no_show: 0,
+    };
+    for (const g of groups)
+      counts[g.status] = (g._count as { _all: number })._all;
+    return {
+      data: rows.map(toBookingDto),
+      total,
+      page: q.page,
+      limit: q.limit,
+      counts,
+    };
   }
 
   /** Refund history across every method; due/recorded is tracked separately from booking status. */
-  async refunds(q: ListRefundBookingsQuery): Promise<Paginated<RefundBookingDto>> {
+  async refunds(
+    q: ListRefundBookingsQuery,
+  ): Promise<Paginated<RefundBookingDto>> {
     const { status, method, ...filters } = q;
-    const refunded: Prisma.PaymentWhereInput = { deletedAt: null, status: 'refunded', ...(method && { method }) };
+    const refunded: Prisma.PaymentWhereInput = {
+      deletedAt: null,
+      status: 'refunded',
+      ...(method && { method }),
+    };
     const where: Prisma.BookingWhereInput = {
       ...listWhere({ ...filters, sort: 'created' }),
       AND: [
         { payments: { some: refunded } },
-        ...(status === 'due' ? [REFUND_DUE_BOOKING] : status === 'recorded' ? [{ NOT: REFUND_DUE_BOOKING }] : []),
+        ...(status === 'due'
+          ? [REFUND_DUE_BOOKING]
+          : status === 'recorded'
+            ? [{ NOT: REFUND_DUE_BOOKING }]
+            : []),
       ],
     };
     const [rows, total] = await this.prisma.$transaction([
       this.prisma.booking.findMany({
-        where, include: BOOKING_INCLUDE, orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
-        skip: (q.page - 1) * q.limit, take: q.limit,
+        where,
+        include: BOOKING_INCLUDE,
+        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        skip: (q.page - 1) * q.limit,
+        take: q.limit,
       }),
       this.prisma.booking.count({ where }),
     ]);
-    return { data: rows.map(toRefundBookingDto), total, page: q.page, limit: q.limit };
+    return {
+      data: rows.map(toRefundBookingDto),
+      total,
+      page: q.page,
+      limit: q.limit,
+    };
   }
 
   private async owingIds(filter: DueFilter): Promise<string[]> {
     const now = venueNow();
-    return (await loadOwing(this.prisma)).filter((b) => matchesDue(b, filter, now)).map((b) => b.id);
+    return (await loadOwing(this.prisma))
+      .filter((b) => matchesDue(b, filter, now))
+      .map((b) => b.id);
   }
 
   async get(id: string): Promise<BookingDetailDto> {
-    const booking = await this.prisma.booking.findFirst({ where: { id, deletedAt: null }, include: BOOKING_DETAIL_INCLUDE });
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, deletedAt: null },
+      include: BOOKING_DETAIL_INCLUDE,
+    });
     if (!booking) throw bookingNotFound();
     const totalBookings = await this.prisma.booking.count({
-      where: { customerId: booking.customerId, deletedAt: null, status: { not: 'cancelled' } },
+      where: {
+        customerId: booking.customerId,
+        deletedAt: null,
+        status: { not: 'cancelled' },
+      },
     });
     return toBookingDetailDto(booking, totalBookings);
   }
@@ -92,27 +173,51 @@ export class BookingQueriesService {
   /** The next pending or confirmed bookings from now (dashboard home). */
   async upcoming(limit: number): Promise<BookingDto[]> {
     const rows = await this.prisma.booking.findMany({
-      where: { deletedAt: null, status: { in: ['pending', 'confirmed'] }, ...hasUpcomingSlot(venueNow()) },
+      where: {
+        deletedAt: null,
+        status: { in: ['pending', 'confirmed'] },
+        ...hasUpcomingSlot(venueNow()),
+      },
       include: BOOKING_INCLUDE,
-      orderBy: [{ slot: { date: 'asc' } }, { slot: { startHour: 'asc' } }, { slot: { startMinute: 'asc' } }],
+      orderBy: [
+        { slot: { date: 'asc' } },
+        { slot: { startHour: 'asc' } },
+        { slot: { startMinute: 'asc' } },
+      ],
       take: limit,
     });
     return rows.map(toBookingDto);
   }
 
   /** Every booking made with the signed-in customer's phone, guest and staff bookings included. */
-  async listMine(phone: string, q: MyBookingsQuery): Promise<Paginated<MyBookingDto>> {
+  async listMine(
+    phone: string,
+    q: MyBookingsQuery,
+  ): Promise<Paginated<MyBookingDto>> {
     const now = venueNow();
-    const upcoming: Prisma.BookingWhereInput = { status: { in: ['pending', 'confirmed'] }, ...hasUpcomingSlot(now) };
+    const upcoming: Prisma.BookingWhereInput = {
+      status: { in: ['pending', 'confirmed'] },
+      ...hasUpcomingSlot(now),
+    };
     const where: Prisma.BookingWhereInput = {
-      deletedAt: null, customer: { phone },
-      ...(q.scope === 'upcoming' ? { ...upcoming, NOT: ABANDONED_CHECKOUT } : { NOT: [ABANDONED_CHECKOUT, upcoming] }),
+      deletedAt: null,
+      customer: { phone },
+      ...(q.scope === 'upcoming'
+        ? { ...upcoming, NOT: ABANDONED_CHECKOUT }
+        : { NOT: [ABANDONED_CHECKOUT, upcoming] }),
     };
     const dir = q.scope === 'upcoming' ? 'asc' : 'desc';
     const [rows, total, settings] = await Promise.all([
       this.prisma.booking.findMany({
-        where, include: BOOKING_INCLUDE, orderBy: [{ slot: { date: dir } }, { slot: { startHour: dir } }, { slot: { startMinute: dir } }],
-        skip: (q.page - 1) * q.limit, take: q.limit,
+        where,
+        include: BOOKING_INCLUDE,
+        orderBy: [
+          { slot: { date: dir } },
+          { slot: { startHour: dir } },
+          { slot: { startMinute: dir } },
+        ],
+        skip: (q.page - 1) * q.limit,
+        take: q.limit,
       }),
       this.prisma.booking.count({ where }),
       this.settings.get(),
@@ -120,7 +225,9 @@ export class BookingQueriesService {
     const { cancellationCutoffHours } = settings;
     const data = rows.map((b) => ({
       ...toPublicBookingDto(
-        b, customerCanCancel(b, now, cancellationCutoffHours), portalCardOn(settings) && customerCanPay(b),
+        b,
+        customerCanCancel(b, now, cancellationCutoffHours),
+        portalCardOn(settings) && customerCanPay(b),
         customerCanRequestCancel(b, now, cancellationCutoffHours),
       ),
       confirmationUrl: confirmationUrl(b.id),
@@ -129,24 +236,40 @@ export class BookingQueriesService {
   }
 
   /** 404 without a valid token, so booking ids can't be guessed. */
-  async getPublic(id: string, token: string | undefined): Promise<PublicBookingDto> {
+  async getPublic(
+    id: string,
+    token: string | undefined,
+  ): Promise<PublicBookingDto> {
     if (!isValidBookingToken(id, token)) throw bookingNotFound();
-    const booking = await this.prisma.booking.findFirst({ where: { id, deletedAt: null }, include: BOOKING_INCLUDE });
+    const booking = await this.prisma.booking.findFirst({
+      where: { id, deletedAt: null },
+      include: BOOKING_INCLUDE,
+    });
     if (!booking) throw bookingNotFound();
     const settings = await this.settings.get();
     const { cancellationCutoffHours } = settings;
     const now = venueNow();
     return toPublicBookingDto(
-      booking, customerCanCancel(booking, now, cancellationCutoffHours), portalCardOn(settings) && customerCanPay(booking),
+      booking,
+      customerCanCancel(booking, now, cancellationCutoffHours),
+      portalCardOn(settings) && customerCanPay(booking),
       customerCanRequestCancel(booking, now, cancellationCutoffHours),
     );
   }
 
   /** Customer cancel through the signed link: full refund, slot freed, email sent. */
-  async cancelPublic(id: string, token: string | undefined): Promise<PublicBookingDto> {
+  async cancelPublic(
+    id: string,
+    token: string | undefined,
+  ): Promise<PublicBookingDto> {
     if (!isValidBookingToken(id, token)) throw bookingNotFound();
     const booking = await this.prisma.booking.findUnique({ where: { id } });
-    await this.cancellation.cancel(id, { actorId: null, refund: true, notify: true, byCustomer: true });
+    await this.cancellation.cancel(id, {
+      actorId: null,
+      refund: true,
+      notify: true,
+      byCustomer: true,
+    });
     await this.notifier.customerCancelledToStaff(id);
     if (booking?.status === 'pending' && booking.stripeCheckoutSessionId) {
       await this.stripe.expireSession(booking.stripeCheckoutSessionId);
@@ -162,7 +285,10 @@ function listWhere(q: ListBookingsQuery): Prisma.BookingWhereInput {
     ...(q.paymentStatus && { paymentStatus: q.paymentStatus }),
     ...(q.groundId && { groundId: q.groundId }),
     ...(q.customerId && { customerId: q.customerId }),
-    ...(q.from && q.to && { slot: { date: { gte: toDbDate(q.from), lte: toDbDate(q.to) } } }),
+    ...(q.from &&
+      q.to && {
+        slot: { date: { gte: toDbDate(q.from), lte: toDbDate(q.to) } },
+      }),
     ...(search && {
       OR: [
         { bookingNumber: { contains: search, mode: 'insensitive' } },

@@ -1,4 +1,9 @@
-import { Injectable, Logger, type OnApplicationBootstrap, type OnModuleDestroy } from '@nestjs/common';
+import {
+  Injectable,
+  Logger,
+  type OnApplicationBootstrap,
+  type OnModuleDestroy,
+} from '@nestjs/common';
 import { BookingSeriesBooker } from '../booking-series/booking-series-booker.js';
 import { trackJob } from '../common/job-runs.js';
 import { env } from '../config/env.js';
@@ -15,7 +20,9 @@ const WEEKEND_CLEANUP_KEY = 'weekend_fri_sat_cleanup';
  * book the dates that now have slots. Off under tests.
  */
 @Injectable()
-export class SlotAutoGenerateJob implements OnApplicationBootstrap, OnModuleDestroy {
+export class SlotAutoGenerateJob
+  implements OnApplicationBootstrap, OnModuleDestroy
+{
   private readonly logger = new Logger(SlotAutoGenerateJob.name);
   private timer?: NodeJS.Timeout;
 
@@ -39,10 +46,15 @@ export class SlotAutoGenerateJob implements OnApplicationBootstrap, OnModuleDest
   private async run() {
     await this.retireClosedDaysOnce();
     try {
-      const generated = await trackJob('slotGeneration', () => this.generator.fillWindow());
+      const generated = await trackJob('slotGeneration', () =>
+        this.generator.fillWindow(),
+      );
       if (generated > 0) this.logger.log(`Generated ${generated} slots`);
     } catch (err) {
-      this.logger.error('Slot auto-generation failed', err instanceof Error ? err.stack : String(err));
+      this.logger.error(
+        'Slot auto-generation failed',
+        err instanceof Error ? err.stack : String(err),
+      );
     }
     await this.extendSeries();
   }
@@ -51,21 +63,35 @@ export class SlotAutoGenerateJob implements OnApplicationBootstrap, OnModuleDest
   private async extendSeries() {
     try {
       const booked = await this.series.extendOngoing();
-      if (booked > 0) this.logger.log(`Repeat bookings: booked ${booked} more dates`);
+      if (booked > 0)
+        this.logger.log(`Repeat bookings: booked ${booked} more dates`);
     } catch (err) {
-      this.logger.error('Extending repeat bookings failed', err instanceof Error ? err.stack : String(err));
+      this.logger.error(
+        'Extending repeat bookings failed',
+        err instanceof Error ? err.stack : String(err),
+      );
     }
   }
 
   /** A failure is logged and retried on the next run; it never stops slot generation. */
   private async retireClosedDaysOnce() {
     try {
-      if (await this.state.get<object | null>(WEEKEND_CLEANUP_KEY, null)) return;
+      if (await this.state.get<object | null>(WEEKEND_CLEANUP_KEY, null))
+        return;
       const { removed, blocked } = await this.generator.retireClosedDays();
-      await this.state.set(WEEKEND_CLEANUP_KEY, { removed, blocked, ranAt: new Date().toISOString() });
-      this.logger.log(`Closed-day cleanup: ${removed} free slots removed, ${blocked} blocked`);
+      await this.state.set(WEEKEND_CLEANUP_KEY, {
+        removed,
+        blocked,
+        ranAt: new Date().toISOString(),
+      });
+      this.logger.log(
+        `Closed-day cleanup: ${removed} free slots removed, ${blocked} blocked`,
+      );
     } catch (err) {
-      this.logger.error('Closed-day cleanup failed', err instanceof Error ? err.stack : String(err));
+      this.logger.error(
+        'Closed-day cleanup failed',
+        err instanceof Error ? err.stack : String(err),
+      );
     }
   }
 }

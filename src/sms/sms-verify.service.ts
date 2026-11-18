@@ -8,8 +8,18 @@ const VERIFY_API = 'https://verify.twilio.com/v2/Services';
 const DEV_CODE_TTL_MS = 10 * 60_000;
 const DEV_MAX_ATTEMPTS = 5;
 
-const providerError = () => new AppError("We couldn't send the code. Please try again shortly", 502, 'SMS_PROVIDER_ERROR');
-const tooManyCodes = () => new AppError('Too many codes requested for this number. Try again later', 429, 'TOO_MANY_CODES');
+const providerError = () =>
+  new AppError(
+    "We couldn't send the code. Please try again shortly",
+    502,
+    'SMS_PROVIDER_ERROR',
+  );
+const tooManyCodes = () =>
+  new AppError(
+    'Too many codes requested for this number. Try again later',
+    429,
+    'TOO_MANY_CODES',
+  );
 
 /**
  * Sends and checks one-time sign-in codes by SMS through Twilio Verify, which generates, stores,
@@ -22,19 +32,30 @@ const tooManyCodes = () => new AppError('Too many codes requested for this numbe
 @Injectable()
 export class SmsVerifyService {
   private readonly logger = new Logger(SmsVerifyService.name);
-  private readonly devCodes = new Map<string, { code: string; expiresAt: number; attempts: number }>();
+  private readonly devCodes = new Map<
+    string,
+    { code: string; expiresAt: number; attempts: number }
+  >();
 
   /** `phone` is normalised E.164 ("+8801711000000"). */
   async send(phone: string): Promise<void> {
     if (this.liveTestCode(phone)) return;
-    if (env.TEST_OTP_CODE) return this.logger.warn(`TEST_OTP_CODE is set: no SMS sent to ${phone}`);
+    if (env.TEST_OTP_CODE)
+      return this.logger.warn(`TEST_OTP_CODE is set: no SMS sent to ${phone}`);
     if (!this.configured()) return this.devSend(phone);
     const res = await this.call('Verifications', { To: phone, Channel: 'sms' });
     if (res.ok) return;
     const { code } = await res.json().catch(() => ({ code: undefined }));
     if (res.status === 429 || code === 60203) throw tooManyCodes();
-    if (code === 60200 || code === 60205) throw new AppError('This number cannot receive SMS', 400, 'INVALID_PHONE');
-    this.logger.error(`Twilio Verify send failed: HTTP ${res.status}, code ${code}`);
+    if (code === 60200 || code === 60205)
+      throw new AppError(
+        'This number cannot receive SMS',
+        400,
+        'INVALID_PHONE',
+      );
+    this.logger.error(
+      `Twilio Verify send failed: HTTP ${res.status}, code ${code}`,
+    );
     throw providerError();
   }
 
@@ -44,7 +65,9 @@ export class SmsVerifyService {
     if (liveCode) {
       const expected = Buffer.from(liveCode);
       const actual = Buffer.from(code);
-      return expected.length === actual.length && timingSafeEqual(expected, actual);
+      return (
+        expected.length === actual.length && timingSafeEqual(expected, actual)
+      );
     }
     if (env.TEST_OTP_CODE) return code === env.TEST_OTP_CODE;
     if (!this.configured()) return this.devCheck(phone, code);
@@ -64,20 +87,38 @@ export class SmsVerifyService {
   }
 
   private configured(): boolean {
-    return Boolean(env.TWILIO_ACCOUNT_SID && env.TWILIO_AUTH_TOKEN && env.TWILIO_VERIFY_SERVICE_SID);
+    return Boolean(
+      env.TWILIO_ACCOUNT_SID &&
+      env.TWILIO_AUTH_TOKEN &&
+      env.TWILIO_VERIFY_SERVICE_SID,
+    );
   }
 
-  private async call(path: string, form: Record<string, string>): Promise<Response> {
-    const auth = Buffer.from(`${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`).toString('base64');
+  private async call(
+    path: string,
+    form: Record<string, string>,
+  ): Promise<Response> {
+    const auth = Buffer.from(
+      `${env.TWILIO_ACCOUNT_SID}:${env.TWILIO_AUTH_TOKEN}`,
+    ).toString('base64');
     try {
-      return await fetch(`${VERIFY_API}/${env.TWILIO_VERIFY_SERVICE_SID}/${path}`, {
-        method: 'POST',
-        headers: { Authorization: `Basic ${auth}`, 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: new URLSearchParams(form),
-        signal: AbortSignal.timeout(10_000),
-      });
+      return await fetch(
+        `${VERIFY_API}/${env.TWILIO_VERIFY_SERVICE_SID}/${path}`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded',
+          },
+          body: new URLSearchParams(form),
+          signal: AbortSignal.timeout(10_000),
+        },
+      );
     } catch (err) {
-      this.logger.error('Twilio Verify unreachable', err instanceof Error ? err.message : String(err));
+      this.logger.error(
+        'Twilio Verify unreachable',
+        err instanceof Error ? err.message : String(err),
+      );
       throw providerError();
     }
   }
@@ -88,13 +129,24 @@ export class SmsVerifyService {
       throw providerError();
     }
     const code = String(randomInt(0, 1_000_000)).padStart(6, '0');
-    this.devCodes.set(phone, { code, expiresAt: Date.now() + DEV_CODE_TTL_MS, attempts: 0 });
-    this.logger.warn(`Twilio not configured, sign-in code for ${phone}: ${code}`);
+    this.devCodes.set(phone, {
+      code,
+      expiresAt: Date.now() + DEV_CODE_TTL_MS,
+      attempts: 0,
+    });
+    this.logger.warn(
+      `Twilio not configured, sign-in code for ${phone}: ${code}`,
+    );
   }
 
   private devCheck(phone: string, code: string): boolean {
     const entry = this.devCodes.get(phone);
-    if (!entry || entry.expiresAt < Date.now() || ++entry.attempts > DEV_MAX_ATTEMPTS) return false;
+    if (
+      !entry ||
+      entry.expiresAt < Date.now() ||
+      ++entry.attempts > DEV_MAX_ATTEMPTS
+    )
+      return false;
     if (entry.code !== code) return false;
     this.devCodes.delete(phone);
     return true;

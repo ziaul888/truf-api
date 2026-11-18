@@ -5,22 +5,32 @@ import { fromDbDate, type IsoDate } from '../slots/venue-time.js';
 export type CustomerTag = 'vip' | 'regular' | 'new';
 
 /** 10+ bookings = VIP, 3–9 = Regular, otherwise New (as the dashboard shows). */
-export const tagOf = (bookings: number): CustomerTag => (bookings >= 10 ? 'vip' : bookings >= 3 ? 'regular' : 'new');
+export const tagOf = (bookings: number): CustomerTag =>
+  bookings >= 10 ? 'vip' : bookings >= 3 ? 'regular' : 'new';
 
 /** The bookings data every customer summary is computed from. */
 export const CUSTOMER_SUMMARY_INCLUDE = {
   bookings: {
     where: { deletedAt: null },
     select: {
-      id: true, bookingNumber: true, status: true, total: true, dueDate: true,
+      id: true,
+      bookingNumber: true,
+      status: true,
+      total: true,
+      dueDate: true,
       ground: { select: { id: true, name: true } },
       slot: { select: { date: true } },
-      payments: { where: { deletedAt: null }, select: { amount: true, status: true, method: true } },
+      payments: {
+        where: { deletedAt: null },
+        select: { amount: true, status: true, method: true },
+      },
     },
   },
 } satisfies Prisma.CustomerInclude;
 
-export type CustomerSummaryRow = Prisma.CustomerGetPayload<{ include: typeof CUSTOMER_SUMMARY_INCLUDE }>;
+export type CustomerSummaryRow = Prisma.CustomerGetPayload<{
+  include: typeof CUSTOMER_SUMMARY_INCLUDE;
+}>;
 
 export interface CustomerDto {
   id: string;
@@ -43,7 +53,12 @@ export function toCustomerDto(c: CustomerSummaryRow): CustomerDto {
   const kept = c.bookings.filter((b) => b.status !== 'cancelled');
   const dates = kept.map((b) => fromDbDate(b.slot.date)).sort();
   return {
-    id: c.id, name: c.name, phone: c.phone, email: c.email, adminNote: c.adminNote, createdAt: c.createdAt,
+    id: c.id,
+    name: c.name,
+    phone: c.phone,
+    email: c.email,
+    adminNote: c.adminNote,
+    createdAt: c.createdAt,
     bookings: kept.length,
     totalSpent: c.bookings.reduce((sum, b) => sum + paidOf(b.payments), 0),
     lastBooking: dates.at(-1) ?? null,

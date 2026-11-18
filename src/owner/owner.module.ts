@@ -1,6 +1,5 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
-import { ThrottlerModule } from '@nestjs/throttler';
 import { env } from '../config/env.js';
 import { OwnerAuthService } from './owner-auth.service.js';
 import { OwnerActivationService } from './owner-activation.service.js';
@@ -12,7 +11,6 @@ import { OwnerBillingController } from './owner-billing.controller.js';
 import { ownerSecret, OWNER_AUDIENCE, OWNER_ISSUER } from './owner-session.js';
 @Module({
   imports: [
-    ThrottlerModule.forRoot([{ ttl: 60000, limit: 20 }]),
     JwtModule.register({
       secret: ownerSecret,
       signOptions: {

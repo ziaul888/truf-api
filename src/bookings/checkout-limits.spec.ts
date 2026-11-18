@@ -19,21 +19,33 @@ afterEach(() => vi.useRealTimers());
 describe('assertCanBookUnpaid', () => {
   it('leaves card checkouts alone, signed in or not, and counts nothing', async () => {
     const { prisma, count } = setup(MAX_OPEN_UNPAID);
-    await expect(assertCanBookUnpaid(prisma, 'card', undefined)).resolves.toBeUndefined();
-    await expect(assertCanBookUnpaid(prisma, 'card', PHONE)).resolves.toBeUndefined();
+    await expect(
+      assertCanBookUnpaid(prisma, 'card', undefined),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertCanBookUnpaid(prisma, 'card', PHONE),
+    ).resolves.toBeUndefined();
     expect(count).not.toHaveBeenCalled();
   });
 
-  it.each(['cash', 'bkash', 'nagad'] as const)('needs a signed-in customer for %s: 401 SIGN_IN_REQUIRED', async (method) => {
-    const { prisma, count } = setup();
-    await expect(assertCanBookUnpaid(prisma, method, undefined)).rejects.toMatchObject({ status: 401, code: 'SIGN_IN_REQUIRED' });
-    expect(count).not.toHaveBeenCalled();
-  });
+  it.each(['cash', 'bkash', 'nagad'] as const)(
+    'needs a signed-in customer for %s: 401 SIGN_IN_REQUIRED',
+    async (method) => {
+      const { prisma, count } = setup();
+      await expect(
+        assertCanBookUnpaid(prisma, method, undefined),
+      ).rejects.toMatchObject({ status: 401, code: 'SIGN_IN_REQUIRED' });
+      expect(count).not.toHaveBeenCalled();
+    },
+  );
 
   it('allows up to 3 open unpaid bookings per phone, then 409 TOO_MANY_OPEN_BOOKINGS', async () => {
-    await expect(assertCanBookUnpaid(setup(MAX_OPEN_UNPAID - 1).prisma, 'cash', PHONE)).resolves.toBeUndefined();
-    await expect(assertCanBookUnpaid(setup(MAX_OPEN_UNPAID).prisma, 'bkash', PHONE))
-      .rejects.toMatchObject({ status: 409, code: 'TOO_MANY_OPEN_BOOKINGS' });
+    await expect(
+      assertCanBookUnpaid(setup(MAX_OPEN_UNPAID - 1).prisma, 'cash', PHONE),
+    ).resolves.toBeUndefined();
+    await expect(
+      assertCanBookUnpaid(setup(MAX_OPEN_UNPAID).prisma, 'bkash', PHONE),
+    ).rejects.toMatchObject({ status: 409, code: 'TOO_MANY_OPEN_BOOKINGS' });
   });
 
   it('counts only pending portal cash or wallet-under-review bookings on the phone whose slot is still ahead', async () => {
@@ -42,9 +54,15 @@ describe('assertCanBookUnpaid', () => {
     // Card checkouts (payAtVenue false, no wallet payment) and slots already started are left out.
     expect(count).toHaveBeenCalledWith({
       where: {
-        deletedAt: null, status: 'pending', source: 'portal', contactPhone: PHONE,
+        deletedAt: null,
+        status: 'pending',
+        source: 'portal',
+        contactPhone: PHONE,
         // Any live slot still ahead counts (a multi-slot booking), not only the primary.
-        AND: [hasUpcomingSlot(venueNow()), { OR: [{ payAtVenue: true }, WALLET_UNDER_REVIEW] }],
+        AND: [
+          hasUpcomingSlot(venueNow()),
+          { OR: [{ payAtVenue: true }, WALLET_UNDER_REVIEW] },
+        ],
       },
     });
   });

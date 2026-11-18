@@ -1,14 +1,32 @@
-import type { PaymentMethod, PaymentStatus, Prisma } from '../generated/prisma/client.js';
-import { WALLET_METHODS, isWalletMethod, type WalletMethod } from './booking-rules.js';
+import type {
+  PaymentMethod,
+  PaymentStatus,
+  Prisma,
+} from '../generated/prisma/client.js';
+import {
+  WALLET_METHODS,
+  isWalletMethod,
+  type WalletMethod,
+} from './booking-rules.js';
 
 /** A refunded bKash / Nagad payment: the money goes back by hand, so staff record when they sent it. */
-export const WALLET_REFUND: Prisma.PaymentWhereInput = { deletedAt: null, status: 'refunded', method: { in: [...WALLET_METHODS] } };
+export const WALLET_REFUND: Prisma.PaymentWhereInput = {
+  deletedAt: null,
+  status: 'refunded',
+  method: { in: [...WALLET_METHODS] },
+};
 
 /** Those refunds that staff have not yet recorded as sent. */
-export const REFUND_DUE: Prisma.PaymentWhereInput = { ...WALLET_REFUND, refundSentAt: null };
+export const REFUND_DUE: Prisma.PaymentWhereInput = {
+  ...WALLET_REFUND,
+  refundSentAt: null,
+};
 
 /** Cancelled bookings with a manual refund still to send (dashboard card, `refundDue=true` list filter). */
-export const REFUND_DUE_BOOKING: Prisma.BookingWhereInput = { status: 'cancelled', payments: { some: REFUND_DUE } };
+export const REFUND_DUE_BOOKING: Prisma.BookingWhereInput = {
+  status: 'cancelled',
+  payments: { some: REFUND_DUE },
+};
 
 /** What the dashboard shows staff for a manual refund. */
 export interface RefundDto {
@@ -36,7 +54,9 @@ export interface RefundPayment {
 
 /** The booking's manual refund, or null when it has no refunded bKash / Nagad payment. `payments` are oldest first. */
 export function refundOf(payments: RefundPayment[]): RefundDto | null {
-  const refunded = payments.filter((p) => p.status === 'refunded' && isWalletMethod(p.method));
+  const refunded = payments.filter(
+    (p) => p.status === 'refunded' && isWalletMethod(p.method),
+  );
   const latest = refunded.at(-1);
   if (!latest || !isWalletMethod(latest.method)) return null;
   const allSent = refunded.every((p) => p.refundSentAt !== null);

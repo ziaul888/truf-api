@@ -9,7 +9,7 @@ import {
   UseGuards,
 } from '@nestjs/common';
 import type { Request, Response } from 'express';
-import { ThrottlerGuard } from '@nestjs/throttler';
+import { Throttle, ThrottlerGuard } from '@nestjs/throttler';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { OwnerAuthService } from './owner-auth.service.js';
 import { OwnerActivationService } from './owner-activation.service.js';
@@ -47,6 +47,7 @@ export class OwnerAuthController {
   @Post('activation/preview')
   @HttpCode(200)
   @UseGuards(OwnerOriginGuard, ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   preview(
     @Body(new ZodValidationPipe(PreviewOwnerInvitationSchema))
     input: {
@@ -58,6 +59,7 @@ export class OwnerAuthController {
   @Post('activation/accept')
   @HttpCode(200)
   @UseGuards(OwnerOriginGuard, ThrottlerGuard)
+  @Throttle({ default: { limit: 20, ttl: 60_000 } })
   accept(
     @Body(new ZodValidationPipe(AcceptOwnerInvitationSchema))
     input: AcceptOwnerInvitation,

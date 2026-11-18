@@ -11,7 +11,8 @@ export function csvCell(value: string | number | null): string {
   return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
-export const csvLine = (cells: (string | number | null)[]) => `${cells.map(csvCell).join(',')}\r\n`;
+export const csvLine = (cells: (string | number | null)[]) =>
+  `${cells.map(csvCell).join(',')}\r\n`;
 
 /** Smallest unit → whole taka with two decimals ("1500.00"). */
 export const csvMoney = (minor: number) => (minor / 100).toFixed(2);

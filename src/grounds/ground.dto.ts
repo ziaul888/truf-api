@@ -1,4 +1,9 @@
-import type { AvailableDays, Ground, Sport, Weekday } from '../generated/prisma/client.js';
+import type {
+  AvailableDays,
+  Ground,
+  Sport,
+  Weekday,
+} from '../generated/prisma/client.js';
 import type { PeakRange } from './ground-schedule.js';
 import { photoUrl } from './photo-storage.js';
 
@@ -38,7 +43,8 @@ export interface GroundDto extends PublicGroundDto {
 }
 
 /** peakRanges is a JSON column; the API validates it on every write, so the cast is safe. */
-export const peakRangesOf = (g: Ground) => g.peakRanges as unknown as PeakRange[];
+export const peakRangesOf = (g: Ground) =>
+  g.peakRanges as unknown as PeakRange[];
 
 export const toPublicGroundDto = (g: Ground): PublicGroundDto => ({
   id: g.id,

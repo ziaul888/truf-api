@@ -3,12 +3,33 @@ import { AppError } from '../common/app-error.js';
 import type { Paginated } from '../common/schemas.js';
 import type { Ground, Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
-import { SlotGeneratorService, type SlotSync } from '../slots/slot-generator.service.js';
-import { peakRangesOf, toGroundDto, toPublicGroundDto, type GroundDto, type PublicGroundDto } from './ground.dto.js';
-import { assertHours, assertPeakPricing, resolveDays, scheduleChanged, VISIBLE_GROUND as VISIBLE } from './ground-rules.js';
-import type { AdminListGroundsQuery, CreateGroundInput, ListGroundsQuery, UpdateGroundInput } from './grounds.schemas.js';
+import {
+  SlotGeneratorService,
+  type SlotSync,
+} from '../slots/slot-generator.service.js';
+import {
+  peakRangesOf,
+  toGroundDto,
+  toPublicGroundDto,
+  type GroundDto,
+  type PublicGroundDto,
+} from './ground.dto.js';
+import {
+  assertHours,
+  assertPeakPricing,
+  resolveDays,
+  scheduleChanged,
+  VISIBLE_GROUND as VISIBLE,
+} from './ground-rules.js';
+import type {
+  AdminListGroundsQuery,
+  CreateGroundInput,
+  ListGroundsQuery,
+  UpdateGroundInput,
+} from './grounds.schemas.js';
 
-const notFound = () => new AppError('Ground not found', 404, 'GROUND_NOT_FOUND');
+const notFound = () =>
+  new AppError('Ground not found', 404, 'GROUND_NOT_FOUND');
 
 @Injectable()
 export class GroundsService {
@@ -17,20 +38,38 @@ export class GroundsService {
     private readonly slots: SlotGeneratorService,
   ) {}
 
-  async listPublic({ page, limit, ...filters }: ListGroundsQuery): Promise<Paginated<PublicGroundDto>> {
-    const { rows, total } = await this.findPage({ ...filterWhere(filters), ...VISIBLE }, page, limit);
+  async listPublic({
+    page,
+    limit,
+    ...filters
+  }: ListGroundsQuery): Promise<Paginated<PublicGroundDto>> {
+    const { rows, total } = await this.findPage(
+      { ...filterWhere(filters), ...VISIBLE },
+      page,
+      limit,
+    );
     return { data: rows.map(toPublicGroundDto), total, page, limit };
   }
 
   /** 404 for hidden grounds, as if they didn't exist. */
   async getPublic(id: string): Promise<PublicGroundDto> {
-    const ground = await this.prisma.ground.findFirst({ where: { id, ...VISIBLE } });
+    const ground = await this.prisma.ground.findFirst({
+      where: { id, ...VISIBLE },
+    });
     if (!ground) throw notFound();
     return toPublicGroundDto(ground);
   }
 
-  async list({ page, limit, isActive, ...filters }: AdminListGroundsQuery): Promise<Paginated<GroundDto>> {
-    const where: Prisma.GroundWhereInput = { ...filterWhere(filters), ...(isActive !== undefined && { isActive }) };
+  async list({
+    page,
+    limit,
+    isActive,
+    ...filters
+  }: AdminListGroundsQuery): Promise<Paginated<GroundDto>> {
+    const where: Prisma.GroundWhereInput = {
+      ...filterWhere(filters),
+      ...(isActive !== undefined && { isActive }),
+    };
     const { rows, total } = await this.findPage(where, page, limit);
     return { data: rows.map(toGroundDto), total, page, limit };
   }
@@ -41,7 +80,10 @@ export class GroundsService {
 
   async create(input: CreateGroundInput): Promise<GroundDto> {
     assertPeakPricing(input);
-    const data = { ...input, ...resolveDays(input.availableDays, input.customDays) };
+    const data = {
+      ...input,
+      ...resolveDays(input.availableDays, input.customDays),
+    };
     const ground = await this.prisma.ground.create({ data });
     await this.slots.fillWindow([ground.id]);
     return toGroundDto(ground);
@@ -51,7 +93,10 @@ export class GroundsService {
    * No delete: deactivate instead (`isActive: false`) so bookings keep their ground.
    * Saves that really change the schedule return `slotSync`: how many future free slots were replaced and how many booked/blocked ones kept.
    */
-  async update(id: string, input: UpdateGroundInput): Promise<GroundDto & { slotSync?: SlotSync }> {
+  async update(
+    id: string,
+    input: UpdateGroundInput,
+  ): Promise<GroundDto & { slotSync?: SlotSync }> {
     const ground = await this.findOrThrow(id);
     const openingHour = input.openingHour ?? ground.openingHour;
     const closingHour = input.closingHour ?? ground.closingHour;
@@ -59,25 +104,49 @@ export class GroundsService {
     assertPeakPricing({
       openingHour,
       closingHour,
-      peakPrice: input.peakPrice !== undefined ? input.peakPrice : ground.peakPrice,
+      peakPrice:
+        input.peakPrice !== undefined ? input.peakPrice : ground.peakPrice,
       peakRanges: input.peakRanges ?? peakRangesOf(ground),
     });
 
     const data: UpdateGroundInput = { ...input };
     if (input.availableDays !== undefined || input.customDays !== undefined) {
-      Object.assign(data, resolveDays(input.availableDays ?? ground.availableDays, input.customDays ?? ground.customDays));
+      Object.assign(
+        data,
+        resolveDays(
+          input.availableDays ?? ground.availableDays,
+          input.customDays ?? ground.customDays,
+        ),
+      );
     }
-    if (!scheduleChanged(ground, data)) return toGroundDto(await this.prisma.ground.update({ where: { id }, data }));
+    if (!scheduleChanged(ground, data))
+      return toGroundDto(
+        await this.prisma.ground.update({ where: { id }, data }),
+      );
     // Together, so a failed resync leaves the old schedule stored and a retry still sees the change.
-    return this.prisma.$transaction(async (tx) => {
-      const updated = toGroundDto(await tx.ground.update({ where: { id }, data }));
-      return { ...updated, slotSync: await this.slots.resync(tx, id) };
-    }, { timeout: 20_000 });
+    return this.prisma.$transaction(
+      async (tx) => {
+        const updated = toGroundDto(
+          await tx.ground.update({ where: { id }, data }),
+        );
+        return { ...updated, slotSync: await this.slots.resync(tx, id) };
+      },
+      { timeout: 20_000 },
+    );
   }
 
-  private async findPage(where: Prisma.GroundWhereInput, page: number, limit: number) {
+  private async findPage(
+    where: Prisma.GroundWhereInput,
+    page: number,
+    limit: number,
+  ) {
     const [rows, total] = await this.prisma.$transaction([
-      this.prisma.ground.findMany({ where, orderBy: { name: 'asc' }, skip: (page - 1) * limit, take: limit }),
+      this.prisma.ground.findMany({
+        where,
+        orderBy: { name: 'asc' },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
       this.prisma.ground.count({ where }),
     ]);
     return { rows, total };
@@ -90,7 +159,12 @@ export class GroundsService {
   }
 }
 
-function filterWhere({ search, sport, format, surface }: Omit<ListGroundsQuery, 'page' | 'limit'>): Prisma.GroundWhereInput {
+function filterWhere({
+  search,
+  sport,
+  format,
+  surface,
+}: Omit<ListGroundsQuery, 'page' | 'limit'>): Prisma.GroundWhereInput {
   return {
     ...(search && { name: { contains: search, mode: 'insensitive' } }),
     ...(sport && { sport }),

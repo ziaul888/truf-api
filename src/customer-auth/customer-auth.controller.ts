@@ -1,11 +1,29 @@
-import { Body, Controller, Get, HttpCode, Post, Req, Res, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  Post,
+  Req,
+  Res,
+  UseGuards,
+} from '@nestjs/common';
 import { Throttle } from '@nestjs/throttler';
 import type { Request, Response } from 'express';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
-import { CUSTOMER_COOKIE, clearCustomerCookieOptions, customerCookieOptions } from './customer-cookie.js';
+import {
+  CUSTOMER_COOKIE,
+  clearCustomerCookieOptions,
+  customerCookieOptions,
+} from './customer-cookie.js';
 import { CurrentCustomer, CustomerAuthGuard } from './customer-auth.guard.js';
 import {
-  CustomerProfileSchema, SendCodeSchema, VerifyCodeSchema, type CustomerProfileInput, type SendCodeInput, type VerifyCodeInput,
+  CustomerProfileSchema,
+  SendCodeSchema,
+  VerifyCodeSchema,
+  type CustomerProfileInput,
+  type SendCodeInput,
+  type VerifyCodeInput,
 } from './customer-auth.schemas.js';
 import { CustomerAuthService } from './customer-auth.service.js';
 import type { CustomerSession } from './customer-auth.types.js';
@@ -21,7 +39,9 @@ export class CustomerAuthController {
   @HttpCode(200)
   @UseGuards(OtpThrottlerGuard)
   @Throttle({ default: { limit: 3, ttl: 10 * 60_000 } })
-  sendCode(@Body(new ZodValidationPipe(SendCodeSchema)) { phone }: SendCodeInput) {
+  sendCode(
+    @Body(new ZodValidationPipe(SendCodeSchema)) { phone }: SendCodeInput,
+  ) {
     return this.auth.sendCode(phone);
   }
 
@@ -30,10 +50,15 @@ export class CustomerAuthController {
   @HttpCode(200)
   @UseGuards(OtpThrottlerGuard)
   async verify(
-    @Body(new ZodValidationPipe(VerifyCodeSchema)) { phone, code, name, email }: VerifyCodeInput,
+    @Body(new ZodValidationPipe(VerifyCodeSchema))
+    { phone, code, name, email }: VerifyCodeInput,
     @Res({ passthrough: true }) res: Response,
   ): Promise<CustomerSession> {
-    const { session, token } = await this.auth.verify(phone, code, name && email ? { name, email } : undefined);
+    const { session, token } = await this.auth.verify(
+      phone,
+      code,
+      name && email ? { name, email } : undefined,
+    );
     res.cookie(CUSTOMER_COOKIE, token, customerCookieOptions());
     return session;
   }
@@ -50,7 +75,8 @@ export class CustomerAuthController {
   @UseGuards(CustomerAuthGuard)
   saveProfile(
     @CurrentCustomer() customer: CustomerSession,
-    @Body(new ZodValidationPipe(CustomerProfileSchema)) body: CustomerProfileInput,
+    @Body(new ZodValidationPipe(CustomerProfileSchema))
+    body: CustomerProfileInput,
   ): Promise<CustomerSession> {
     return this.auth.saveProfile(customer.phone, body);
   }

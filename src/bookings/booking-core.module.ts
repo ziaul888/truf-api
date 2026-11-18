@@ -11,8 +11,18 @@ import { BookingNotifier } from './booking-notifier.service.js';
  * module can cancel a booking when staff block its slot, without a module cycle.
  */
 @Module({
-  imports: [PaymentsModule, EmailModule, SlotSettingsModule, SettingsCoreModule],
+  imports: [
+    PaymentsModule,
+    EmailModule,
+    SlotSettingsModule,
+    SettingsCoreModule,
+  ],
   providers: [BookingCancellationService, BookingNotifier],
-  exports: [BookingCancellationService, BookingNotifier, PaymentsModule, EmailModule],
+  exports: [
+    BookingCancellationService,
+    BookingNotifier,
+    PaymentsModule,
+    EmailModule,
+  ],
 })
 export class BookingCoreModule {}

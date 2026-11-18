@@ -8,6 +8,10 @@ import { DashboardService } from './dashboard.service.js';
 @Module({
   imports: [AuthModule],
   controllers: [DashboardController],
-  providers: [DashboardService, DashboardAttentionService, DashboardTodayService],
+  providers: [
+    DashboardService,
+    DashboardAttentionService,
+    DashboardTodayService,
+  ],
 })
 export class DashboardModule {}

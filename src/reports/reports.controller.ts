@@ -5,7 +5,12 @@ import { AuthGuard } from '../auth/auth.guard.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { ReportExportService } from './report-export.service.js';
 import {
-  ExportQuerySchema, ReportRangeSchema, ReportSeriesQuerySchema, type ExportQuery, type ReportRange, type ReportSeriesQuery,
+  ExportQuerySchema,
+  ReportRangeSchema,
+  ReportSeriesQuerySchema,
+  type ExportQuery,
+  type ReportRange,
+  type ReportSeriesQuery,
 } from './reports.schemas.js';
 import { ReportsService } from './reports.service.js';
 
@@ -24,7 +29,9 @@ export class ReportsController {
   }
 
   @Get('revenue')
-  revenue(@Query(new ZodValidationPipe(ReportSeriesQuerySchema)) q: ReportSeriesQuery) {
+  revenue(
+    @Query(new ZodValidationPipe(ReportSeriesQuerySchema)) q: ReportSeriesQuery,
+  ) {
     return this.reports.revenue(q);
   }
 
@@ -34,7 +41,9 @@ export class ReportsController {
   }
 
   @Get('bookings')
-  bookings(@Query(new ZodValidationPipe(ReportSeriesQuerySchema)) q: ReportSeriesQuery) {
+  bookings(
+    @Query(new ZodValidationPipe(ReportSeriesQuerySchema)) q: ReportSeriesQuery,
+  ) {
     return this.reports.bookings(q);
   }
 
@@ -43,10 +52,16 @@ export class ReportsController {
    * names as UTF-8. Validation errors come back as JSON; a failure mid-download aborts the file.
    */
   @Get('export')
-  async export(@Query(new ZodValidationPipe(ExportQuerySchema)) q: ExportQuery, @Res() res: Response) {
+  async export(
+    @Query(new ZodValidationPipe(ExportQuerySchema)) q: ExportQuery,
+    @Res() res: Response,
+  ) {
     const file = this.exports.open(q);
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-    res.setHeader('Content-Disposition', `attachment; filename="${file.filename}"`);
+    res.setHeader(
+      'Content-Disposition',
+      `attachment; filename="${file.filename}"`,
+    );
     res.write('\uFEFF');
     try {
       for await (const line of file.lines) {

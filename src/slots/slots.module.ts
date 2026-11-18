@@ -18,13 +18,27 @@ import { SlotSettingsModule } from './slot-settings.module.js';
 import { SlotsService } from './slots.service.js';
 
 @Module({
-  imports: [AuthModule, SlotSettingsModule, BookingCoreModule, SettingsCoreModule, BookingSeriesModule],
+  imports: [
+    AuthModule,
+    SlotSettingsModule,
+    BookingCoreModule,
+    SettingsCoreModule,
+    BookingSeriesModule,
+  ],
   controllers: [
-    AdminSlotsController, AdminSlotEventsController, AdminClosuresController,
-    PublicSlotsController, PublicClosuresController, SlotSettingsController,
+    AdminSlotsController,
+    AdminSlotEventsController,
+    AdminClosuresController,
+    PublicSlotsController,
+    PublicClosuresController,
+    SlotSettingsController,
   ],
   providers: [
-    SlotsService, SlotBlocksService, SlotGeneratorService, SlotEventsService, ClosuresService,
+    SlotsService,
+    SlotBlocksService,
+    SlotGeneratorService,
+    SlotEventsService,
+    ClosuresService,
     SlotAutoGenerateJob,
   ],
   exports: [SlotGeneratorService],
