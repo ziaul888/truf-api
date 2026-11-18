@@ -1,6 +1,7 @@
 import { AppError } from '../common/app-error.js';
 import type { Prisma } from '../generated/prisma/client.js';
 import type { OwnerContext, OwnerSession } from './owner-session.js';
+import { configuredVenue } from './owner-venue.js';
 export const ownerMembershipSelect = {
   id: true,
   userId: true,
@@ -30,6 +31,7 @@ export const ownerMembershipSelect = {
       timezone: true,
       currency: true,
       createdAt: true,
+      setup: { select: { data: true } },
     },
   },
 } satisfies Prisma.TenantMembershipSelect;
@@ -68,7 +70,15 @@ export function ownerContext(
       name: row.user.name,
       role: 'owner',
       audience: 'owner',
-      tenant: { id, slug, name, status, timezone, currency },
+      tenant: {
+        id,
+        slug,
+        name,
+        status,
+        timezone,
+        currency,
+        setupComplete: Boolean(configuredVenue(row.tenant.setup?.data)),
+      },
     },
   };
 }

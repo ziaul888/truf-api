@@ -217,6 +217,75 @@ model Tenant {
   platformReceipts      PlatformReceipt[]
   platformAuditEvents   PlatformAuditEvent[]
   ownerApplication      OwnerApplication?
+  setup                 TenantSetup?
+  grounds               TenantGround[]
+}
+
+/// Tenant venue settings. Historical onboarding data can coexist with the venue document.
+model TenantSetup {
+  tenantId    String    @id
+  data        Json      @default("{}")
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+}
+
+/// SaaS grounds are separate from single-business operational data.
+model TenantGround {
+  id                  String        @id @default(uuid())
+  tenantId            String
+  name                String
+  description         String?
+  rules               String?
+  address             String?
+  mapUrl              String?
+  hourlyPrice         Int
+  openingHour         Int
+  closingHour         Int
+  isActive            Boolean       @default(true)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+  sport               Sport         @default(other)
+  format              String?
+  surface             String?
+  dimensions          String?
+  capacity            Int?
+  amenities           String[]      @default([])
+  availableDays       AvailableDays @default(everyday)
+  customDays          Weekday[]     @default([])
+  showOnPortal        Boolean       @default(false)
+  internalNotes       String?
+  peakPrice           Int?
+  peakRanges          Json          @default("[]")
+  slotDurationMinutes Int           @default(60)
+  photos              String[]      @default([])
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Restrict)
+  slots  TenantSlot[]
+
+  @@unique([tenantId, id])
+  @@index([tenantId, name])
+}
+
+model TenantSlot {
+  id              String     @id @default(uuid())
+  tenantId        String
+  groundId        String
+  date            DateTime   @db.Date
+  startHour       Int
+  startMinute     Int        @default(0)
+  durationMinutes Int        @default(60)
+  price           Int
+  status          SlotStatus @default(available)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  ground TenantGround @relation(fields: [tenantId, groundId], references: [tenantId, id], onDelete: Restrict)
+
+  @@unique([tenantId, groundId, date, startHour, startMinute])
+  @@index([tenantId, date])
 }
 
 /// Business authority is explicit; User.role never implies membership or platform access.

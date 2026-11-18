@@ -27,6 +27,7 @@ function membership(): OwnerMembership {
       timezone: 'Asia/Dhaka',
       currency: 'bdt',
       createdAt: new Date(),
+      setup: null,
     },
   };
 }

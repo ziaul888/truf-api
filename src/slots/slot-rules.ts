@@ -74,7 +74,7 @@ export const dateWhere = (
   from && to ? { date: { gte: toDbDate(from), lte: toDbDate(to) } } : {};
 
 /** Slots that have not started yet, in venue time (to the minute: at 16:10 the 16:30 slot is still upcoming). */
-export const upcomingWhere = (now: VenueNow): Prisma.SlotWhereInput => {
+export const upcomingWhere = (now: VenueNow) => {
   const hour = Math.floor(now.minutes / 60);
   return {
     OR: [
@@ -86,7 +86,7 @@ export const upcomingWhere = (now: VenueNow): Prisma.SlotWhereInput => {
         startMinute: { gt: now.minutes % 60 },
       },
     ],
-  };
+  } satisfies Prisma.SlotWhereInput;
 };
 
 /** What generation needs to know about a ground. */

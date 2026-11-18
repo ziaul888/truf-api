@@ -8,6 +8,10 @@ import { OwnerGuard } from './owner.guard.js';
 import { OwnerOriginGuard } from './owner-origin.guard.js';
 import { OwnerAuthController } from './owner-auth.controller.js';
 import { OwnerBillingController } from './owner-billing.controller.js';
+import { OwnerOperationsController } from './owner-operations.controller.js';
+import { OwnerGroundsService } from './owner-grounds.service.js';
+import { OwnerSlotsService } from './owner-slots.service.js';
+import { OwnerVenueService } from './owner-venue.service.js';
 import { ownerSecret, OWNER_AUDIENCE, OWNER_ISSUER } from './owner-session.js';
 @Module({
   imports: [
@@ -26,11 +30,14 @@ import { ownerSecret, OWNER_AUDIENCE, OWNER_ISSUER } from './owner-session.js';
       },
     }),
   ],
-  controllers: [OwnerAuthController, OwnerBillingController],
+  controllers: [OwnerAuthController, OwnerBillingController, OwnerOperationsController],
   providers: [
     OwnerAuthService,
     OwnerActivationService,
     OwnerBillingService,
+    OwnerGroundsService,
+    OwnerSlotsService,
+    OwnerVenueService,
     OwnerGuard,
     OwnerOriginGuard,
   ],

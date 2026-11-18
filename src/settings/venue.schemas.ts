@@ -42,13 +42,13 @@ export const VenueStoredSchema = z.object({
 });
 export type VenueStored = z.infer<typeof VenueStoredSchema>;
 
-export const UpdateVenueSchema = z
-  .object(fields)
-  .partial()
-  .refine(
-    (v) => Object.keys(v).length > 0,
-    'Send at least one field to update',
-  );
+export const CompleteVenueSchema = z.object(fields);
+export type CompleteVenueInput = z.infer<typeof CompleteVenueSchema>;
+
+export const UpdateVenueSchema = CompleteVenueSchema.partial().refine(
+  (v) => Object.keys(v).length > 0,
+  'Send at least one field to update',
+);
 export type UpdateVenueInput = z.infer<typeof UpdateVenueSchema>;
 
 /** Until an admin saves General: a name only, so the portal shows no made-up contact details. */

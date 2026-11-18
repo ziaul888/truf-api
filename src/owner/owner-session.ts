@@ -29,6 +29,7 @@ export interface OwnerUser {
     status: string;
     timezone: string;
     currency: string;
+    setupComplete: boolean;
   };
 }
 export interface OwnerContext {
