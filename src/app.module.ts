@@ -14,6 +14,7 @@ import { ReportsModule } from './reports/reports.module.js';
 import { SettingsModule } from './settings/settings.module.js';
 import { SlotsModule } from './slots/slots.module.js';
 import { TenantsModule } from './tenants/tenants.module.js';
+import { TenantPortalModule } from './tenant-portal/tenant-portal.module.js';
 import { UsersModule } from './users/users.module.js';
 
 @Module({
@@ -33,6 +34,7 @@ import { UsersModule } from './users/users.module.js';
     ReportsModule,
     SettingsModule,
     TenantsModule,
+    TenantPortalModule,
     PlatformModule,
   ],
 })

@@ -2,7 +2,7 @@ import { OwnerAuthService } from '../owner/owner-auth.service.js';
 import {
   OWNER_COOKIE,
   ownerCookieOptions,
-  type OwnerUser,
+  type TenantUser,
 } from '../owner/owner-session.js';
 import { env } from '../config/env.js';
 import { OwnerOriginGuard } from '../owner/owner-origin.guard.js';
@@ -49,7 +49,7 @@ export class AuthController {
   async login(
     @Body(new ZodValidationPipe(LoginSchema)) body: LoginInput,
     @Res({ passthrough: true }) res: Response,
-  ): Promise<AuthUser | OwnerUser> {
+  ): Promise<AuthUser | TenantUser> {
     const identity = await this.auth.verifyCredentials(body);
     if (identity.legacyStaffAccess === false) {
       const { user, token } = await this.owners.issueVerified(identity);

@@ -1,5 +1,5 @@
-import { Controller, Get, Query, UseGuards } from '@nestjs/common';
-import { AuthGuard } from '../auth/auth.guard.js';
+import { Get, Query } from '@nestjs/common';
+import { DashboardController } from '../auth/dashboard-controller.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { SlotEventsService } from './slot-events.service.js';
 import {
@@ -8,8 +8,7 @@ import {
 } from './slots.schemas.js';
 
 /** The block / unblock / close / reopen timeline across all slots. Admins and managers. */
-@Controller('admin/slot-events')
-@UseGuards(AuthGuard)
+@DashboardController('slot-events')
 export class AdminSlotEventsController {
   constructor(private readonly events: SlotEventsService) {}
 

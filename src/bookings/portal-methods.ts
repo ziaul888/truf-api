@@ -1,4 +1,5 @@
 import { cardPaymentsEnabled } from '../payments/stripe.service.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import type { SlotSettings } from '../slots/slots.schemas.js';
 import { WALLET_METHODS, type WalletMethod } from './booking-rules.js';
 
@@ -9,7 +10,7 @@ import { WALLET_METHODS, type WalletMethod } from './booking-rules.js';
  */
 export const portalCardOn = (
   settings: Pick<SlotSettings, 'portalCardEnabled'>,
-) => cardPaymentsEnabled() && settings.portalCardEnabled;
+) => !dashboardData.getStore() && cardPaymentsEnabled() && settings.portalCardEnabled;
 
 /** The number customers send money to, or null while that wallet isn't offered. */
 export function portalWalletNumber(

@@ -98,6 +98,35 @@ function toCalendarSlot(s: SlotRow): CalendarSlot {
   };
 }
 
+export async function slotCalendar(
+  db: PrismaService,
+  { from, to, groundId }: CalendarQuery,
+): Promise<Calendar> {
+  assertRange(from, to, MAX_CALENDAR_DAYS);
+  const base: Prisma.SlotWhereInput = { groundId, ...dateWhere(from, to) };
+  const [rows, counts] = await db.$transaction([
+    db.slot.findMany({
+      where: { ...base, status: { in: ['held', 'booked', 'blocked'] } },
+      include: SLOT_INCLUDE,
+      orderBy: ORDER,
+    }),
+    db.slot.groupBy({
+      by: ['date', 'groundId'],
+      where: base,
+      orderBy: [{ date: 'asc' }, { groundId: 'asc' }],
+      _count: { _all: true },
+    }),
+  ]);
+  return {
+    slots: rows.map(toCalendarSlot),
+    totals: counts.map((c) => ({
+      date: fromDbDate(c.date),
+      groundId: c.groundId,
+      totalSlots: (c._count as { _all: number })._all,
+    })),
+  };
+}
+
 const ORDER: Prisma.SlotOrderByWithRelationInput[] = [
   { date: 'asc' },
   { startHour: 'asc' },
@@ -189,33 +218,8 @@ export class SlotsService {
   }
 
   /** Held, booked and blocked slots only, plus each ground's slot count per day. */
-  async calendar({ from, to, groundId }: CalendarQuery): Promise<Calendar> {
-    assertRange(from, to, MAX_CALENDAR_DAYS);
-    const base: Prisma.SlotWhereInput = {
-      ...(groundId && { groundId }),
-      ...dateWhere(from, to),
-    };
-    const [rows, counts] = await this.prisma.$transaction([
-      this.prisma.slot.findMany({
-        where: { ...base, status: { in: ['held', 'booked', 'blocked'] } },
-        include: SLOT_INCLUDE,
-        orderBy: ORDER,
-      }),
-      this.prisma.slot.groupBy({
-        by: ['date', 'groundId'],
-        where: base,
-        orderBy: [{ date: 'asc' }, { groundId: 'asc' }],
-        _count: { _all: true },
-      }),
-    ]);
-    return {
-      slots: rows.map(toCalendarSlot),
-      totals: counts.map((c) => ({
-        date: fromDbDate(c.date),
-        groundId: c.groundId,
-        totalSlots: (c._count as { _all: number })._all,
-      })),
-    };
+  calendar(query: CalendarQuery): Promise<Calendar> {
+    return slotCalendar(this.prisma, query);
   }
 
   /**

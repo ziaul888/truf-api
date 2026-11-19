@@ -3,6 +3,7 @@ import { JwtService } from '@nestjs/jwt';
 import { AppError } from '../common/app-error.js';
 import { upsertCustomerByPhone } from '../customers/customer-upsert.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import { SmsVerifyService } from '../sms/sms-verify.service.js';
 import type { CustomerProfileInput } from './customer-auth.schemas.js';
 import {
@@ -53,6 +54,7 @@ export class CustomerAuthService {
     const payload: CustomerJwtPayload = {
       sub: phone,
       ver: customer?.sessionVersion ?? 0,
+      tenantId: dashboardData.getStore()?.tenantId,
     };
     return {
       session: toCustomerSession(phone, customer),
@@ -105,6 +107,7 @@ export class CustomerAuthService {
     token: string | undefined,
   ): Promise<CustomerJwtPayload | null> {
     if (!token) return null;
-    return this.jwt.verifyAsync<CustomerJwtPayload>(token).catch(() => null);
+    const payload = await this.jwt.verifyAsync<CustomerJwtPayload>(token).catch(() => null);
+    return payload?.tenantId === dashboardData.getStore()?.tenantId ? payload : null;
   }
 }

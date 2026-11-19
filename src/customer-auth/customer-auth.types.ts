@@ -18,6 +18,7 @@ export interface CustomerJwtPayload {
   sub: string;
   /** The customer's `sessionVersion` when the token was issued; a mismatch means signed out. */
   ver: number;
+  tenantId?: string;
 }
 
 export type CustomerRequest = Request & { customer?: CustomerSession };

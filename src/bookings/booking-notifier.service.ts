@@ -1,5 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { env } from '../config/env.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import { EmailService, type EmailMessage } from '../email/email.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SettingsStore } from '../settings/settings-store.service.js';
@@ -62,6 +63,7 @@ export class BookingNotifier {
   ) {}
 
   async confirmed(bookingId: string): Promise<boolean> {
+    if (dashboardData.getStore()) return false;
     const b = await this.load(bookingId);
     return this.sendTo(
       b,
@@ -83,6 +85,7 @@ export class BookingNotifier {
 
   /** A "pay at the venue" or bKash / Nagad request: reserved, waiting for staff to confirm. */
   async received(bookingId: string): Promise<boolean> {
+    if (dashboardData.getStore()) return false;
     const b = await this.load(bookingId);
     const wallet = pendingWalletPayment(b.payments);
     return this.sendTo(
@@ -110,6 +113,7 @@ export class BookingNotifier {
     bookingId: string,
     notice: CancelledNotice,
   ): Promise<boolean> {
+    if (dashboardData.getStore()) return false;
     const b = await this.load(bookingId);
     const lines = [
       `Hi ${b.contactName},`,
@@ -137,6 +141,7 @@ export class BookingNotifier {
 
   /** An online payment that arrived when nothing was owed, refunded in full. */
   async paymentRefunded(bookingId: string, amount: number): Promise<boolean> {
+    if (dashboardData.getStore()) return false;
     if (!(await this.store.get('notifications')).refundIssued) return false;
     const b = await this.load(bookingId);
     return this.sendTo(
@@ -154,6 +159,7 @@ export class BookingNotifier {
 
   /** "New booking" to the staff recipients, if the notifyAdminOnBooking setting is on. */
   async newBookingToAdmins(bookingId: string): Promise<void> {
+    if (dashboardData.getStore()) return;
     if (!(await this.settings.get()).notifyAdminOnBooking) return;
     const b = await this.load(bookingId);
     for (const email of await this.staffRecipients()) {
@@ -173,6 +179,7 @@ export class BookingNotifier {
 
   /** Tells staff a customer cancelled through their link, if that setting is on. */
   async customerCancelledToStaff(bookingId: string): Promise<void> {
+    if (dashboardData.getStore()) return;
     if (!(await this.store.get('notifications')).customerCancelled) return;
     const b = await this.load(bookingId);
     for (const email of await this.staffRecipients()) {
@@ -191,6 +198,7 @@ export class BookingNotifier {
 
   /** A customer asked to cancel while their bKash / Nagad payment is under review: staff decide. Always sent. */
   async cancelRequestToStaff(bookingId: string): Promise<void> {
+    if (dashboardData.getStore()) return;
     const b = await this.load(bookingId);
     for (const email of await this.staffRecipients()) {
       await this.sendTo(

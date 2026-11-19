@@ -1,5 +1,6 @@
 import type { Request } from 'express';
 import type { User, UserRole } from '../generated/prisma/client.js';
+import type { TenantOperator } from '../owner/owner-session.js';
 
 /** The signed-in staff member, safe to return to the client (no password hash). */
 export interface AuthUser {
@@ -16,7 +17,10 @@ export interface JwtPayload {
   ver: number;
 }
 
-export type AuthedRequest = Request & { user?: AuthUser };
+export type AuthedRequest = Request & {
+  user?: AuthUser;
+  operator?: TenantOperator;
+};
 
 export const toAuthUser = ({ id, email, name, role }: User): AuthUser => ({
   id,

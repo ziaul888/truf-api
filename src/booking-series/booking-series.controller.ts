@@ -1,13 +1,12 @@
 import {
   Body,
-  Controller,
   Get,
   HttpCode,
   Param,
   Post,
-  UseGuards,
 } from '@nestjs/common';
-import { AuthGuard, CurrentUser } from '../auth/auth.guard.js';
+import { DashboardController } from '../auth/dashboard-controller.js';
+import { CurrentUser } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
@@ -24,8 +23,7 @@ import {
 import { BookingSeriesService } from './booking-series.service.js';
 
 /** Repeat bookings (dashboard), for admins and managers. Each date is a normal booking, managed as usual. */
-@Controller('admin/booking-series')
-@UseGuards(AuthGuard)
+@DashboardController('booking-series')
 export class BookingSeriesController {
   constructor(private readonly series: BookingSeriesService) {}
 

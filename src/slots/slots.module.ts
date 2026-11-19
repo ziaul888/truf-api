@@ -41,6 +41,6 @@ import { SlotsService } from './slots.service.js';
     ClosuresService,
     SlotAutoGenerateJob,
   ],
-  exports: [SlotGeneratorService],
+  exports: [SlotGeneratorService, SlotsService, ClosuresService],
 })
 export class SlotsModule {}

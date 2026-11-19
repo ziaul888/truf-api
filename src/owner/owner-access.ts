@@ -1,6 +1,10 @@
 import { AppError } from '../common/app-error.js';
 import type { Prisma } from '../generated/prisma/client.js';
-import type { OwnerContext, OwnerSession } from './owner-session.js';
+import type {
+  OwnerContext,
+  OwnerSession,
+  TenantOperator,
+} from './owner-session.js';
 import { configuredVenue } from './owner-venue.js';
 export const ownerMembershipSelect = {
   id: true,
@@ -48,9 +52,18 @@ export function ownerContext(
   row: OwnerMembership,
   session: OwnerSession,
 ): OwnerContext {
+  const context = tenantOperator(row, session);
+  if (context.user.role !== 'owner') throw ownerUnauthenticated();
+  return { session: context.session, user: context.user };
+}
+
+export function tenantOperator(
+  row: OwnerMembership,
+  session: OwnerSession,
+): TenantOperator {
   if (
     !row.isActive ||
-    row.role !== 'owner' ||
+    (row.role !== 'owner') !== Boolean(session.staff) ||
     !row.user.isActive ||
     row.user.legacyStaffAccess ||
     row.tenant.status === 'archived' ||
@@ -62,27 +75,43 @@ export function ownerContext(
   )
     throw ownerUnauthenticated();
   const { id, slug, name, status, timezone, currency } = row.tenant;
+  const identity = {
+    id: row.user.id,
+    email: row.user.email,
+    name: row.user.name,
+    tenant: {
+      id,
+      slug,
+      name,
+      status,
+      timezone,
+      currency,
+      setupComplete: Boolean(configuredVenue(row.tenant.setup?.data)),
+    },
+  };
   return {
     session: Object.freeze({ ...session }),
-    user: {
-      id: row.user.id,
-      email: row.user.email,
-      name: row.user.name,
-      role: 'owner',
-      audience: 'owner',
-      tenant: {
-        id,
-        slug,
-        name,
-        status,
-        timezone,
-        currency,
-        setupComplete: Boolean(configuredVenue(row.tenant.setup?.data)),
-      },
-    },
+    user:
+      row.role === 'owner'
+        ? { ...identity, role: 'owner', audience: 'owner' }
+        : { ...identity, role: row.role, audience: 'tenant-staff' },
   };
 }
 export async function requireOwner(
+  tx: Prisma.TransactionClient,
+  session: OwnerSession,
+) {
+  return ownerContext(await findMembership(tx, session), session);
+}
+
+export async function requireTenantOperator(
+  tx: Prisma.TransactionClient,
+  session: OwnerSession,
+) {
+  return tenantOperator(await findMembership(tx, session), session);
+}
+
+async function findMembership(
   tx: Prisma.TransactionClient,
   session: OwnerSession,
 ) {
@@ -91,5 +120,5 @@ export async function requireOwner(
     select: ownerMembershipSelect,
   });
   if (!row) throw ownerUnauthenticated();
-  return ownerContext(row, session);
+  return row;
 }

@@ -1,4 +1,5 @@
 import { env } from '../config/env.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import type { Weekday } from '../generated/prisma/client.js';
 
 // Slots live in venue-local time: a calendar date plus an hour and minute (slot-time.ts), never UTC timestamps.
@@ -17,7 +18,7 @@ const WEEKDAYS: Weekday[] = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
 
 export function venueNow(
   now = new Date(),
-  timeZone = env.VENUE_TIMEZONE,
+  timeZone = dashboardData.getStore()?.timezone ?? env.VENUE_TIMEZONE,
 ): VenueNow {
   const format = new Intl.DateTimeFormat('en-CA', {
     timeZone,
@@ -71,7 +72,7 @@ export const hasEnded = (
 /** The instant venue-local midnight starts on `date` (for comparing with timestamps like createdAt). */
 export function venueDayStart(
   date: IsoDate,
-  timeZone = env.VENUE_TIMEZONE,
+  timeZone = dashboardData.getStore()?.timezone ?? env.VENUE_TIMEZONE,
 ): Date {
   const guess = toDbDate(date).getTime();
   const local = venueNow(new Date(guess), timeZone);

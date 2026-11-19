@@ -13,6 +13,7 @@ import {
   StripeService,
 } from '../payments/stripe.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import { SlotSettingsService } from '../slots/slot-settings.service.js';
 import {
   assertDayOpen,
@@ -131,7 +132,7 @@ export class CheckoutService {
       cashEnabled: portalCashOn(settings),
       wallets: portalWallets(settings),
       serviceFee,
-      currency: env.CURRENCY,
+      currency: dashboardData.getStore()?.currency ?? env.CURRENCY,
       holdMinutes,
       maxSlotsPerBooking: slotLimitOf(settings),
       cashDepositPercent: cashDepositPercentOf(settings),
@@ -434,7 +435,7 @@ function walletPaymentOf(
   return {
     create: {
       ...wallet,
-      currency: env.CURRENCY,
+      currency: dashboardData.getStore()?.currency ?? env.CURRENCY,
       status: 'pending' as const,
       reference: input.reference!,
       payerNumber: input.payerNumber!,

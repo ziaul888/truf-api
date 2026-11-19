@@ -17,6 +17,11 @@ export class OwnerApplicationsController {
     return this.applications.plans();
   }
 
+  @Get('payment-methods')
+  methods() {
+    return this.applications.paymentMethods();
+  }
+
   @Post()
   @UseGuards(OwnerOriginGuard, ThrottlerGuard)
   @Throttle({ default: { limit: 5, ttl: 60 * 60_000 } })

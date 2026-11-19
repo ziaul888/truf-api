@@ -1,15 +1,14 @@
 import {
   Body,
-  Controller,
   Delete,
   Get,
   Param,
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { AuthGuard, Roles } from '../auth/auth.guard.js';
+import { DashboardController } from '../auth/dashboard-controller.js';
+import { Roles } from '../auth/auth.guard.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
 import {
@@ -25,8 +24,7 @@ import {
 import { CustomersService } from './customers.service.js';
 
 /** Admins and managers manage customers; only admins delete. */
-@Controller('admin/customers')
-@UseGuards(AuthGuard)
+@DashboardController('customers')
 export class AdminCustomersController {
   constructor(private readonly customers: CustomersService) {}
 

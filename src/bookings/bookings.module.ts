@@ -39,5 +39,6 @@ import { StripeWebhookService } from './stripe-webhook.service.js';
     BookingJobs,
     CancelRequestService,
   ],
+  exports: [BookingQueriesService, CheckoutService, CancelRequestService],
 })
 export class BookingsModule {}

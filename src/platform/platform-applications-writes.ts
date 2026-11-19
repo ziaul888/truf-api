@@ -2,6 +2,8 @@ import { AppError } from '../common/app-error.js';
 import type { PlatformTx } from './platform-command.js';
 import { billingDate, billingToday } from './platform-billing-dates.js';
 import { createPlatformInvoice } from './platform-invoice-builder.js';
+import type { ActivateApplication } from './platform-applications.schemas.js';
+import { payableInvoice, storeReceipt } from './platform-receipt-writes.js';
 
 async function pendingApplication(tx: PlatformTx, applicationId: string) {
   const application = await tx.ownerApplication.findUnique({
@@ -27,7 +29,25 @@ async function pendingApplication(tx: PlatformTx, applicationId: string) {
       409,
       'PLAN_NOT_AVAILABLE',
     );
-  return { ...application, passwordHash, planVersion, billingInterval };
+  const { paymentMethod, paymentReference, paymentDate } = application;
+  if (!paymentMethod || !paymentReference || !paymentDate) {
+    throw new AppError(
+      'This application is missing payment proof',
+      409,
+      'PAYMENT_PROOF_REQUIRED',
+    );
+  }
+  return {
+    ...application,
+    passwordHash,
+    planVersion,
+    billingInterval,
+    payment: {
+      method: paymentMethod,
+      reference: paymentReference,
+      receivedOn: billingDate(paymentDate),
+    },
+  };
 }
 
 async function createInitialSubscription(
@@ -96,11 +116,15 @@ export async function activateApplication(
   tx: PlatformTx,
   applicationId: string,
   actorId: string,
+  confirmation: ActivateApplication,
 ) {
   const application = await pendingApplication(tx, applicationId);
   const user = await createOwner(tx, application);
   const tenant = await createTurf(tx, application, user.id);
   const billing = await createInitialSubscription(tx, application, tenant.id);
+  const payment = { ...application.payment, ...confirmation };
+  const invoice = await payableInvoice(tx, billing.invoice.id, payment);
+  const receipt = await storeReceipt(tx, actorId, invoice, payment);
   await tx.ownerApplication.update({
     where: { id: application.id },
     data: {
@@ -119,6 +143,7 @@ export async function activateApplication(
       status: 'activated',
       subscriptionId: billing.subscription.id,
       invoiceId: billing.invoice.id,
+      receiptId: receipt.id,
       planVersionId: billing.subscription.planVersionId,
       interval: billing.subscription.interval,
       amount: billing.subscription.amount,

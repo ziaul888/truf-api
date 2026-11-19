@@ -3,6 +3,9 @@ import { Prisma } from '../generated/prisma/client.js';
 import { AppError } from '../common/app-error.js';
 import { hashPassword } from '../auth/password.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { toDbDate } from '../slots/venue-time.js';
+import { billingToday } from '../platform/platform-billing-dates.js';
+import { paymentInstructions } from '../platform/platform-payment-instructions.js';
 import { applicationFingerprint } from './owner-application-fingerprint.js';
 import {
   ownerApplicationSelect,
@@ -57,6 +60,10 @@ export class OwnerApplicationsService {
     return rows.map(toPlanDto);
   }
 
+  paymentMethods() {
+    return paymentInstructions(this.db);
+  }
+
   private create(
     input: SubmitOwnerApplication,
     inputHash: string,
@@ -73,7 +80,8 @@ export class OwnerApplicationsService {
           return toOwnerApplicationDto(replay);
         }
         await this.assertAvailable(tx, input.ownerEmail, input.slug);
-        const planVersionId = await this.availablePlanVersion(tx, input.planId);
+        const planVersionId = await this.availablePlanVersion(tx, input);
+        const paymentDate = await assertPaymentProof(tx, input);
         const created = await tx.ownerApplication.create({
           data: {
             requestId: input.requestId,
@@ -87,6 +95,9 @@ export class OwnerApplicationsService {
             currency: input.currency,
             planVersionId,
             billingInterval: input.interval,
+            paymentMethod: input.paymentMethod,
+            paymentReference: input.paymentReference,
+            paymentDate,
           },
           select: ownerApplicationSelect,
         });
@@ -98,12 +109,17 @@ export class OwnerApplicationsService {
 
   private async availablePlanVersion(
     tx: Prisma.TransactionClient,
-    planId: string,
+    input: SubmitOwnerApplication,
   ) {
     const version = await tx.platformPlanVersion.findFirst({
-      where: { planId, plan: { isActive: true } },
+      where: { planId: input.planId, plan: { isActive: true } },
       orderBy: { version: 'desc' },
-      select: { id: true },
+      select: {
+        id: true,
+        version: true,
+        monthlyAmount: true,
+        yearlyAmount: true,
+      },
     });
     if (!version)
       throw new AppError(
@@ -111,6 +127,20 @@ export class OwnerApplicationsService {
         400,
         'PLAN_NOT_AVAILABLE',
       );
+    const amount =
+      input.interval === 'monthly'
+        ? version.monthlyAmount
+        : version.yearlyAmount;
+    if (
+      version.version !== input.planVersion ||
+      amount !== input.expectedAmount
+    ) {
+      throw new AppError(
+        'The plan price changed. Contact the platform administrator if you already paid.',
+        409,
+        'PLAN_PRICE_CHANGED',
+      );
+    }
     return version.id;
   }
 
@@ -132,4 +162,50 @@ export class OwnerApplicationsService {
     ]);
     if (user || tenant || pending) throw unavailable();
   }
+}
+
+async function assertPaymentProof(
+  tx: Prisma.TransactionClient,
+  input: SubmitOwnerApplication,
+) {
+  const methods = await paymentInstructions(tx);
+  if (!methods[input.paymentMethod]) {
+    throw new AppError(
+      'This payment method is not available',
+      400,
+      'PAYMENT_METHOD_UNAVAILABLE',
+    );
+  }
+  const date = toDbDate(input.paymentDate);
+  if (date > billingToday()) {
+    throw new AppError(
+      'Payment date cannot be in the future',
+      400,
+      'PAYMENT_DATE_IN_FUTURE',
+    );
+  }
+  const recorded = await tx.platformReceipt.findUnique({
+    where: {
+      method_referenceNormalized: {
+        method: input.paymentMethod,
+        referenceNormalized: input.paymentReference,
+      },
+    },
+    select: { id: true },
+  });
+  const pending = await tx.ownerApplication.findFirst({
+    where: {
+      status: 'pending',
+      paymentMethod: input.paymentMethod,
+      paymentReference: input.paymentReference,
+    },
+    select: { id: true },
+  });
+  if (recorded || pending)
+    throw new AppError(
+      'This payment reference has already been used',
+      409,
+      'PAYMENT_REFERENCE_USED',
+    );
+  return date;
 }

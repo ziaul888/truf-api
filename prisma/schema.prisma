@@ -325,6 +325,9 @@ model OwnerApplication {
   currency        String                   @default("bdt")
   planVersionId   String?
   billingInterval PlatformBillingInterval?
+  paymentMethod   PlatformReceiptMethod?
+  paymentReference String?
+  paymentDate     DateTime?                @db.Date
   status          OwnerApplicationStatus   @default(pending)
   reviewedAt      DateTime?
   reviewedById    String?
@@ -832,6 +835,7 @@ enum PlatformAuditAction {
   owner_activated
   application_activated
   application_rejected
+  payment_methods_updated
 }
 
 model PlatformPlan {

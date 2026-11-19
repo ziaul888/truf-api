@@ -4,6 +4,7 @@ import type {
   SlotSettings as SlotSettingsRow,
 } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import type { SlotSettings, UpdateSlotSettingsInput } from './slots.schemas.js';
 
 /** Used until an admin saves the settings page for the first time. */
@@ -58,6 +59,8 @@ export class SlotSettingsService {
   async get(
     db: PrismaService | Prisma.TransactionClient = this.prisma,
   ): Promise<SlotSettings> {
+    const context = dashboardData.getStore();
+    if (context) return context.settings;
     const row = await db.slotSettings.findUnique({
       where: { id: SETTINGS_ID },
     });

@@ -1,11 +1,10 @@
-import { Controller, Get, UseGuards } from '@nestjs/common';
-import { AuthGuard } from '../auth/auth.guard.js';
+import { Get } from '@nestjs/common';
+import { DashboardController as DashboardRoutes } from '../auth/dashboard-controller.js';
 import { DashboardAttentionService } from './dashboard-attention.service.js';
 import { DashboardTodayService } from './dashboard-today.service.js';
 import { DashboardService } from './dashboard.service.js';
 
-@Controller('admin/dashboard')
-@UseGuards(AuthGuard)
+@DashboardRoutes('dashboard', 'operations/dashboard')
 export class DashboardController {
   constructor(
     private readonly dashboard: DashboardService,

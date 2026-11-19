@@ -22,6 +22,7 @@ export function configureApp(app: INestApplication) {
       '/api/v1/platform',
       '/api/v1/owner',
       '/api/v1/owner-applications',
+      '/api/v1/turfs',
       '/api/v1/admin/auth',
     ],
     (_req: Request, res: Response, next: NextFunction) => {

@@ -1,15 +1,14 @@
 import {
   Body,
-  Controller,
   Get,
   HttpCode,
   Param,
   Patch,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { AuthGuard, CurrentUser } from '../auth/auth.guard.js';
+import { DashboardController } from '../auth/dashboard-controller.js';
+import { CurrentUser } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
@@ -44,8 +43,7 @@ import {
  * Dashboard bookings, for admins and managers. Status changes go through the actions
  * (confirm, cancel, payments, no-show), never a generic status PATCH, so refunds, slots and emails stay consistent.
  */
-@Controller('admin/bookings')
-@UseGuards(AuthGuard)
+@DashboardController('bookings')
 export class AdminBookingsController {
   constructor(
     private readonly queries: BookingQueriesService,

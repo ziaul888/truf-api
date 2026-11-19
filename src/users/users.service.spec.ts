@@ -9,6 +9,7 @@ const user = (overrides: Partial<User> = {}): User => ({
   name: 'Manager',
   role: 'manager',
   isActive: true,
+  legacyStaffAccess: true,
   tokenVersion: 0,
   passwordHash: 'scrypt$hash',
   createdAt: new Date('2026-01-01'),
@@ -60,6 +61,7 @@ describe('UsersService', () => {
         skip: 10,
         take: 10,
         where: {
+          legacyStaffAccess: true,
           OR: [
             { name: { contains: 'man', mode: 'insensitive' } },
             { email: { contains: 'man', mode: 'insensitive' } },

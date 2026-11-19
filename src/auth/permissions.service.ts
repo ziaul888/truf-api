@@ -23,6 +23,7 @@ const joinPath = (...parts: (string | undefined)[]) =>
 @Injectable()
 export class PermissionsService {
   private cache?: Permissions;
+  private tenantCache?: Permissions;
 
   constructor(
     private readonly discovery: DiscoveryService,
@@ -30,17 +31,29 @@ export class PermissionsService {
     private readonly reflector: Reflector,
   ) {}
 
-  list(): Permissions {
+  list(tenant = false): Permissions {
+    if (tenant) {
+      this.tenantCache ??= this.build(true);
+      return this.tenantCache;
+    }
     this.cache ??= this.build();
     return this.cache;
   }
 
-  private build(): Permissions {
+  private build(tenant = false): Permissions {
     const result: Permissions = { admin: [], manager: [] };
     for (const { metatype } of this.discovery.getControllers()) {
       if (typeof metatype !== 'function') continue;
-      const base = Reflect.getMetadata(PATH_METADATA, metatype) as
-        string | undefined;
+      const paths = Reflect.getMetadata(PATH_METADATA, metatype) as
+        string | string[] | undefined;
+      const base = Array.isArray(paths)
+        ? paths.find((path) =>
+            path.startsWith(tenant ? 'owner/admin/' : 'admin/'),
+          )
+        : tenant
+          ? undefined
+          : paths;
+      if (!base) continue;
       const classGuards = (Reflect.getMetadata(GUARDS_METADATA, metatype) ??
         []) as unknown[];
       const proto = metatype.prototype as Record<string, unknown>;
@@ -59,7 +72,7 @@ export class PermissionsService {
           ROLES_KEY,
           [handler as never, metatype],
         );
-        const route = `${RequestMethod[Reflect.getMetadata(METHOD_METADATA, handler) as number]} ${joinPath(base, path)}`;
+        const route = `${RequestMethod[Reflect.getMetadata(METHOD_METADATA, handler) as number]} ${joinPath(tenant ? base.slice(6) : base, path)}`;
         for (const role of ROLES)
           if (!roles || roles.includes(role)) result[role].push(route);
       }

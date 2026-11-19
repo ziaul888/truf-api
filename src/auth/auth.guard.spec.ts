@@ -4,6 +4,8 @@ import { AppError } from '../common/app-error.js';
 import { AuthGuard, Roles } from './auth.guard.js';
 import type { AuthService } from './auth.service.js';
 import type { AuthedRequest, AuthUser } from './auth.types.js';
+import type { OwnerAuthService } from '../owner/owner-auth.service.js';
+import { OwnerOriginGuard } from '../owner/owner-origin.guard.js';
 
 const manager: AuthUser = {
   id: 'u1',
@@ -30,7 +32,12 @@ function run(
     getHandler: () => controller.prototype.handler,
     getClass: () => controller,
   } as unknown as ExecutionContext;
-  const guard = new AuthGuard({ authenticate } as AuthService, new Reflector());
+  const guard = new AuthGuard(
+    { authenticate } as AuthService,
+    new Reflector(),
+    {} as OwnerAuthService,
+    new OwnerOriginGuard(),
+  );
   return { req, result: guard.canActivate(ctx) };
 }
 

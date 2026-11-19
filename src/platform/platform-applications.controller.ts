@@ -13,8 +13,10 @@ import { PlatformGuard, CurrentPlatformActor } from './platform.guard.js';
 import { PlatformOriginGuard } from './platform-origin.guard.js';
 import type { PlatformActor } from './platform-session.js';
 import {
+  ActivateApplicationSchema,
   PlatformApplicationFiltersSchema,
   ReviewApplicationSchema,
+  type ActivateApplication,
   type PlatformApplicationFilters,
   type ReviewApplication,
 } from './platform-applications.schemas.js';
@@ -37,10 +39,10 @@ export class PlatformApplicationsController {
   activate(
     @CurrentPlatformActor() actor: PlatformActor,
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Body(new ZodValidationPipe(ReviewApplicationSchema))
-    input: ReviewApplication,
+    @Body(new ZodValidationPipe(ActivateApplicationSchema))
+    input: ActivateApplication,
   ) {
-    return this.applications.activate(actor, id, input.requestId);
+    return this.applications.activate(actor, id, input);
   }
 
   @Post(':id/reject')

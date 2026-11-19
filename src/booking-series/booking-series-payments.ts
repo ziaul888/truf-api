@@ -5,6 +5,7 @@ import {
   receivedDetail,
 } from '../bookings/booking-rules.js';
 import { env } from '../config/env.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import type {
   BookingStatus,
   PaymentMethod,
@@ -56,7 +57,7 @@ export async function recordAllocated(
         bookingId: part.id,
         method: payment.method,
         amount: part.amount,
-        currency: env.CURRENCY,
+        currency: dashboardData.getStore()?.currency ?? env.CURRENCY,
         status: 'succeeded',
         receivedAt: new Date(),
         reference,

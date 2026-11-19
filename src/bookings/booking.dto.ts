@@ -9,6 +9,7 @@ import type {
   Sport,
 } from '../generated/prisma/client.js';
 import { photoUrl } from '../grounds/photo-storage.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import { slotHour, slotTimes, type SlotTimes } from '../slots/slot-time.js';
 import {
   fromDbDate,
@@ -402,6 +403,6 @@ export const toPublicBookingDto = (
     canPay,
     cancelRequested: b.cancelRequestedAt !== null,
     canRequestCancel,
-    emailed: b.contactEmail !== null,
+    emailed: !dashboardData.getStore() && b.contactEmail !== null,
   };
 };

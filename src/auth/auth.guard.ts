@@ -7,6 +7,10 @@ import {
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { AppError } from '../common/app-error.js';
+import { OwnerAuthService } from '../owner/owner-auth.service.js';
+import { OwnerOriginGuard } from '../owner/owner-origin.guard.js';
+import { OWNER_COOKIE } from '../owner/owner-session.js';
+import { requireVenue } from '../owner/owner-venue.js';
 import type { UserRole } from '../generated/prisma/client.js';
 import { AUTH_COOKIE } from './auth-cookie.js';
 import { AuthService } from './auth.service.js';
@@ -24,19 +28,24 @@ export const CurrentUser = createParamDecorator(
 );
 
 /**
- * Requires a valid `admin_token` cookie (401 otherwise) and, when `@Roles(...)` is set,
- * one of those roles (403 otherwise). Usage: `@UseGuards(AuthGuard)` on admin controllers.
+ * Authenticates the session for the registered dashboard route and enforces
+ * its `@Roles(...)` metadata.
  */
 @Injectable()
 export class AuthGuard implements CanActivate {
   constructor(
     private readonly auth: AuthService,
     private readonly reflector: Reflector,
+    private readonly owners: OwnerAuthService,
+    private readonly ownerOrigin: OwnerOriginGuard,
   ) {}
 
   async canActivate(ctx: ExecutionContext): Promise<boolean> {
     const req = ctx.switchToHttp().getRequest<AuthedRequest>();
-    const user = await this.auth.authenticate(req.cookies?.[AUTH_COOKIE]);
+    const route = req.route as { path?: string } | undefined;
+    const user = route?.path?.startsWith('/api/v1/owner/admin/')
+      ? await this.authorizeTenant(ctx, req)
+      : await this.auth.authenticate(req.cookies?.[AUTH_COOKIE]);
     req.user = user;
 
     const roles = this.reflector.getAllAndOverride<UserRole[] | undefined>(
@@ -51,5 +60,20 @@ export class AuthGuard implements CanActivate {
       );
     }
     return true;
+  }
+
+  private async authorizeTenant(
+    ctx: ExecutionContext,
+    req: AuthedRequest,
+  ): Promise<AuthUser> {
+    if (req.method !== 'GET' && req.method !== 'HEAD')
+      this.ownerOrigin.canActivate(ctx);
+    const operator = await this.owners.authorizeOperator(
+      req.cookies?.[OWNER_COOKIE],
+    );
+    requireVenue(operator);
+    req.operator = operator;
+    const { id, email, name, role } = operator.user;
+    return { id, email, name, role: role === 'owner' ? 'admin' : role };
   }
 }

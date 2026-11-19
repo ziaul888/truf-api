@@ -7,7 +7,10 @@ import {
 import type { PlatformActor } from './platform-session.js';
 import { PlatformCommands } from './platform-command.js';
 import { PlatformTenantsService } from './platform-tenants.service.js';
-import type { PlatformApplicationFilters } from './platform-applications.schemas.js';
+import type {
+  ActivateApplication,
+  PlatformApplicationFilters,
+} from './platform-applications.schemas.js';
 import {
   activateApplication,
   rejectApplication,
@@ -41,15 +44,15 @@ export class PlatformApplicationsService {
     };
   }
 
-  async activate(actor: PlatformActor, id: string, requestId: string) {
+  async activate(actor: PlatformActor, id: string, input: ActivateApplication) {
     const tenantId = await this.commands.run(
       actor,
       {
-        requestId,
+        requestId: input.requestId,
         action: 'application_activated',
-        payload: { applicationId: id, requestId },
+        payload: { applicationId: id, ...input },
       },
-      (tx) => activateApplication(tx, id, actor.userId),
+      (tx) => activateApplication(tx, id, actor.userId, input),
     );
     return this.tenants.detail(tenantId);
   }

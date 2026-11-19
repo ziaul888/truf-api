@@ -19,6 +19,11 @@ export function applicationFingerprint(input: SubmitOwnerApplication) {
         password: input.password,
         planId: input.planId,
         interval: input.interval,
+        planVersion: input.planVersion,
+        expectedAmount: input.expectedAmount,
+        paymentMethod: input.paymentMethod,
+        paymentReference: input.paymentReference,
+        paymentDate: input.paymentDate,
       }),
     )
     .digest('hex');

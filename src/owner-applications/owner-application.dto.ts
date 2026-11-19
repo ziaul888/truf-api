@@ -10,6 +10,9 @@ export const ownerApplicationSelect = {
   currency: true,
   planVersionId: true,
   billingInterval: true,
+  paymentMethod: true,
+  paymentReference: true,
+  paymentDate: true,
   planVersion: {
     select: {
       id: true,
@@ -34,10 +37,25 @@ type ApplicationRow = Prisma.OwnerApplicationGetPayload<{
 }>;
 
 export const toOwnerApplicationDto = (row: ApplicationRow) => {
-  const { planVersion, billingInterval, ...application } = row;
+  const {
+    planVersion,
+    billingInterval,
+    paymentMethod,
+    paymentReference,
+    paymentDate,
+    ...application
+  } = row;
   return {
     ...application,
     billingInterval,
+    payment:
+      paymentMethod && paymentReference && paymentDate
+        ? {
+            method: paymentMethod,
+            reference: paymentReference,
+            date: paymentDate.toISOString().slice(0, 10),
+          }
+        : null,
     plan:
       planVersion && billingInterval
         ? {

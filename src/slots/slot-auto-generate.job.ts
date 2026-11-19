@@ -7,6 +7,7 @@ import {
 import { BookingSeriesBooker } from '../booking-series/booking-series-booker.js';
 import { trackJob } from '../common/job-runs.js';
 import { env } from '../config/env.js';
+import { TenantDashboardDatabase } from '../owner/tenant-dashboard-database.service.js';
 import { SystemStateService } from '../settings/system-state.service.js';
 import { SlotGeneratorService } from './slot-generator.service.js';
 
@@ -30,6 +31,7 @@ export class SlotAutoGenerateJob
     private readonly generator: SlotGeneratorService,
     private readonly state: SystemStateService,
     private readonly series: BookingSeriesBooker,
+    private readonly tenantDashboard?: TenantDashboardDatabase,
   ) {}
 
   onApplicationBootstrap() {
@@ -62,7 +64,13 @@ export class SlotAutoGenerateJob
   /** Runs even when generation failed or is off: slots may exist from before. Never throws. */
   private async extendSeries() {
     try {
-      const booked = await this.series.extendOngoing();
+      let booked = await this.series.extendOngoing();
+      await this.tenantDashboard?.forConfiguredTurfs(
+        'repeat bookings',
+        async () => {
+          booked += await this.series.extendOngoing();
+        },
+      );
       if (booked > 0)
         this.logger.log(`Repeat bookings: booked ${booked} more dates`);
     } catch (err) {

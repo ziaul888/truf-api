@@ -14,14 +14,13 @@ export const OwnerSessionSchema = z.object({
   mid: z.uuid(),
   uv: z.number().int().nonnegative(),
   mv: z.number().int().nonnegative(),
+  staff: z.literal(true).optional(),
 });
 export type OwnerSession = z.infer<typeof OwnerSessionSchema>;
-export interface OwnerUser {
+type TenantIdentity = {
   id: string;
   email: string;
   name: string;
-  role: 'owner';
-  audience: 'owner';
   tenant: {
     id: string;
     slug: string;
@@ -31,12 +30,22 @@ export interface OwnerUser {
     currency: string;
     setupComplete: boolean;
   };
-}
-export interface OwnerContext {
+};
+export type OwnerUser = TenantIdentity & { role: 'owner'; audience: 'owner' };
+export type TenantUser =
+  | OwnerUser
+  | (TenantIdentity & { role: 'admin' | 'manager'; audience: 'tenant-staff' });
+export interface TenantOperator {
   session: Readonly<OwnerSession>;
+  user: TenantUser;
+}
+export interface OwnerContext extends TenantOperator {
   user: OwnerUser;
 }
-export type OwnerRequest = Request & { owner?: OwnerContext };
+export type OwnerRequest = Request & {
+  owner?: OwnerContext;
+  operator?: TenantOperator;
+};
 export const ownerCookieOptions = (): CookieOptions => ({
   httpOnly: true,
   secure: env.NODE_ENV === 'production',

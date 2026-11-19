@@ -1,7 +1,7 @@
 import { once } from 'node:events';
-import { Controller, Get, Query, Res, UseGuards } from '@nestjs/common';
+import { Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
-import { AuthGuard } from '../auth/auth.guard.js';
+import { DashboardController } from '../auth/dashboard-controller.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { ReportExportService } from './report-export.service.js';
 import {
@@ -15,8 +15,7 @@ import {
 import { ReportsService } from './reports.service.js';
 
 /** Reports pages and dashboard charts. Admin and manager, like the dashboard. */
-@Controller('admin/reports')
-@UseGuards(AuthGuard)
+@DashboardController('reports')
 export class ReportsController {
   constructor(
     private readonly reports: ReportsService,

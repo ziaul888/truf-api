@@ -28,14 +28,15 @@ export class UsersService {
     limit,
     search,
   }: ListUsersQuery): Promise<Paginated<UserDto>> {
-    const where: Prisma.UserWhereInput = search
-      ? {
-          OR: [
-            { name: { contains: search, mode: 'insensitive' } },
-            { email: { contains: search, mode: 'insensitive' } },
-          ],
-        }
-      : {};
+    const where: Prisma.UserWhereInput = {
+      legacyStaffAccess: true,
+      ...(search && {
+        OR: [
+          { name: { contains: search, mode: 'insensitive' } },
+          { email: { contains: search, mode: 'insensitive' } },
+        ],
+      }),
+    };
     const [users, total] = await this.prisma.$transaction([
       this.prisma.user.findMany({
         where,
@@ -87,7 +88,7 @@ export class UsersService {
       await this.assertEmailFree(input.email);
 
     const updated = await this.prisma.user
-      .update({ where: { id }, data: input })
+      .update({ where: { id, legacyStaffAccess: true }, data: input })
       .catch((err: unknown) => {
         throw isUniqueViolation(err) ? emailTaken() : err;
       });
@@ -101,7 +102,7 @@ export class UsersService {
   ): Promise<UserDto> {
     await this.findOrThrow(id);
     const updated = await this.prisma.user.update({
-      where: { id },
+      where: { id, legacyStaffAccess: true },
       data: {
         passwordHash: await hashPassword(password),
         tokenVersion: { increment: 1 },
@@ -111,7 +112,9 @@ export class UsersService {
   }
 
   private async findOrThrow(id: string): Promise<User> {
-    const user = await this.prisma.user.findUnique({ where: { id } });
+    const user = await this.prisma.user.findUnique({
+      where: { id, legacyStaffAccess: true },
+    });
     if (!user) throw new AppError('User not found', 404, 'USER_NOT_FOUND');
     return user;
   }

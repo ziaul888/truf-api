@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import { env } from '../config/env.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import {
   contactEmailOf,
   upsertCustomerByPhone,
@@ -409,7 +410,7 @@ export class StaffBookingsService {
         bookingId,
         method: p.method,
         amount: p.amount,
-        currency: env.CURRENCY,
+        currency: dashboardData.getStore()?.currency ?? env.CURRENCY,
         status: 'succeeded',
         receivedAt: new Date(),
         reference: p.reference ?? null,
@@ -532,7 +533,7 @@ function newStaffBooking(
               {
                 method: payment.method!,
                 amount: paid,
-                currency: env.CURRENCY,
+                currency: dashboardData.getStore()?.currency ?? env.CURRENCY,
                 status: 'succeeded' as const,
                 receivedAt: new Date(),
                 reference: payment.reference ?? null,

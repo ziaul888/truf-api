@@ -2,6 +2,8 @@ import { PlatformOwnerAccessController } from './platform-owner-access.controlle
 import { PlatformOwnerAccessService } from './platform-owner-access.service.js';
 import { PlatformApplicationsController } from './platform-applications.controller.js';
 import { PlatformApplicationsService } from './platform-applications.service.js';
+import { PlatformPaymentInstructionsController } from './platform-payment-instructions.controller.js';
+import { PlatformPaymentInstructionsService } from './platform-payment-instructions.service.js';
 import { PlatformCommands } from './platform-command.js';
 import { PlatformOnboardingController } from './platform-onboarding.controller.js';
 import { PlatformOnboardingService } from './platform-onboarding.service.js';
@@ -53,6 +55,7 @@ import {
     PlatformBillingController,
     PlatformOwnerAccessController,
     PlatformApplicationsController,
+    PlatformPaymentInstructionsController,
   ],
   providers: [
     PlatformAuthService,
@@ -67,6 +70,7 @@ import {
     PlatformReceiptsService,
     PlatformOwnerAccessService,
     PlatformApplicationsService,
+    PlatformPaymentInstructionsService,
   ],
 })
 export class PlatformModule {}

@@ -2,6 +2,7 @@ import { createHmac, randomInt, timingSafeEqual } from 'node:crypto';
 import { AppError } from '../common/app-error.js';
 import { violatedUniqueIndex } from '../common/prisma-errors.js';
 import { env } from '../config/env.js';
+import { dashboardData } from '../prisma/dashboard-data-context.js';
 import type {
   BookingPaymentStatus,
   PaymentMethod,
@@ -169,8 +170,11 @@ export function isValidBookingToken(
   return given.length === expected.length && timingSafeEqual(given, expected);
 }
 
-export const confirmationUrl = (bookingId: string) =>
-  `${env.PUBLIC_APP_URL}/confirmation/${bookingId}?token=${bookingToken(bookingId)}`;
+export const confirmationUrl = (bookingId: string) => {
+  const slug = dashboardData.getStore()?.portalSlug;
+  const base = slug ? `/turf/${encodeURIComponent(slug)}` : '';
+  return `${env.PUBLIC_APP_URL}${base}/confirmation/${bookingId}?token=${bookingToken(bookingId)}`;
+};
 
 interface PaymentLike {
   amount: number;

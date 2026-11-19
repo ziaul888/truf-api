@@ -1,14 +1,13 @@
 import {
   Body,
-  Controller,
   Get,
   HttpCode,
   Param,
   Post,
   Query,
-  UseGuards,
 } from '@nestjs/common';
-import { AuthGuard, CurrentUser, Roles } from '../auth/auth.guard.js';
+import { DashboardController } from '../auth/dashboard-controller.js';
+import { CurrentUser, Roles } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
@@ -34,8 +33,7 @@ import {
 import { SlotsService } from './slots.service.js';
 
 /** Dashboard: admins and managers view, block and unblock; only admins generate. */
-@Controller('admin/slots')
-@UseGuards(AuthGuard)
+@DashboardController('slots', 'operations/slots')
 export class AdminSlotsController {
   constructor(
     private readonly slots: SlotsService,

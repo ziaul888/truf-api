@@ -27,6 +27,6 @@ import { PermissionsService } from './permissions.service.js';
   ],
   controllers: [AuthController],
   providers: [AuthService, AuthGuard, PermissionsService],
-  exports: [AuthService, AuthGuard],
+  exports: [AuthService, AuthGuard, OwnerModule],
 })
 export class AuthModule {}

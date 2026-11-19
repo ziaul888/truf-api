@@ -7,6 +7,7 @@ import {
 import { trackJob } from '../common/job-runs.js';
 import { env } from '../config/env.js';
 import { StripeService } from '../payments/stripe.service.js';
+import { TenantDashboardDatabase } from '../owner/tenant-dashboard-database.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { SystemStateService } from '../settings/system-state.service.js';
 import { addDays, toDbDate, venueNow } from '../slots/venue-time.js';
@@ -43,6 +44,7 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
     private readonly notifier: BookingNotifier,
     private readonly stripe: StripeService,
     private readonly state: SystemStateService,
+    private readonly tenantDashboard?: TenantDashboardDatabase,
   ) {}
 
   onApplicationBootstrap() {
@@ -53,7 +55,7 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
     this.every(
       60 * MINUTE_MS,
       async () =>
-        (await trackJob('completion', () => this.completeEnded())) +
+        (await trackJob('completion', () => this.completeAllEnded())) +
         (await trackJob('dueReminders', () => this.sendDueReminders())) +
         (await trackJob('dueDigest', () => this.sendDueDigest())),
     );
@@ -61,6 +63,17 @@ export class BookingJobs implements OnApplicationBootstrap, OnModuleDestroy {
 
   onModuleDestroy() {
     this.timers.forEach(clearInterval);
+  }
+
+  private async completeAllEnded() {
+    let completed = await this.completeEnded();
+    await this.tenantDashboard?.forConfiguredTurfs(
+      'booking completion',
+      async () => {
+        completed += await this.completeEnded();
+      },
+    );
+    return completed;
   }
 
   /** Releases every lapsed hold; one that fails is logged and retried next run without holding up the rest. */
