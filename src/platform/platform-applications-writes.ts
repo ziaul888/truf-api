@@ -3,7 +3,12 @@ import type { PlatformTx } from './platform-command.js';
 import { billingDate, billingToday } from './platform-billing-dates.js';
 import { createPlatformInvoice } from './platform-invoice-builder.js';
 import type { ActivateApplication } from './platform-applications.schemas.js';
-import { payableInvoice, storeReceipt } from './platform-receipt-writes.js';
+import {
+  normalizedReceiptReference,
+  payableInvoice,
+  storeReceipt,
+} from './platform-receipt-writes.js';
+import { toDbDate } from '../slots/venue-time.js';
 
 async function pendingApplication(tx: PlatformTx, applicationId: string) {
   const application = await tx.ownerApplication.findUnique({
@@ -29,25 +34,7 @@ async function pendingApplication(tx: PlatformTx, applicationId: string) {
       409,
       'PLAN_NOT_AVAILABLE',
     );
-  const { paymentMethod, paymentReference, paymentDate } = application;
-  if (!paymentMethod || !paymentReference || !paymentDate) {
-    throw new AppError(
-      'This application is missing payment proof',
-      409,
-      'PAYMENT_PROOF_REQUIRED',
-    );
-  }
-  return {
-    ...application,
-    passwordHash,
-    planVersion,
-    billingInterval,
-    payment: {
-      method: paymentMethod,
-      reference: paymentReference,
-      receivedOn: billingDate(paymentDate),
-    },
-  };
+  return { ...application, passwordHash, planVersion, billingInterval };
 }
 
 async function createInitialSubscription(
@@ -119,10 +106,49 @@ export async function activateApplication(
   confirmation: ActivateApplication,
 ) {
   const application = await pendingApplication(tx, applicationId);
+  const { paymentMethod, paymentReference, paymentDate } = application;
+  const evidence =
+    paymentMethod && paymentReference && paymentDate
+      ? {
+          method: paymentMethod,
+          reference: paymentReference,
+          receivedOn: billingDate(paymentDate),
+        }
+      : confirmation.payment;
+  if (!evidence) {
+    throw new AppError(
+      'Enter verified payment details before activating this application',
+      409,
+      'PAYMENT_PROOF_REQUIRED',
+    );
+  }
+  const reference = normalizedReceiptReference(evidence.reference);
+  const otherApplication = await tx.ownerApplication.findFirst({
+    where: {
+      id: { not: application.id },
+      status: 'pending',
+      paymentMethod: evidence.method,
+      paymentReference: reference,
+    },
+    select: { id: true },
+  });
+  if (otherApplication) {
+    throw new AppError(
+      'This payment reference belongs to another pending application',
+      409,
+      'PAYMENT_REFERENCE_USED',
+    );
+  }
+
   const user = await createOwner(tx, application);
   const tenant = await createTurf(tx, application, user.id);
   const billing = await createInitialSubscription(tx, application, tenant.id);
-  const payment = { ...application.payment, ...confirmation };
+  const payment = {
+    ...evidence,
+    reference,
+    requestId: confirmation.requestId,
+    confirmed: confirmation.confirmed,
+  };
   const invoice = await payableInvoice(tx, billing.invoice.id, payment);
   const receipt = await storeReceipt(tx, actorId, invoice, payment);
   await tx.ownerApplication.update({
@@ -132,6 +158,9 @@ export async function activateApplication(
       reviewedAt: new Date(),
       reviewedById: actorId,
       tenantId: tenant.id,
+      paymentMethod: payment.method,
+      paymentReference: payment.reference,
+      paymentDate: toDbDate(payment.receivedOn),
       passwordHash: null,
     },
   });

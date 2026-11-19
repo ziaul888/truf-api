@@ -11,7 +11,10 @@ import {
   ownerApplicationSelect,
   toOwnerApplicationDto,
 } from './owner-application.dto.js';
-import type { SubmitOwnerApplication } from './owner-applications.schemas.js';
+import type {
+  ApplicationPayment,
+  SubmitOwnerApplication,
+} from './owner-applications.schemas.js';
 import {
   platformPlanSelect,
   toPlanDto,
@@ -81,7 +84,13 @@ export class OwnerApplicationsService {
         }
         await this.assertAvailable(tx, input.ownerEmail, input.slug);
         const planVersionId = await this.availablePlanVersion(tx, input);
-        const paymentDate = await assertPaymentProof(tx, input);
+        const payment = input.paymentMethod
+          ? {
+              paymentMethod: input.paymentMethod,
+              paymentReference: input.paymentReference,
+              paymentDate: await assertPaymentProof(tx, input),
+            }
+          : {};
         const created = await tx.ownerApplication.create({
           data: {
             requestId: input.requestId,
@@ -95,9 +104,7 @@ export class OwnerApplicationsService {
             currency: input.currency,
             planVersionId,
             billingInterval: input.interval,
-            paymentMethod: input.paymentMethod,
-            paymentReference: input.paymentReference,
-            paymentDate,
+            ...payment,
           },
           select: ownerApplicationSelect,
         });
@@ -136,7 +143,9 @@ export class OwnerApplicationsService {
       amount !== input.expectedAmount
     ) {
       throw new AppError(
-        'The plan price changed. Contact the platform administrator if you already paid.',
+        input.paymentMethod
+          ? 'The plan price changed. Contact the platform administrator if you already paid.'
+          : 'The plan price changed. Reload the page to review the current price.',
         409,
         'PLAN_PRICE_CHANGED',
       );
@@ -166,7 +175,7 @@ export class OwnerApplicationsService {
 
 async function assertPaymentProof(
   tx: Prisma.TransactionClient,
-  input: SubmitOwnerApplication,
+  input: ApplicationPayment,
 ) {
   const methods = await paymentInstructions(tx);
   if (!methods[input.paymentMethod]) {

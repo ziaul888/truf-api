@@ -8,16 +8,14 @@ import { hashPassword } from '../src/auth/password.js';
 import { AuthModule } from '../src/auth/auth.module.js';
 import { Prisma } from '../src/generated/prisma/client.js';
 import { OwnerApplicationsModule } from '../src/owner-applications/owner-applications.module.js';
+import type { SubmitOwnerApplication } from '../src/owner-applications/owner-applications.schemas.js';
 import { PlatformAuthService } from '../src/platform/platform-auth.service.js';
 import { PlatformModule } from '../src/platform/platform.module.js';
 import {
   billingDate,
   billingToday,
 } from '../src/platform/platform-billing-dates.js';
-import {
-  PLATFORM_PAYMENT_KEY,
-  type SubscriptionPaymentMethod,
-} from '../src/platform/platform-payment-instructions.js';
+import { PLATFORM_PAYMENT_KEY } from '../src/platform/platform-payment-instructions.js';
 import { PrismaModule } from '../src/prisma/prisma.module.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { requireProofDatabase } from './tenant-isolation/test-database-safety.js';
@@ -39,7 +37,7 @@ const application = () => {
     ownerEmail: `applicant-${n}@owner-application-e2e.test`,
     password: ownerPassword,
     timezone: 'Asia/Dhaka',
-    currency: 'bdt',
+    currency: 'bdt' as const,
     planId,
     interval: 'monthly' as const,
     planVersion: 1,
@@ -161,11 +159,7 @@ describe('Owner applications and SaaS admin activation', () => {
     }
   });
 
-  const submit = (
-    input: Omit<ReturnType<typeof application>, 'paymentMethod'> & {
-      paymentMethod: SubscriptionPaymentMethod;
-    },
-  ) =>
+  const submit = (input: Partial<SubmitOwnerApplication>) =>
     request(app.getHttpServer()).post('/api/v1/owner-applications').send(input);
   const platformPost = (path: string, body: object) =>
     request(app.getHttpServer())
@@ -302,7 +296,7 @@ describe('Owner applications and SaaS admin activation', () => {
     expect(JSON.stringify(audit)).not.toContain(ownerPassword);
   });
 
-  it('requires payment details, an available method and the current full plan amount', async () => {
+  it('validates submitted payment proof and the current plan price', async () => {
     const purchase = application();
     const methods = await request(app.getHttpServer())
       .get('/api/v1/owner-applications/payment-methods')
@@ -333,18 +327,72 @@ describe('Owner applications and SaaS admin activation', () => {
       .expect(401);
   });
 
-  it('keeps older applications without payment proof blocked', async () => {
-    const created = await submit(application()).expect(201);
+  it('accepts pay-later applications and activates them after recording payment', async () => {
+    const { paymentMethod, paymentReference, paymentDate, ...input } =
+      application();
+    await submit({ ...input, paymentMethod }).expect(400);
+    const created = await submit(input).expect(201);
     const id = created.body.data.id as string;
-    await db.ownerApplication.update({
-      where: { id },
-      data: { paymentMethod: null, paymentReference: null, paymentDate: null },
+    expect(created.body.data).toMatchObject({
+      status: 'pending',
+      payment: null,
+      plan: { id: planId, interval: 'monthly', selectedAmount: 150_000 },
     });
-    const denied = await platformPost(`/applications/${id}/activate`, {
+    const retry = await submit(input).expect(201);
+    expect(retry.body.data.id).toBe(id);
+
+    const activatePath = '/applications/' + id + '/activate';
+    const denied = await platformPost(activatePath, {
       requestId: randomUUID(),
       confirmed: true,
     }).expect(409);
     expect(denied.body.code).toBe('PAYMENT_PROOF_REQUIRED');
+
+    const pendingProof = application();
+    await submit(pendingProof).expect(201);
+    const duplicate = await platformPost(activatePath, {
+      requestId: randomUUID(),
+      confirmed: true,
+      payment: {
+        method: pendingProof.paymentMethod,
+        reference: pendingProof.paymentReference,
+        receivedOn: paymentDate,
+      },
+    }).expect(409);
+    expect(duplicate.body.code).toBe('PAYMENT_REFERENCE_USED');
+
+    const activation = {
+      requestId: randomUUID(),
+      confirmed: true,
+      payment: {
+        method: paymentMethod,
+        reference: paymentReference.toLowerCase(),
+        receivedOn: paymentDate,
+      },
+    };
+    const activated = await platformPost(activatePath, activation).expect(201);
+    const activationRetry = await platformPost(activatePath, activation).expect(
+      201,
+    );
+    expect(activationRetry.body.data.id).toBe(activated.body.data.id);
+    const stored = await db.ownerApplication.findUniqueOrThrow({
+      where: { id },
+    });
+    expect(stored).toMatchObject({
+      status: 'activated',
+      paymentMethod,
+      paymentReference,
+      passwordHash: null,
+    });
+    const receipts = await db.platformReceipt.findMany({
+      where: { tenantId: activated.body.data.id },
+    });
+    expect(receipts).toHaveLength(1);
+    expect(receipts[0]).toMatchObject({
+      amount: 150_000,
+      method: paymentMethod,
+      reference: paymentReference,
+    });
   });
 
   it('is idempotent for the same submission and rejects changed replays', async () => {

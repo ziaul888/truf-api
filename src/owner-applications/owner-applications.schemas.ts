@@ -5,7 +5,7 @@ import { BillingDateSchema } from '../platform/platform-billing.schemas.js';
 import { SubscriptionPaymentMethod } from '../platform/platform-payment-instructions.js';
 import { normalizedReceiptReference } from '../platform/platform-receipt-writes.js';
 
-export const SubmitOwnerApplicationSchema = CreateTurfSchema.pick({
+const ApplicationDetailsSchema = CreateTurfSchema.pick({
   requestId: true,
   name: true,
   slug: true,
@@ -19,21 +19,37 @@ export const SubmitOwnerApplicationSchema = CreateTurfSchema.pick({
   interval: z.enum(['monthly', 'yearly']),
   planVersion: z.number().int().positive(),
   expectedAmount: z.number().int().positive().max(1_000_000_000),
+});
+
+export const ApplicationPaymentReferenceSchema = z
+  .string()
+  .max(100)
+  .transform(normalizedReceiptReference)
+  .pipe(
+    z
+      .string()
+      .regex(
+        /^[A-Z0-9][A-Z0-9._/-]{2,99}$/,
+        'Enter a valid transaction reference',
+      ),
+  );
+
+const ApplicationPaymentSchema = z.object({
   paymentMethod: SubscriptionPaymentMethod,
-  paymentReference: z
-    .string()
-    .max(100)
-    .transform(normalizedReceiptReference)
-    .pipe(
-      z
-        .string()
-        .regex(
-          /^[A-Z0-9][A-Z0-9._/-]{2,99}$/,
-          'Enter a valid transaction reference',
-        ),
-    ),
+  paymentReference: ApplicationPaymentReferenceSchema,
   paymentDate: BillingDateSchema,
 });
+
+export const SubmitOwnerApplicationSchema = z.union([
+  ApplicationDetailsSchema.extend(ApplicationPaymentSchema.shape),
+  ApplicationDetailsSchema.extend({
+    paymentMethod: z.undefined().optional(),
+    paymentReference: z.undefined().optional(),
+    paymentDate: z.undefined().optional(),
+  }),
+]);
+
+export type ApplicationPayment = z.infer<typeof ApplicationPaymentSchema>;
 
 export type SubmitOwnerApplication = z.infer<
   typeof SubmitOwnerApplicationSchema
