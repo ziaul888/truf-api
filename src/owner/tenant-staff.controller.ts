@@ -21,6 +21,7 @@ import {
   type ResetPasswordInput,
   type UpdateUserInput,
 } from '../users/users.schemas.js';
+import { RequirePlanFeature } from '../platform/platform-plan-features.js';
 import { OwnerOriginGuard } from './owner-origin.guard.js';
 import type { TenantOperator } from './owner-session.js';
 import {
@@ -31,6 +32,7 @@ import { TenantStaffService } from './tenant-staff.service.js';
 
 @Controller('owner/admin/users')
 @UseGuards(TenantOperatorGuard)
+@RequirePlanFeature('staff')
 export class TenantStaffController {
   constructor(private readonly staff: TenantStaffService) {}
 

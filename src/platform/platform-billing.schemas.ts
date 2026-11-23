@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { PaginationSchema } from '../common/schemas.js';
+import { PLAN_FEATURES } from './platform-plan-features.js';
 import { RequestIdSchema } from './platform-onboarding.schemas.js';
 export const BillingDateSchema = z.iso
   .date()
@@ -8,7 +9,7 @@ export const BillingDateSchema = z.iso
     'Enter a date between 2000 and 2100',
   );
 const amount = z.number().int().min(1).max(1_000_000_000);
-export const CreatePlanSchema = RequestIdSchema.extend({
+const PlanDetailsSchema = RequestIdSchema.extend({
   name: z.string().trim().min(2).max(80),
   code: z
     .string()
@@ -18,9 +19,24 @@ export const CreatePlanSchema = RequestIdSchema.extend({
     .max(40)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/),
   description: z.string().trim().max(500).optional(),
-  monthlyAmount: amount,
-  yearlyAmount: amount,
+  features: z
+    .array(z.enum(PLAN_FEATURES))
+    .max(PLAN_FEATURES.length)
+    .transform((features) => [...new Set(features)])
+    .default([...PLAN_FEATURES]),
 });
+export const CreatePlanSchema = z.union([
+  PlanDetailsSchema.extend({
+    trialDays: z.undefined().optional(),
+    monthlyAmount: amount,
+    yearlyAmount: amount,
+  }),
+  PlanDetailsSchema.extend({
+    trialDays: z.number().int().min(1).max(365),
+    monthlyAmount: z.literal(0).default(0),
+    yearlyAmount: z.literal(0).default(0),
+  }),
+]);
 export const CreateSubscriptionSchema = RequestIdSchema.extend({
   planId: z.uuid(),
   interval: z.enum(['monthly', 'yearly']),
@@ -48,7 +64,15 @@ export const InvoiceListSchema = BillingListSchema.extend({
 });
 export const SubscriptionListSchema = BillingListSchema.extend({
   status: z
-    .enum(['pending', 'scheduled', 'active', 'past_due', 'cancelled'])
+    .enum([
+      'pending',
+      'scheduled',
+      'active',
+      'trialing',
+      'trial_ended',
+      'past_due',
+      'cancelled',
+    ])
     .optional(),
 });
 export type CreatePlan = z.infer<typeof CreatePlanSchema>;

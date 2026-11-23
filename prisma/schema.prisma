@@ -836,6 +836,7 @@ enum PlatformAuditAction {
   application_activated
   application_rejected
   payment_methods_updated
+  plan_removed
 }
 
 model PlatformPlan {
@@ -849,8 +850,8 @@ model PlatformPlan {
   versions    PlatformPlanVersion[]
 }
 
-/// Immutable prices; subscriptions retain the version they agreed to.
-/// Positive BDT amount checks are in 20261117120000_platform_onboarding_billing.
+/// Subscriptions retain the prices and features of the version they agreed to.
+/// A free trial version stores its duration and zero prices.
 model PlatformPlanVersion {
   id                String                 @id @default(uuid())
   planId            String
@@ -858,6 +859,8 @@ model PlatformPlanVersion {
   currency          String                 @default("bdt")
   monthlyAmount     Int
   yearlyAmount      Int
+  trialDays         Int?
+  features          String[]               @default(["staff", "reports", "website", "refunds"])
   createdAt         DateTime               @default(now())
   plan              PlatformPlan           @relation(fields: [planId], references: [id], onDelete: Restrict)
   subscriptions     PlatformSubscription[]
@@ -877,6 +880,7 @@ model PlatformSubscription {
   amount            Int
   anchorDate        DateTime                  @db.Date
   paidThrough       DateTime?                 @db.Date
+  trialEndsOn       DateTime?                 @db.Date
   status            PlatformSubscriptionState @default(pending)
   cancelAtPeriodEnd Boolean                   @default(false)
   cancelledAt       DateTime?

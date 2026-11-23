@@ -46,10 +46,11 @@ export class PlatformBillingReadService {
     });
   }
   async plan(id: string) {
-    const row = await this.db.platformPlan.findUniqueOrThrow({
+    const row = await this.db.platformPlan.findUnique({
       where: { id },
       select: platformPlanSelect,
     });
+    if (!row) throw new AppError('Plan not found', 404, 'PLAN_NOT_FOUND');
     return toPlanDto(row);
   }
   subscriptions(q: SubscriptionList) {

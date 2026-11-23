@@ -1,6 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import { storedAppearance } from '../settings/appearance.schemas.js';
 import {
   DEFAULT_NOTIFICATIONS,
   NotificationsStoredSchema,
@@ -35,6 +36,7 @@ export function turfSettingsOf(data: Prisma.JsonValue | undefined) {
   const settings = setupData(setupData(data).turfSettings);
   return {
     slots: tenantSlotSettings(data),
+    appearance: storedAppearance(settings.appearance),
     website:
       WebsiteStoredSchema.safeParse(settings.website).data ?? DEFAULT_WEBSITE,
     portalPublished: settings.portalPublished === true,

@@ -6,6 +6,7 @@ import {
   type ExecutionContext,
 } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
+import { assertRoutePlanFeature } from '../platform/platform-plan-features.js';
 import { AppError } from '../common/app-error.js';
 import { OwnerAuthService } from '../owner/owner-auth.service.js';
 import { OwnerOriginGuard } from '../owner/owner-origin.guard.js';
@@ -72,6 +73,7 @@ export class AuthGuard implements CanActivate {
       req.cookies?.[OWNER_COOKIE],
     );
     requireVenue(operator);
+    assertRoutePlanFeature(this.reflector, ctx, operator.user.tenant.features);
     req.operator = operator;
     const { id, email, name, role } = operator.user;
     return { id, email, name, role: role === 'owner' ? 'admin' : role };

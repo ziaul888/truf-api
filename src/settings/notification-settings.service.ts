@@ -155,7 +155,7 @@ export class NotificationSettingsService {
   async sendTest(to: string): Promise<{ sent: true }> {
     if (!this.email.configured)
       throw new AppError(
-        'Email is not set up yet (SENDGRID_API_KEY)',
+        'Email is not set up yet (RESEND_API_KEY or SENDGRID_API_KEY)',
         400,
         'EMAIL_NOT_CONFIGURED',
       );

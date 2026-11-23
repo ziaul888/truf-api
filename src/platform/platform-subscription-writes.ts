@@ -1,7 +1,11 @@
 import { AppError } from '../common/app-error.js';
 import { toDbDate } from '../slots/venue-time.js';
 import type { PlatformTx } from './platform-command.js';
-import { billingToday, subscriptionState } from './platform-billing-dates.js';
+import {
+  billingToday,
+  subscriptionState,
+  trialEndDate,
+} from './platform-billing-dates.js';
 import { createPlatformInvoice } from './platform-invoice-builder.js';
 import type {
   CreateSubscription,
@@ -27,7 +31,8 @@ async function ensureNoCurrent(tx: PlatformTx, tenantId: string) {
     where: { tenantId, status: { not: 'cancelled' } },
   });
   if (!current) return;
-  if (subscriptionState(current) === 'cancelled') {
+  const state = subscriptionState(current);
+  if (state === 'cancelled' || state === 'trial_ended') {
     await tx.platformSubscription.update({
       where: { id: current.id },
       data: { status: 'cancelled' },
@@ -70,6 +75,8 @@ async function storeAgreement(
   input: CreateSubscription,
 ) {
   const version = await availablePlan(tx, input.planId);
+  const anchorDate = toDbDate(input.startDate);
+  const trialEndsOn = trialEndDate(anchorDate, version.trialDays);
   return tx.platformSubscription.create({
     data: {
       tenantId,
@@ -81,7 +88,9 @@ async function storeAgreement(
         input.interval === 'monthly'
           ? version.monthlyAmount
           : version.yearlyAmount,
-      anchorDate: toDbDate(input.startDate),
+      anchorDate,
+      trialEndsOn,
+      status: trialEndsOn ? 'active' : 'pending',
     },
   });
 }
@@ -93,12 +102,14 @@ export async function createAgreement(
   await requireOnboardedTurf(tx, tenantId);
   await ensureNoCurrent(tx, tenantId);
   const sub = await storeAgreement(tx, tenantId, input);
-  const invoice = await createPlatformInvoice(tx, sub, 0, input.dueOn);
+  const invoice = sub.trialEndsOn
+    ? null
+    : await createPlatformInvoice(tx, sub, 0, input.dueOn);
   return {
     targetId: sub.id,
     tenantId,
     details: {
-      invoiceId: invoice.id,
+      invoiceId: invoice?.id ?? null,
       planVersionId: sub.planVersionId,
       amount: sub.amount,
       interval: sub.interval,

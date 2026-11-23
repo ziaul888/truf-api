@@ -3,6 +3,10 @@ import { AppError } from '../common/app-error.js';
 import { TenantDashboardDatabase } from '../owner/tenant-dashboard-database.service.js';
 import { configuredVenue } from '../owner/owner-venue.js';
 import { turfSettingsOf } from '../owner/tenant-settings.store.js';
+import {
+  latestPlanFeatures,
+  planFeaturesOf,
+} from '../platform/platform-plan-features.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 
 @Injectable()
@@ -20,7 +24,11 @@ export class TenantPortalService {
       venue: {
         ...publicVenue,
         logoUrl: null,
-        locale: { timezone: turf.timezone, currency: turf.currency.toUpperCase(), weekStartsOn: 'sat' },
+        locale: {
+          timezone: turf.timezone,
+          currency: turf.currency.toUpperCase(),
+          weekStartsOn: 'sat',
+        },
       },
     };
   }
@@ -36,14 +44,19 @@ export class TenantPortalService {
           },
         },
       },
-      select: { slug: true, setup: { select: { data: true } } },
-      take: 2,
+      select: {
+        slug: true,
+        setup: { select: { data: true } },
+        platformSubscriptions: latestPlanFeatures,
+      },
     });
-    const [turf] = turfs;
+    const publishedTurfs = turfs.filter(
+      (turf) =>
+        planFeaturesOf(turf).includes('website') &&
+        configuredVenue(turf.setup?.data),
+    );
     return {
-      slug: turfs.length === 1 && turf && configuredVenue(turf.setup?.data)
-        ? turf.slug
-        : null,
+      slug: publishedTurfs.length === 1 ? publishedTurfs[0].slug : null,
     };
   }
 
@@ -60,13 +73,19 @@ export class TenantPortalService {
         slug: true,
         timezone: true,
         currency: true,
+        platformSubscriptions: latestPlanFeatures,
         setup: { select: { data: true } },
       },
     });
     const data = turf?.setup?.data;
     const venue = configuredVenue(data);
     const { portalPublished, website } = turfSettingsOf(data);
-    if (!turf || !venue || !portalPublished) {
+    if (
+      !turf ||
+      !venue ||
+      !portalPublished ||
+      !planFeaturesOf(turf).includes('website')
+    ) {
       throw new AppError('Turf website not found', 404, 'PORTAL_NOT_FOUND');
     }
     return { turf, venue, website };

@@ -29,6 +29,7 @@ type TenantIdentity = {
     timezone: string;
     currency: string;
     setupComplete: boolean;
+    features: readonly string[];
   };
 };
 export type OwnerUser = TenantIdentity & { role: 'owner'; audience: 'owner' };

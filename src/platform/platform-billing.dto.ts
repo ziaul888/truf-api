@@ -35,6 +35,8 @@ export function toPlanDto(
     currency: version.currency,
     monthlyAmount: version.monthlyAmount,
     yearlyAmount: version.yearlyAmount,
+    trialDays: version.trialDays,
+    features: version.features,
   };
 }
 export const subscriptionSelect = {
@@ -47,6 +49,7 @@ export const subscriptionSelect = {
   amount: true,
   anchorDate: true,
   paidThrough: true,
+  trialEndsOn: true,
   status: true,
   cancelAtPeriodEnd: true,
   cancelledAt: true,
@@ -72,6 +75,7 @@ export function toSubscriptionDto(
     amount: row.amount,
     startDate: billingDate(row.anchorDate),
     paidThrough: row.paidThrough ? billingDate(row.paidThrough) : null,
+    trialEndsOn: row.trialEndsOn ? billingDate(row.trialEndsOn) : null,
     status,
     cancelAtPeriodEnd: row.cancelAtPeriodEnd,
     cancellationRequestedAt: row.cancelledAt?.toISOString() ?? null,
@@ -79,6 +83,7 @@ export function toSubscriptionDto(
     createdAt: row.createdAt.toISOString(),
     canRenew:
       row.status === 'active' &&
+      !row.trialEndsOn &&
       !row.cancelAtPeriodEnd &&
       row._count.invoices === 0,
     openInvoiceCount: row._count.invoices,

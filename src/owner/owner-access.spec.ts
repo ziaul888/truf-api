@@ -28,6 +28,7 @@ function membership(): OwnerMembership {
       currency: 'bdt',
       createdAt: new Date(),
       setup: null,
+      platformSubscriptions: [],
     },
   };
 }

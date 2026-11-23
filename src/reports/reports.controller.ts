@@ -3,6 +3,7 @@ import { Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { DashboardController } from '../auth/dashboard-controller.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
+import { RequirePlanFeature } from '../platform/platform-plan-features.js';
 import { ReportExportService } from './report-export.service.js';
 import {
   ExportQuerySchema,
@@ -16,6 +17,7 @@ import { ReportsService } from './reports.service.js';
 
 /** Reports pages and dashboard charts. Admin and manager, like the dashboard. */
 @DashboardController('reports')
+@RequirePlanFeature('reports')
 export class ReportsController {
   constructor(
     private readonly reports: ReportsService,

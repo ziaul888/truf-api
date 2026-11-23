@@ -18,7 +18,7 @@ const ApplicationDetailsSchema = CreateTurfSchema.pick({
   planId: z.uuid('Choose a subscription plan'),
   interval: z.enum(['monthly', 'yearly']),
   planVersion: z.number().int().positive(),
-  expectedAmount: z.number().int().positive().max(1_000_000_000),
+  expectedAmount: z.number().int().min(0).max(1_000_000_000),
 });
 
 export const ApplicationPaymentReferenceSchema = z

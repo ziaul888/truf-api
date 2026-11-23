@@ -7,6 +7,7 @@ import {
   Post,
   Query,
 } from '@nestjs/common';
+import { RequirePlanFeature } from '../platform/platform-plan-features.js';
 import { DashboardController } from '../auth/dashboard-controller.js';
 import { CurrentUser } from '../auth/auth.guard.js';
 import type { AuthUser } from '../auth/auth.types.js';
@@ -66,6 +67,7 @@ export class AdminBookingsController {
   }
 
   @Get('refunds')
+  @RequirePlanFeature('refunds')
   refunds(
     @Query(new ZodValidationPipe(ListRefundBookingsQuerySchema))
     query: ListRefundBookingsQuery,

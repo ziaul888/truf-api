@@ -5,6 +5,10 @@ import type {
   OwnerSession,
   TenantOperator,
 } from './owner-session.js';
+import {
+  latestPlanFeatures,
+  planFeaturesOf,
+} from '../platform/platform-plan-features.js';
 import { configuredVenue } from './owner-venue.js';
 export const ownerMembershipSelect = {
   id: true,
@@ -36,6 +40,7 @@ export const ownerMembershipSelect = {
       currency: true,
       createdAt: true,
       setup: { select: { data: true } },
+      platformSubscriptions: latestPlanFeatures,
     },
   },
 } satisfies Prisma.TenantMembershipSelect;
@@ -74,6 +79,9 @@ export function tenantOperator(
     row.tokenVersion !== session.mv
   )
     throw ownerUnauthenticated();
+  const features = planFeaturesOf(row.tenant);
+  if (session.staff && !features.includes('staff'))
+    throw ownerUnauthenticated();
   const { id, slug, name, status, timezone, currency } = row.tenant;
   const identity = {
     id: row.user.id,
@@ -87,6 +95,7 @@ export function tenantOperator(
       timezone,
       currency,
       setupComplete: Boolean(configuredVenue(row.tenant.setup?.data)),
+      features,
     },
   };
   return {

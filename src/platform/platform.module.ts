@@ -17,6 +17,9 @@ import { JwtModule } from '@nestjs/jwt';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { AuthModule } from '../auth/auth.module.js';
 import { env } from '../config/env.js';
+import { PlatformLandingScreenshotsController } from './platform-landing-screenshots.controller.js';
+import { PlatformBrandingController } from './platform-branding.controller.js';
+import { PlatformAppearanceController } from './platform-appearance.controller.js';
 import { PlatformAuthController } from './platform-auth.controller.js';
 import { PlatformAuthService } from './platform-auth.service.js';
 import { PlatformGuard } from './platform.guard.js';
@@ -50,6 +53,9 @@ import {
   ],
   controllers: [
     PlatformAuthController,
+    PlatformAppearanceController,
+    PlatformBrandingController,
+    PlatformLandingScreenshotsController,
     PlatformTenantsController,
     PlatformOnboardingController,
     PlatformBillingController,

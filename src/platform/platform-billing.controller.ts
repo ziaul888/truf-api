@@ -35,6 +35,8 @@ import {
   type CancelSubscription,
   type RecordReceipt,
 } from './platform-billing.schemas.js';
+import { RequestIdSchema } from './platform-onboarding.schemas.js';
+
 @Controller('platform')
 @UseGuards(PlatformGuard, PlatformOriginGuard)
 export class PlatformBillingController {
@@ -54,6 +56,16 @@ export class PlatformBillingController {
     @Body(new ZodValidationPipe(CreatePlanSchema)) input: CreatePlan,
   ) {
     return this.plans.create(actor, input);
+  }
+  @Post('plans/:id/remove')
+  @HttpCode(200)
+  removePlan(
+    @CurrentPlatformActor() actor: PlatformActor,
+    @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
+    @Body(new ZodValidationPipe(RequestIdSchema))
+    { requestId }: { requestId: string },
+  ) {
+    return this.plans.remove(actor, id, requestId);
   }
   @Get('subscriptions') subscriptions(
     @Query(new ZodValidationPipe(SubscriptionListSchema)) q: SubscriptionList,

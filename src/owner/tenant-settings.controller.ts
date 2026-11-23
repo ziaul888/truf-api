@@ -10,6 +10,10 @@ import {
 import { z } from 'zod';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import {
+  AppearanceSchema,
+  type Appearance,
+} from '../settings/appearance.schemas.js';
+import {
   ResetSettingsSchema,
   UpdateNotificationsSchema,
   type ResetSettingsInput,
@@ -23,6 +27,7 @@ import {
   UpdateSlotSettingsSchema,
   type UpdateSlotSettingsInput,
 } from '../slots/slots.schemas.js';
+import { RequirePlanFeature } from '../platform/platform-plan-features.js';
 import { OwnerOriginGuard } from './owner-origin.guard.js';
 import type { TenantOperator } from './owner-session.js';
 import {
@@ -63,17 +68,33 @@ export class TenantSettingsController {
     return this.settings.slots(operator, body);
   }
 
+  @Get('appearance')
+  getAppearance(@CurrentOperator() operator: TenantOperator) {
+    return this.settings.appearance(operator);
+  }
+
+  @Put('appearance')
+  @UseGuards(OwnerOriginGuard)
+  saveAppearance(
+    @CurrentOperator() operator: TenantOperator,
+    @Body(new ZodValidationPipe(AppearanceSchema)) input: Appearance,
+  ) {
+    return this.settings.appearance(operator, input);
+  }
+
   @Get('payments/status')
   payments(@CurrentOperator() operator: TenantOperator) {
     return this.settings.payments(operator);
   }
 
   @Get('website')
+  @RequirePlanFeature('website')
   getWebsite(@CurrentOperator() operator: TenantOperator) {
     return this.settings.website(operator);
   }
 
   @Put('website')
+  @RequirePlanFeature('website')
   @UseGuards(OwnerOriginGuard)
   saveWebsite(
     @CurrentOperator() operator: TenantOperator,
@@ -83,11 +104,13 @@ export class TenantSettingsController {
   }
 
   @Get('website/portal')
+  @RequirePlanFeature('website')
   getPortal(@CurrentOperator() operator: TenantOperator) {
     return this.settings.portal(operator);
   }
 
   @Put('website/portal')
+  @RequirePlanFeature('website')
   @UseGuards(OwnerOriginGuard)
   savePortal(
     @CurrentOperator() operator: TenantOperator,

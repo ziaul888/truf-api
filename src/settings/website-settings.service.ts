@@ -2,6 +2,7 @@ import { Injectable } from '@nestjs/common';
 import {
   deleteImage,
   imageUrl,
+  WEBSITE_IMAGE_RULES,
   saveImage,
   type UploadedImage,
 } from './settings-images.js';
@@ -15,14 +16,6 @@ import type {
 
 export type WebsiteDto = WebsiteStored & SectionMeta;
 export type PublicWebsite = WebsiteStored & { venue: PublicVenue };
-
-const IMAGE_RULES = {
-  field: 'image',
-  types: ['jpg', 'png', 'webp'] as ('jpg' | 'png' | 'webp')[],
-  maxBytes: 2 * 1024 * 1024,
-  maxLabel: '2 MB',
-  label: 'Images',
-};
 
 const imagesOf = (w: WebsiteStored) => [
   w.hero.imageUrl,
@@ -59,7 +52,7 @@ export class WebsiteSettingsService {
   ): Promise<WebsiteDto> {
     const url = imageUrl(
       'website',
-      await saveImage('website', file, IMAGE_RULES),
+      await saveImage('website', file, WEBSITE_IMAGE_RULES),
     );
     const current = await this.store.get('website');
     const next = structuredClone(current);

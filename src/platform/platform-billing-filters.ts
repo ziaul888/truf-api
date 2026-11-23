@@ -13,8 +13,16 @@ function paidStateFilter(
       return {
         status: 'active',
         anchorDate: { gt: today },
-        paidThrough: { gt: today },
+        OR: [{ paidThrough: { gt: today } }, { trialEndsOn: { gt: today } }],
       };
+    case 'trialing':
+      return {
+        status: 'active',
+        anchorDate: { lte: today },
+        trialEndsOn: { gt: today },
+      };
+    case 'trial_ended':
+      return { status: 'active', trialEndsOn: { lte: today } };
     case 'active':
       return {
         status: 'active',

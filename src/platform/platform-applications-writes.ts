@@ -1,6 +1,10 @@
 import { AppError } from '../common/app-error.js';
 import type { PlatformTx } from './platform-command.js';
-import { billingDate, billingToday } from './platform-billing-dates.js';
+import {
+  billingDate,
+  billingToday,
+  trialEndDate,
+} from './platform-billing-dates.js';
 import { createPlatformInvoice } from './platform-invoice-builder.js';
 import type { ActivateApplication } from './platform-applications.schemas.js';
 import {
@@ -45,6 +49,7 @@ async function createInitialSubscription(
   const version = application.planVersion;
   const interval = application.billingInterval;
   const anchorDate = billingToday();
+  const trialEndsOn = trialEndDate(anchorDate, version.trialDays);
   const subscription = await tx.platformSubscription.create({
     data: {
       tenantId,
@@ -55,14 +60,13 @@ async function createInitialSubscription(
       amount:
         interval === 'monthly' ? version.monthlyAmount : version.yearlyAmount,
       anchorDate,
+      trialEndsOn,
+      status: trialEndsOn ? 'active' : 'pending',
     },
   });
-  const invoice = await createPlatformInvoice(
-    tx,
-    subscription,
-    0,
-    billingDate(anchorDate),
-  );
+  const invoice = trialEndsOn
+    ? null
+    : await createPlatformInvoice(tx, subscription, 0, billingDate(anchorDate));
   return { subscription, invoice };
 }
 
@@ -106,6 +110,57 @@ export async function activateApplication(
   confirmation: ActivateApplication,
 ) {
   const application = await pendingApplication(tx, applicationId);
+  const payment = application.planVersion.trialDays
+    ? null
+    : await applicationPayment(tx, application, confirmation);
+  const user = await createOwner(tx, application);
+  const tenant = await createTurf(tx, application, user.id);
+  const billing = await createInitialSubscription(tx, application, tenant.id);
+  const receipt =
+    billing.invoice && payment
+      ? await storeReceipt(
+          tx,
+          actorId,
+          await payableInvoice(tx, billing.invoice.id, payment),
+          payment,
+        )
+      : null;
+  await tx.ownerApplication.update({
+    where: { id: application.id },
+    data: {
+      status: 'activated',
+      reviewedAt: new Date(),
+      reviewedById: actorId,
+      tenantId: tenant.id,
+      ...(payment && {
+        paymentMethod: payment.method,
+        paymentReference: payment.reference,
+        paymentDate: toDbDate(payment.receivedOn),
+      }),
+      passwordHash: null,
+    },
+  });
+  return {
+    targetId: tenant.id,
+    tenantId: tenant.id,
+    details: {
+      applicationId: application.id,
+      status: 'activated',
+      subscriptionId: billing.subscription.id,
+      invoiceId: billing.invoice?.id ?? null,
+      receiptId: receipt?.id ?? null,
+      planVersionId: billing.subscription.planVersionId,
+      interval: billing.subscription.interval,
+      amount: billing.subscription.amount,
+    },
+  };
+}
+
+async function applicationPayment(
+  tx: PlatformTx,
+  application: Awaited<ReturnType<typeof pendingApplication>>,
+  confirmation: ActivateApplication,
+) {
   const { paymentMethod, paymentReference, paymentDate } = application;
   const evidence =
     paymentMethod && paymentReference && paymentDate
@@ -139,44 +194,11 @@ export async function activateApplication(
       'PAYMENT_REFERENCE_USED',
     );
   }
-
-  const user = await createOwner(tx, application);
-  const tenant = await createTurf(tx, application, user.id);
-  const billing = await createInitialSubscription(tx, application, tenant.id);
-  const payment = {
+  return {
     ...evidence,
     reference,
     requestId: confirmation.requestId,
     confirmed: confirmation.confirmed,
-  };
-  const invoice = await payableInvoice(tx, billing.invoice.id, payment);
-  const receipt = await storeReceipt(tx, actorId, invoice, payment);
-  await tx.ownerApplication.update({
-    where: { id: application.id },
-    data: {
-      status: 'activated',
-      reviewedAt: new Date(),
-      reviewedById: actorId,
-      tenantId: tenant.id,
-      paymentMethod: payment.method,
-      paymentReference: payment.reference,
-      paymentDate: toDbDate(payment.receivedOn),
-      passwordHash: null,
-    },
-  });
-  return {
-    targetId: tenant.id,
-    tenantId: tenant.id,
-    details: {
-      applicationId: application.id,
-      status: 'activated',
-      subscriptionId: billing.subscription.id,
-      invoiceId: billing.invoice.id,
-      receiptId: receipt.id,
-      planVersionId: billing.subscription.planVersionId,
-      interval: billing.subscription.interval,
-      amount: billing.subscription.amount,
-    },
   };
 }
 

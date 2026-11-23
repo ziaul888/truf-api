@@ -126,6 +126,7 @@ export class OwnerApplicationsService {
         version: true,
         monthlyAmount: true,
         yearlyAmount: true,
+        trialDays: true,
       },
     });
     if (!version)
@@ -134,6 +135,13 @@ export class OwnerApplicationsService {
         400,
         'PLAN_NOT_AVAILABLE',
       );
+    if (version.trialDays && input.paymentMethod) {
+      throw new AppError(
+        'The trial plan is free',
+        400,
+        'TRIAL_PAYMENT_NOT_REQUIRED',
+      );
+    }
     const amount =
       input.interval === 'monthly'
         ? version.monthlyAmount

@@ -15,7 +15,7 @@ export interface EmailMessage {
 
 export interface Delivery {
   ok: boolean;
-  /** Why it wasn't sent (SendGrid's reason, or "not configured"). */
+  /** A provider error or a missing configuration. */
   error?: string;
 }
 
@@ -25,13 +25,10 @@ export interface Sender {
   replyTo: string;
 }
 
-const NOT_CONFIGURED = 'Email is not configured (SENDGRID_API_KEY)';
+const NOT_CONFIGURED =
+  'Email is not configured (RESEND_API_KEY or SENDGRID_API_KEY)';
 
-/**
- * Sends plain-text email through SendGrid, from EMAIL_FROM with the name and reply-to set on the
- * Notifications page. Every attempt is written to EmailLog. Without SENDGRID_API_KEY it logs and
- * skips. Tests mock it.
- */
+/** Sends plain-text email using the configured provider and logs each delivery attempt. */
 @Injectable()
 export class EmailService {
   private readonly logger = new Logger(EmailService.name);
@@ -43,10 +40,10 @@ export class EmailService {
   ) {}
 
   get configured(): boolean {
-    return Boolean(env.SENDGRID_API_KEY);
+    return Boolean(env.RESEND_API_KEY || env.SENDGRID_API_KEY);
   }
 
-  /** True when the email was handed to SendGrid. Never throws: a failed email must not fail a booking. */
+  /** Returns whether the provider accepted the message. */
   async send(message: EmailMessage): Promise<boolean> {
     return (await this.deliver(message)).ok;
   }
@@ -88,25 +85,49 @@ export class EmailService {
   }
 
   private async attempt(message: EmailMessage): Promise<Delivery> {
-    if (!env.SENDGRID_API_KEY) {
-      this.logger.log(
-        `Email skipped (SENDGRID_API_KEY not set): "${message.subject}"`,
-      );
+    const { RESEND_API_KEY: resendKey, SENDGRID_API_KEY: sendgridKey } = env;
+    if (!resendKey && !sendgridKey) {
+      this.logger.log(NOT_CONFIGURED);
       return { ok: false, error: NOT_CONFIGURED };
-    }
-    if (!this.keySet) {
-      sendgrid.setApiKey(env.SENDGRID_API_KEY);
-      this.keySet = true;
     }
     try {
       const sender = await this.sender();
-      await sendgrid.send({
-        to: message.to,
-        subject: message.subject,
-        text: message.text,
-        from: { email: sender.fromEmail, name: sender.fromName },
-        replyTo: sender.replyTo,
-      });
+      if (resendKey) {
+        const fromName = sender.fromName.replace(/[\r\n<>]/g, '').trim();
+        const response = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: 'Bearer ' + resendKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from: fromName
+              ? fromName + ' <' + sender.fromEmail + '>'
+              : sender.fromEmail,
+            to: [message.to],
+            subject: message.subject,
+            text: message.text,
+            reply_to: sender.replyTo,
+          }),
+          signal: AbortSignal.timeout(10_000),
+        });
+        if (!response.ok)
+          throw new Error(
+            'Resend rejected the email (HTTP ' + response.status + ')',
+          );
+      } else if (sendgridKey) {
+        if (!this.keySet) {
+          sendgrid.setApiKey(sendgridKey);
+          this.keySet = true;
+        }
+        await sendgrid.send({
+          to: message.to,
+          subject: message.subject,
+          text: message.text,
+          from: { email: sender.fromEmail, name: sender.fromName },
+          replyTo: sender.replyTo,
+        });
+      }
       return { ok: true };
     } catch (err) {
       const reason = reasonOf(err);

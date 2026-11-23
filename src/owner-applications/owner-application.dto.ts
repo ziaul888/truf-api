@@ -20,6 +20,8 @@ export const ownerApplicationSelect = {
       currency: true,
       monthlyAmount: true,
       yearlyAmount: true,
+      trialDays: true,
+      features: true,
       plan: {
         select: { id: true, code: true, name: true, description: true },
       },
@@ -69,6 +71,8 @@ export const toOwnerApplicationDto = (row: ApplicationRow) => {
             currency: planVersion.currency,
             monthlyAmount: planVersion.monthlyAmount,
             yearlyAmount: planVersion.yearlyAmount,
+            trialDays: planVersion.trialDays,
+            features: planVersion.features,
             selectedAmount:
               billingInterval === 'monthly'
                 ? planVersion.monthlyAmount

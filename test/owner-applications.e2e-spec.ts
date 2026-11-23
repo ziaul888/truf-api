@@ -178,6 +178,7 @@ describe('Owner applications and SaaS admin activation', () => {
           name: 'Application Starter',
           monthlyAmount: 150_000,
           yearlyAmount: 1_500_000,
+          features: ['staff', 'reports', 'website', 'refunds'],
         }),
       ]),
     );
@@ -393,6 +394,219 @@ describe('Owner applications and SaaS admin activation', () => {
       method: paymentMethod,
       reference: paymentReference,
     });
+  });
+
+  it('publishes a core-only paid plan and rejects unknown feature keys', async () => {
+    const plan = {
+      name: 'Application Essentials',
+      code: 'owner-application-e2e-essentials',
+      monthlyAmount: 75_000,
+      yearlyAmount: 750_000,
+    };
+    await platformPost('/plans', {
+      ...plan,
+      requestId: randomUUID(),
+      features: ['unrecognized'],
+    }).expect(400);
+
+    const created = await platformPost('/plans', {
+      ...plan,
+      requestId: randomUUID(),
+      features: [],
+    }).expect(201);
+    expect(created.body.data.features).toEqual([]);
+    await request(app.getHttpServer())
+      .get('/api/v1/owner-applications/plans')
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data).toContainEqual(
+          expect.objectContaining({ id: created.body.data.id, features: [] }),
+        );
+      });
+  });
+
+  it('permanently deletes unreferenced plans and safely archives plans with applications', async () => {
+    const createTrial = (suffix: string) =>
+      platformPost('/plans', {
+        requestId: randomUUID(),
+        name: 'Removal Fixture ' + suffix,
+        code: 'owner-application-e2e-removal-' + suffix,
+        trialDays: 10,
+        features: ['reports'],
+      }).expect(201);
+    const unused = (await createTrial('unused')).body.data;
+    const used = (await createTrial('used')).body.data;
+    const unusedPath = '/plans/' + unused.id + '/remove';
+    const removeRequest = { requestId: randomUUID() };
+
+    await request(app.getHttpServer())
+      .post('/api/v1/platform' + unusedPath)
+      .send(removeRequest)
+      .expect(401);
+    for (let retry = 0; retry < 2; retry++) {
+      const removed = await platformPost(unusedPath, removeRequest).expect(200);
+      expect(removed.body.data).toEqual({ id: unused.id, status: 'deleted' });
+    }
+    expect(
+      await db.platformPlanVersion.count({ where: { planId: unused.id } }),
+    ).toBe(0);
+    expect(
+      await db.platformPlan.findUnique({ where: { id: unused.id } }),
+    ).toBeNull();
+    expect(
+      await db.platformAuditEvent.count({
+        where: {
+          requestId: removeRequest.requestId,
+          action: 'plan_removed',
+        },
+      }),
+    ).toBe(1);
+
+    const {
+      paymentMethod: _method,
+      paymentReference: _reference,
+      paymentDate: _date,
+      ...input
+    } = {
+      ...application(),
+      planId: used.id,
+      expectedAmount: 0,
+    };
+    const applied = await submit(input).expect(201);
+    const archived = await platformPost('/plans/' + used.id + '/remove', {
+      requestId: randomUUID(),
+    }).expect(200);
+    expect(archived.body.data).toEqual({ id: used.id, status: 'archived' });
+    expect(
+      await db.platformPlan.findUnique({ where: { id: used.id } }),
+    ).toMatchObject({ isActive: false });
+    const publicPlans = await request(app.getHttpServer())
+      .get('/api/v1/owner-applications/plans')
+      .expect(200);
+    expect(
+      publicPlans.body.data.map((plan: { id: string }) => plan.id),
+    ).not.toContain(used.id);
+    const otherApplicant = application();
+    const newApplication = await submit({
+      ...input,
+      requestId: otherApplicant.requestId,
+      slug: otherApplicant.slug,
+      ownerEmail: otherApplicant.ownerEmail,
+    }).expect(400);
+    expect(newApplication.body.code).toBe('PLAN_NOT_AVAILABLE');
+
+    const activated = await platformPost(
+      '/applications/' + applied.body.data.id + '/activate',
+      {
+        requestId: randomUUID(),
+        confirmed: true,
+      },
+    ).expect(201);
+    const agreement = await db.platformSubscription.findFirst({
+      where: { tenantId: activated.body.data.id },
+      include: { planVersion: true },
+    });
+    expect(agreement?.planVersion).toMatchObject({
+      planId: used.id,
+      trialDays: 10,
+      features: ['reports'],
+    });
+  });
+
+  it('approves a free trial, tracks expiry and allows assigning a paid plan afterward', async () => {
+    const trialPlan = await platformPost('/plans', {
+      requestId: randomUUID(),
+      name: 'Application Trial',
+      code: 'owner-application-e2e-trial',
+      trialDays: 14,
+      features: ['reports'],
+    }).expect(201);
+    const trial = trialPlan.body.data;
+    expect(trial).toMatchObject({
+      trialDays: 14,
+      monthlyAmount: 0,
+      yearlyAmount: 0,
+    });
+
+    const { paymentMethod, paymentReference, paymentDate, ...input } = {
+      ...application(),
+      planId: trial.id,
+      expectedAmount: 0,
+    };
+    const paid = await submit({
+      ...input,
+      paymentMethod,
+      paymentReference,
+      paymentDate,
+    }).expect(400);
+    expect(paid.body.code).toBe('TRIAL_PAYMENT_NOT_REQUIRED');
+
+    const applied = await submit(input).expect(201);
+    expect(applied.body.data).toMatchObject({
+      payment: null,
+      plan: {
+        name: 'Application Trial',
+        trialDays: 14,
+        selectedAmount: 0,
+        features: ['reports'],
+      },
+    });
+    const tenant = await platformPost(
+      '/applications/' + applied.body.data.id + '/activate',
+      {
+        requestId: randomUUID(),
+        confirmed: true,
+      },
+    ).expect(201);
+
+    const tenantId = tenant.body.data.id as string;
+    const trialBillingPath =
+      '/api/v1/platform/tenants/' + tenantId + '/billing';
+    const billing = await request(app.getHttpServer())
+      .get(trialBillingPath)
+      .set('Cookie', platformCookie)
+      .expect(200);
+    const today = billingToday();
+    expect(billing.body.data).toMatchObject({
+      subscription: {
+        status: 'trialing',
+        amount: 0,
+        paidThrough: null,
+        trialEndsOn: billingDate(new Date(today.getTime() + 14 * 86_400_000)),
+        canRenew: false,
+      },
+      recentInvoices: [],
+    });
+    const trialId = billing.body.data.subscription.id as string;
+    await db.platformSubscription.update({
+      where: { id: trialId },
+      data: {
+        anchorDate: new Date(today.getTime() - 14 * 86_400_000),
+        trialEndsOn: today,
+      },
+    });
+    const expired = await request(app.getHttpServer())
+      .get(trialBillingPath)
+      .set('Cookie', platformCookie)
+      .expect(200);
+    expect(expired.body.data.subscription.status).toBe('trial_ended');
+
+    const assigned = await platformPost(
+      '/tenants/' + tenantId + '/subscription',
+      {
+        requestId: randomUUID(),
+        planId,
+        interval: 'monthly',
+        startDate: billingDate(today),
+        dueOn: billingDate(today),
+      },
+    ).expect(201);
+    expect(assigned.body.data).toMatchObject({
+      status: 'pending',
+      amount: 150_000,
+      trialEndsOn: null,
+    });
+    expect(await db.platformInvoice.count({ where: { tenantId } })).toBe(1);
   });
 
   it('is idempotent for the same submission and rejects changed replays', async () => {

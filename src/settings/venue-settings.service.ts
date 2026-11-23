@@ -3,6 +3,7 @@ import { env } from '../config/env.js';
 import {
   deleteImage,
   imageUrl,
+  LOGO_RULES,
   saveImage,
   type UploadedImage,
 } from './settings-images.js';
@@ -17,14 +18,6 @@ export type PublicVenue = Omit<VenueStored, 'logo' | 'supportEmail'> & {
 export type VenueDto = PublicVenue & {
   supportEmail: string | null;
 } & SectionMeta;
-
-const LOGO_RULES = {
-  field: 'logo',
-  types: ['png', 'jpg'] as ('png' | 'jpg')[],
-  maxBytes: 200 * 1024,
-  maxLabel: '200 KB',
-  label: 'The logo',
-};
 
 export function toPublicVenue({
   logo,

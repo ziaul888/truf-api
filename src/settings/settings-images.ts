@@ -5,8 +5,24 @@ import { AppError } from '../common/app-error.js';
 import { env } from '../config/env.js';
 import { detectImageType, UPLOADS_ROUTE } from '../grounds/photo-storage.js';
 
-export type ImageFolder = 'venue' | 'website';
+export type ImageFolder = 'venue' | 'website' | 'platform' | 'saas';
 type ImageType = 'jpg' | 'png' | 'webp';
+
+export const LOGO_RULES = {
+  field: 'logo',
+  types: ['png', 'jpg'] as ('png' | 'jpg')[],
+  maxBytes: 200 * 1024,
+  maxLabel: '200 KB',
+  label: 'The logo',
+};
+
+export const WEBSITE_IMAGE_RULES = {
+  field: 'image',
+  types: ['jpg', 'png', 'webp'] as ('jpg' | 'png' | 'webp')[],
+  maxBytes: 2 * 1024 * 1024,
+  maxLabel: '2 MB',
+  label: 'Images',
+};
 
 /** The parts of a Multer file we use. */
 export interface UploadedImage {

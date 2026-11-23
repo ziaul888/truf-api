@@ -23,18 +23,32 @@ export function billingPeriod(
   };
   return { start: shift(index), end: shift(index + 1) };
 }
+export function trialEndDate(start: Date, days: number | null) {
+  return days === null ? null : new Date(start.getTime() + days * 86_400_000);
+}
 export type EffectiveSubscriptionState =
-  'pending' | 'scheduled' | 'active' | 'past_due' | 'cancelled';
+  | 'pending'
+  | 'scheduled'
+  | 'active'
+  | 'trialing'
+  | 'trial_ended'
+  | 'past_due'
+  | 'cancelled';
 export function subscriptionState(
   row: {
     status: PlatformSubscriptionState;
     anchorDate: Date;
     paidThrough: Date | null;
+    trialEndsOn?: Date | null;
     cancelAtPeriodEnd: boolean;
   },
   today = billingToday(),
 ): EffectiveSubscriptionState {
   if (row.status === 'cancelled') return 'cancelled';
+  if (row.trialEndsOn) {
+    if (row.anchorDate > today) return 'scheduled';
+    return row.trialEndsOn > today ? 'trialing' : 'trial_ended';
+  }
   if (!row.paidThrough) return 'pending';
   if (row.cancelAtPeriodEnd && row.paidThrough <= today) return 'cancelled';
   if (row.anchorDate > today) return 'scheduled';

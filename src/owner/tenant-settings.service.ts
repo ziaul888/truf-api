@@ -22,6 +22,7 @@ import {
   type TurfSettings,
 } from './tenant-settings.store.js';
 import { AppError } from '../common/app-error.js';
+import type { Appearance } from '../settings/appearance.schemas.js';
 
 @Injectable()
 export class TenantSettingsService {
@@ -55,6 +56,20 @@ export class TenantSettingsService {
         }))
       : await this.store.read(operator);
     return { ...saved.slots, ...saved.meta('slots') };
+  }
+
+  async appearance(operator: TenantOperator, input?: Appearance) {
+    if (!input) return (await this.store.read(operator)).appearance;
+    if (operator.user.role !== 'owner') {
+      throw new AppError(
+        'Only the turf owner can change dashboard appearance',
+        403,
+        'FORBIDDEN',
+      );
+    }
+    return (
+      await this.store.write(operator.session, () => ({ appearance: input }))
+    ).appearance;
   }
 
   async payments(operator: TenantOperator): Promise<PaymentsStatus> {

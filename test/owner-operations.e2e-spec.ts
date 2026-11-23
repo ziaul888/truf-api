@@ -36,6 +36,7 @@ describe('Turf owner setup and operations', () => {
   let db: PrismaService;
   const tenantIds: string[] = [];
   const userIds: string[] = [];
+  const planIds: string[] = [];
   let cookieA: string;
   let cookieB: string;
   const client = () => request(app.getHttpServer());
@@ -113,11 +114,112 @@ describe('Turf owner setup and operations', () => {
       await db.tenantGround.deleteMany({ where });
       await db.tenantSetup.deleteMany({ where });
       await db.tenantMembership.deleteMany({ where });
+      await db.platformSubscription.deleteMany({ where });
+      const plans = { id: { in: planIds } };
+      await db.platformPlanVersion.deleteMany({ where: { plan: plans } });
+      await db.platformPlan.deleteMany({ where: plans });
       await db.tenant.deleteMany({ where: { id: { in: tenantIds } } });
       await db.user.deleteMany({ where: { id: { in: userIds } } });
     } finally {
       await app?.close();
     }
+  });
+
+  it('enforces the plan on dashboard modules, staff sessions and the public website', async () => {
+    const ownerCookie = await signInOwner();
+    const session = await get('/session', ownerCookie).expect(200);
+    const { id: tenantId, slug } = session.body.data.tenant;
+    await put('/settings/venue', ownerCookie, venue).expect(200);
+    await put('/settings/website/portal', ownerCookie, {
+      published: true,
+    }).expect(200);
+    const website = '/api/v1/turfs/' + slug + '/website';
+    await client().get(website).expect(200);
+
+    const email = `plan-staff-${randomUUID()}@example.test`;
+    const created = await post('/users', ownerCookie, {
+      email,
+      name: 'Plan Staff',
+      password,
+      role: 'manager',
+    }).expect(201);
+    userIds.push(created.body.data.id);
+    const staff = await signIn(email);
+    const plan = await db.platformPlan.create({
+      data: {
+        code: 'test-features-' + randomUUID(),
+        name: 'Core and refunds',
+        versions: {
+          create: {
+            version: 1,
+            monthlyAmount: 50_000,
+            yearlyAmount: 500_000,
+            features: ['refunds'],
+          },
+        },
+      },
+      include: { versions: true },
+    });
+    planIds.push(plan.id);
+    await db.platformSubscription.create({
+      data: {
+        tenantId,
+        planVersionId: plan.versions[0].id,
+        planName: plan.name,
+        interval: 'monthly',
+        currency: 'bdt',
+        amount: 50_000,
+        anchorDate: new Date(),
+        status: 'active',
+      },
+    });
+
+    await get('/session', ownerCookie)
+      .expect(200)
+      .expect(({ body }) => {
+        expect(body.data.tenant.features).toEqual(['refunds']);
+      });
+    await get('/bookings', ownerCookie).expect(200);
+    await get('/grounds', ownerCookie).expect(200);
+    await get('/bookings/refunds', ownerCookie).expect(200);
+    await get('/session', staff.cookie).expect(401);
+    for (const route of [
+      '/users',
+      '/settings/website',
+      '/settings/website/portal',
+      '/reports/summary',
+      '/reports/export',
+    ]) {
+      await get(route, ownerCookie)
+        .expect(403)
+        .expect(({ body }) => {
+          expect(body.code).toBe('PLAN_FEATURE_REQUIRED');
+        });
+    }
+    await client().get(website).expect(404);
+  });
+
+  it('keeps dashboard appearance separate for each turf during and after setup', async () => {
+    const ownerCookie = await signInOwner();
+    const endpoint = '/settings/appearance';
+    await client().get(path(endpoint)).expect(401);
+    await get(endpoint, ownerCookie).expect(200).expect(({ body }) => {
+      expect(body.data).toEqual({ accentColor: null });
+    });
+    await put(endpoint, ownerCookie, { accentColor: 'blue' }).expect(400);
+    await put(endpoint, ownerCookie, { accentColor: '#2563eb' }).expect(200).expect(({ body }) => {
+      expect(body.data).toEqual({ accentColor: '#2563EB' });
+    });
+    await put(endpoint, cookieB, { accentColor: '#7C3AED' }).expect(200);
+    await put('/settings/venue', ownerCookie, venue).expect(200);
+    await get(endpoint, ownerCookie).expect(200).expect(({ body }) => {
+      expect(body.data).toEqual({ accentColor: '#2563EB' });
+    });
+    await put(endpoint, ownerCookie, { accentColor: null }).expect(200);
+    await get(endpoint, cookieB).expect(200).expect(({ body }) => {
+      expect(body.data).toEqual({ accentColor: '#7C3AED' });
+    });
+    await put(endpoint, cookieB, { accentColor: null }).expect(200);
   });
 
   it('unlocks grounds and slots only after saving a complete venue profile', async () => {
@@ -396,6 +498,9 @@ describe('Turf owner setup and operations', () => {
       advanceBookingDays: 60,
     }).expect(403);
     await get('/users', staff.cookie).expect(403);
+    await get('/settings/appearance', staff.cookie).expect(200);
+    await put('/settings/appearance', staff.cookie, { accentColor: '#DA291C' }).expect(403);
+
     await client()
       .get('/api/v1/owner/auth/me')
       .set('Cookie', staff.cookie)

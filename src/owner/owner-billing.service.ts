@@ -18,6 +18,7 @@ const subscriptionSelect = {
   amount: true,
   anchorDate: true,
   paidThrough: true,
+  trialEndsOn: true,
   status: true,
   cancelAtPeriodEnd: true,
 } as const;
@@ -73,6 +74,7 @@ function subscriptionDto(
     currency: sub.currency,
     startDate: billingDate(sub.anchorDate),
     paidThrough: sub.paidThrough ? billingDate(sub.paidThrough) : null,
+    trialEndsOn: sub.trialEndsOn ? billingDate(sub.trialEndsOn) : null,
     status: subscriptionState(sub),
     cancelAtPeriodEnd: sub.cancelAtPeriodEnd,
   };

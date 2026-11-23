@@ -23,6 +23,8 @@ export async function createPlan(tx: PlatformTx, input: CreatePlan) {
           currency: 'bdt',
           monthlyAmount: input.monthlyAmount,
           yearlyAmount: input.yearlyAmount,
+          trialDays: input.trialDays,
+          features: input.features,
         },
       },
     },
@@ -33,7 +35,38 @@ export async function createPlan(tx: PlatformTx, input: CreatePlan) {
       version: 1,
       monthlyAmount: input.monthlyAmount,
       yearlyAmount: input.yearlyAmount,
+      trialDays: input.trialDays ?? null,
+      features: input.features,
       currency: 'bdt',
     },
+  };
+}
+
+export async function removePlan(tx: PlatformTx, id: string) {
+  const plan = await tx.platformPlan.findUnique({
+    where: { id },
+    select: { name: true, code: true },
+  });
+  if (!plan) throw new AppError('Plan not found', 404, 'PLAN_NOT_FOUND');
+
+  const history = await tx.platformPlanVersion.findFirst({
+    where: {
+      planId: id,
+      OR: [
+        { subscriptions: { some: {} } },
+        { ownerApplications: { some: {} } },
+      ],
+    },
+    select: { id: true },
+  });
+  if (history) {
+    await tx.platformPlan.update({ where: { id }, data: { isActive: false } });
+  } else {
+    await tx.platformPlanVersion.deleteMany({ where: { planId: id } });
+    await tx.platformPlan.delete({ where: { id } });
+  }
+  return {
+    targetId: id,
+    details: { ...plan, status: history ? 'archived' : 'deleted' },
   };
 }

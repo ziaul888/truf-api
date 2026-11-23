@@ -118,6 +118,7 @@ export class SystemStatusService {
       integrations: {
         stripe: Boolean(env.STRIPE_SECRET_KEY),
         sendgrid: Boolean(env.SENDGRID_API_KEY),
+        resend: Boolean(env.RESEND_API_KEY),
         twilio: Boolean(
           env.TWILIO_ACCOUNT_SID &&
           env.TWILIO_AUTH_TOKEN &&

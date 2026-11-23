@@ -60,7 +60,8 @@ const EnvSchema = z
       .string()
       .startsWith('whsec_', 'must be a Stripe webhook secret (whsec_…)')
       .optional(),
-    /** Without it, emails are skipped (logged, not sent). */
+    /** Prefer Resend for email when its API key is configured. */
+    RESEND_API_KEY: z.string().trim().optional(),
     SENDGRID_API_KEY: z.string().optional(),
     EMAIL_FROM: z.email().default('bookings@example.com'),
     /** Customer sign-in codes (Twilio Verify). Without them, codes are only logged, and only outside production. */
