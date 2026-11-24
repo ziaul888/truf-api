@@ -5,7 +5,8 @@ import { AppError } from '../common/app-error.js';
 import { env } from '../config/env.js';
 import { detectImageType, UPLOADS_ROUTE } from '../grounds/photo-storage.js';
 
-export type ImageFolder = 'venue' | 'website' | 'platform' | 'saas';
+export type ImageFolder =
+  'venue' | 'website' | 'platform' | 'saas' | `turf-logos/${string}`;
 type ImageType = 'jpg' | 'png' | 'webp';
 
 export const LOGO_RULES = {

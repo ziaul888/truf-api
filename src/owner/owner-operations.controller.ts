@@ -1,6 +1,7 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
   HttpCode,
   Param,
@@ -9,8 +10,11 @@ import {
   Put,
   Query,
   Res,
+  UploadedFile,
   UseGuards,
+  UseInterceptors,
 } from '@nestjs/common';
+import { FileInterceptor } from '@nestjs/platform-express';
 import type { Response } from 'express';
 import { z } from 'zod';
 import {
@@ -28,6 +32,7 @@ import {
   type CreateGroundInput,
   type UpdateGroundInput,
 } from '../grounds/grounds.schemas.js';
+import type { UploadedImage } from '../settings/settings-images.js';
 import {
   CompleteVenueSchema,
   type CompleteVenueInput,
@@ -144,6 +149,24 @@ export class OwnerOperationsController {
     @Body(new ZodValidationPipe(CompleteVenueSchema)) body: CompleteVenueInput,
   ) {
     return this.venue.update(owner.session, body);
+  }
+
+  @Post('settings/venue/logo')
+  @UseGuards(OwnerOriginGuard)
+  @UseInterceptors(
+    FileInterceptor('logo', { limits: { fileSize: 1024 * 1024, files: 1 } }),
+  )
+  uploadLogo(
+    @CurrentOperator() owner: TenantOperator,
+    @UploadedFile() file: UploadedImage | undefined,
+  ) {
+    return this.venue.uploadLogo(owner, file);
+  }
+
+  @Delete('settings/venue/logo')
+  @UseGuards(OwnerOriginGuard)
+  removeLogo(@CurrentOperator() owner: TenantOperator) {
+    return this.venue.removeLogo(owner.session);
   }
 
   @Get('grounds')

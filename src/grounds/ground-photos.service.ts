@@ -1,7 +1,6 @@
-import { randomUUID } from 'node:crypto';
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
-import type { Ground } from '../generated/prisma/client.js';
+import { Prisma, type Ground } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import { toGroundDto, type GroundDto } from './ground.dto.js';
 import {
@@ -9,6 +8,7 @@ import {
   detectImageType,
   MAX_PHOTO_BYTES,
   MAX_PHOTOS,
+  newPhotoName,
   savePhoto,
 } from './photo-storage.js';
 
@@ -23,6 +23,8 @@ const photoError = (message: string, code: string, status = 400) =>
 
 @Injectable()
 export class GroundPhotosService {
+  private readonly logger = new Logger(GroundPhotosService.name);
+
   constructor(private readonly prisma: PrismaService) {}
 
   async add(
@@ -50,16 +52,12 @@ export class GroundPhotosService {
         'INVALID_PHOTO_TYPE',
       );
 
-    const name = `${randomUUID()}.${type}`;
+    const name = newPhotoName(type);
     await savePhoto(groundId, name, file.buffer);
     try {
-      const updated = await this.prisma.ground.update({
-        where: { id: groundId },
-        data: { photos: { push: name } },
-      });
-      return toGroundDto(updated);
+      return await this.updatePhotos(ground, [...ground.photos, name]);
     } catch (err) {
-      await deletePhoto(groundId, name); // don't leave an orphan file behind
+      await this.removeFile(groundId, name);
       throw err;
     }
   }
@@ -69,12 +67,12 @@ export class GroundPhotosService {
     if (!ground.photos.includes(name))
       throw photoError('Photo not found', 'PHOTO_NOT_FOUND', 404);
 
-    const updated = await this.prisma.ground.update({
-      where: { id: groundId },
-      data: { photos: ground.photos.filter((p) => p !== name) },
-    });
-    await deletePhoto(groundId, name);
-    return toGroundDto(updated);
+    const updated = await this.updatePhotos(
+      ground,
+      ground.photos.filter((p) => p !== name),
+    );
+    await this.removeFile(groundId, name);
+    return updated;
   }
 
   /** `order` must list exactly the ground's current photos, in the new order. */
@@ -89,12 +87,46 @@ export class GroundPhotosService {
         'INVALID_PHOTO_ORDER',
       );
     }
-    return toGroundDto(
-      await this.prisma.ground.update({
-        where: { id: groundId },
-        data: { photos: order },
-      }),
-    );
+    return this.updatePhotos(ground, order);
+  }
+
+  private async updatePhotos(
+    ground: Ground,
+    photos: string[],
+  ): Promise<GroundDto> {
+    // The old list is part of the write condition, so simultaneous requests
+    // cannot overwrite another upload or exceed the limit.
+    const existing = { photos: { equals: ground.photos } };
+    const where: Prisma.GroundWhereUniqueInput = {
+      id: ground.id,
+      ...(ground.photos.length
+        ? existing
+        : { OR: [existing, { photos: { equals: null } }] }),
+    };
+    try {
+      return toGroundDto(
+        await this.prisma.ground.update({ where, data: { photos } }),
+      );
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError &&
+        error.code === 'P2025'
+      )
+        throw photoError(
+          'Ground photos changed. Try saving again.',
+          'PHOTO_CONFLICT',
+          409,
+        );
+      throw error;
+    }
+  }
+
+  private async removeFile(groundId: string, name: string): Promise<void> {
+    try {
+      await deletePhoto(groundId, name);
+    } catch (error) {
+      this.logger.warn('Could not remove a ground photo file', error);
+    }
   }
 
   private async findOrThrow(id: string): Promise<Ground> {

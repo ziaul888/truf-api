@@ -9,8 +9,6 @@ import {
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
-import { z } from 'zod';
 import { AuthGuard, Roles } from '../auth/auth.guard.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
@@ -18,14 +16,13 @@ import {
   GroundPhotosService,
   type UploadedPhoto,
 } from './ground-photos.service.js';
-import { MAX_PHOTOS, PHOTO_NAME } from './photo-storage.js';
-
-const PhotoName = z.string().regex(PHOTO_NAME, 'Unknown photo');
-const PhotoParamSchema = IdParamSchema.extend({ photo: PhotoName });
-const ReorderSchema = z.object({ photos: z.array(PhotoName).max(MAX_PHOTOS) });
-
-// Multer's own cap. Files between 2 MB and this get a clear 400 from the service; bigger ones a 413.
-const UPLOAD_LIMIT_BYTES = 5 * 1024 * 1024;
+import {
+  GroundPhotoOrderSchema,
+  GroundPhotoParamSchema,
+  GroundPhotoUpload,
+  type GroundPhotoOrder,
+  type GroundPhotoParam,
+} from './ground-photo-input.js';
 
 /** Ground photos: admins only. The first photo is the cover. */
 @Controller('admin/grounds/:id/photos')
@@ -36,11 +33,7 @@ export class AdminGroundPhotosController {
 
   /** multipart/form-data with one image in the `photo` field. */
   @Post()
-  @UseInterceptors(
-    FileInterceptor('photo', {
-      limits: { fileSize: UPLOAD_LIMIT_BYTES, files: 1 },
-    }),
-  )
+  @UseInterceptors(GroundPhotoUpload)
   add(
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
     @UploadedFile() file: UploadedPhoto | undefined,
@@ -51,16 +44,16 @@ export class AdminGroundPhotosController {
   @Put()
   reorder(
     @Param(new ZodValidationPipe(IdParamSchema)) { id }: IdParam,
-    @Body(new ZodValidationPipe(ReorderSchema))
-    { photos }: z.infer<typeof ReorderSchema>,
+    @Body(new ZodValidationPipe(GroundPhotoOrderSchema))
+    { photos }: GroundPhotoOrder,
   ) {
     return this.photos.reorder(id, photos);
   }
 
   @Delete(':photo')
   remove(
-    @Param(new ZodValidationPipe(PhotoParamSchema))
-    { id, photo }: z.infer<typeof PhotoParamSchema>,
+    @Param(new ZodValidationPipe(GroundPhotoParamSchema))
+    { id, photo }: GroundPhotoParam,
   ) {
     return this.photos.remove(id, photo);
   }

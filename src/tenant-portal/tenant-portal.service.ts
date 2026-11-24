@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
 import { TenantDashboardDatabase } from '../owner/tenant-dashboard-database.service.js';
-import { configuredVenue } from '../owner/owner-venue.js';
+import { configuredVenue, turfLogoUrl } from '../owner/owner-venue.js';
 import { turfSettingsOf } from '../owner/tenant-settings.store.js';
 import {
   latestPlanFeatures,
@@ -23,7 +23,7 @@ export class TenantPortalService {
       ...website,
       venue: {
         ...publicVenue,
-        logoUrl: null,
+        logoUrl: turfLogoUrl(turf.id, turf.setup?.data),
         locale: {
           timezone: turf.timezone,
           currency: turf.currency.toUpperCase(),

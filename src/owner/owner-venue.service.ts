@@ -1,5 +1,12 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
+import type { Prisma } from '../generated/prisma/client.js';
 import { PrismaService } from '../prisma/prisma.service.js';
+import {
+  deleteImage,
+  LOGO_RULES,
+  saveImage,
+  type UploadedImage,
+} from '../settings/settings-images.js';
 import {
   DEFAULT_VENUE,
   type CompleteVenueInput,
@@ -12,28 +19,40 @@ import {
   assertTurfAvailable,
   configuredVenue,
   setupData,
+  turfLogoFolder,
+  turfLogoName,
+  turfLogoUrl,
 } from './owner-venue.js';
 
 function venueDto(
   owner: TenantOperator,
-  venue: CompleteVenueInput,
+  data: Prisma.JsonValue | undefined,
   updatedAt: Date | null,
 ) {
+  const venue = configuredVenue(data);
+  const { logo: _logo, ...defaults } = DEFAULT_VENUE;
+  const logoUrl = turfLogoUrl(owner.session.tid, data);
   return {
-    ...venue,
-    logoUrl: null,
+    ...(venue ?? {
+      ...defaults,
+      name: owner.user.tenant.name,
+      email: owner.user.email,
+    }),
+    logoUrl,
     locale: {
       currency: owner.user.tenant.currency.toUpperCase(),
       timezone: owner.user.tenant.timezone,
       weekStartsOn: 'sat' as const,
     },
-    updatedAt,
+    updatedAt: venue || logoUrl ? updatedAt : null,
     updatedBy: null,
   };
 }
 
 @Injectable()
 export class OwnerVenueService {
+  private readonly logger = new Logger(OwnerVenueService.name);
+
   constructor(private readonly db: PrismaService) {}
 
   async get(owner: TenantOperator) {
@@ -41,17 +60,7 @@ export class OwnerVenueService {
     const setup = await this.db.tenantSetup.findUnique({
       where: { tenantId: owner.session.tid },
     });
-    const { logo: _logo, ...defaults } = DEFAULT_VENUE;
-    const venue = configuredVenue(setup?.data);
-    return venueDto(
-      owner,
-      venue ?? {
-        ...defaults,
-        name: owner.user.tenant.name,
-        email: owner.user.email,
-      },
-      venue ? (setup?.updatedAt ?? null) : null,
-    );
+    return venueDto(owner, setup?.data, setup?.updatedAt ?? null);
   }
 
   update(session: TenantOperator['session'], input: CompleteVenueInput) {
@@ -73,7 +82,62 @@ export class OwnerVenueService {
           data: { name: input.name },
         });
       }
-      return venueDto(owner, input, saved.updatedAt);
+      return venueDto(owner, saved.data, saved.updatedAt);
     });
+  }
+
+  async uploadLogo(owner: TenantOperator, file: UploadedImage | undefined) {
+    assertTurfAdmin(owner);
+    const name = await saveImage(
+      turfLogoFolder(owner.session.tid),
+      file,
+      LOGO_RULES,
+    );
+    return this.setLogo(owner.session, name);
+  }
+
+  removeLogo(session: TenantOperator['session']) {
+    return this.setLogo(session, null);
+  }
+
+  private async setLogo(
+    session: TenantOperator['session'],
+    name: string | null,
+  ) {
+    const result = await ownerTransaction(this.db, async (tx) => {
+      const owner = await requireTenantOperator(tx, session);
+      assertTurfAdmin(owner);
+      const where = { tenantId: session.tid };
+      const current = await tx.tenantSetup.findUnique({ where });
+      const previous = turfLogoName(current?.data);
+      if (previous === name)
+        return {
+          previous,
+          venue: venueDto(owner, current?.data, current?.updatedAt ?? null),
+        };
+
+      const data = { ...setupData(current?.data), venueLogo: name };
+      const saved = await tx.tenantSetup.upsert({
+        where,
+        create: { ...where, data },
+        update: { data },
+      });
+      return { previous, venue: venueDto(owner, saved.data, saved.updatedAt) };
+    }).catch(async (error: unknown) => {
+      await this.removeLogoFile(session.tid, name);
+      throw error;
+    });
+
+    if (result.previous !== name)
+      await this.removeLogoFile(session.tid, result.previous);
+    return result.venue;
+  }
+
+  private async removeLogoFile(tenantId: string, name: string | null) {
+    try {
+      await deleteImage(turfLogoFolder(tenantId), name);
+    } catch (error) {
+      this.logger.warn('Could not remove a turf logo file', error);
+    }
   }
 }

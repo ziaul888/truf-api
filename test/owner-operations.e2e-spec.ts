@@ -12,6 +12,10 @@ import { addDays, venueNow } from '../src/slots/venue-time.js';
 import { requireProofDatabase } from './tenant-isolation/test-database-safety.js';
 
 const password = 'tenant-operations-e2e-password';
+const png = Buffer.from(
+  'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aLXEAAAAASUVORK5CYII=',
+  'base64',
+);
 const venue = {
   name: 'Independent Turf',
   tagline: '',
@@ -197,6 +201,129 @@ describe('Turf owner setup and operations', () => {
         });
     }
     await client().get(website).expect(404);
+  });
+
+  it('uploads, reorders and deletes ground photos in the owning turf only', async () => {
+    const [owner, other] = await Promise.all([signInOwner(), signInOwner()]);
+    const { id: tenantId, slug } = (await get('/session', owner)).body.data
+      .tenant;
+    await put('/settings/venue', owner, venue).expect(200);
+    await put('/settings/venue', other, venue).expect(200);
+    const created = await post('/grounds', owner, {
+      ...ground,
+      showOnPortal: true,
+    }).expect(201);
+    const groundPath = '/grounds/' + created.body.data.id;
+    const photosPath = groundPath + '/photos';
+    const upload = (cookie: string) =>
+      client()
+        .post(path(photosPath))
+        .set('Cookie', cookie)
+        .attach('photo', png, 'pitch.png');
+
+    await client()
+      .post(path(photosPath))
+      .attach('photo', png, 'pitch.png')
+      .expect(401);
+    await upload(other).expect(404);
+    await upload(owner).set('Origin', 'https://other.example.test').expect(403);
+    const staffEmail = `ground-staff-${randomUUID()}@example.test`;
+    const staff = await post('/users', owner, {
+      email: staffEmail,
+      name: 'Ground staff',
+      password,
+      role: 'manager',
+    }).expect(201);
+    userIds.push(staff.body.data.id);
+    await upload((await signIn(staffEmail)).cookie).expect(403);
+    await upload(owner).expect(201);
+    const second = await upload(owner).expect(201);
+    const urls = second.body.data.photos as string[];
+    expect(urls).toHaveLength(2);
+    expect(urls[0]).toContain('/uploads/grounds/' + tenantId + '/');
+    const names = urls.map((url) => url.split('/').pop()!);
+    const remove = (photo: string, cookie: string) =>
+      client()
+        .delete(path(photosPath + '/' + photo))
+        .set('Cookie', cookie);
+
+    try {
+      await client()
+        .get(urls[0])
+        .expect('Content-Type', /image\/png/)
+        .expect(200);
+      await remove(names[0], other).expect(404);
+      await put(photosPath, owner, { photos: [...names].reverse() }).expect(
+        200,
+      );
+      await put('/settings/website/portal', owner, { published: true }).expect(
+        200,
+      );
+      const publicGround = await client()
+        .get('/api/v1/turfs/' + slug + groundPath)
+        .expect(200);
+      expect(publicGround.body.data.photos).toEqual([...urls].reverse());
+    } finally {
+      await put('/settings/website/portal', owner, { published: false }).expect(
+        200,
+      );
+      for (const name of names) await remove(name, owner).expect(200);
+    }
+    await client().get(urls[0]).expect(404);
+    expect((await get(groundPath, owner).expect(200)).body.data.photos).toEqual(
+      [],
+    );
+  });
+
+  it('keeps venue logos separate and publishes the current logo with the turf website', async () => {
+    const [owner, other] = await Promise.all([signInOwner(), signInOwner()]);
+    const { id: tenantId, slug } = (await get('/session', owner)).body.data
+      .tenant;
+    const endpoint = path('/settings/venue/logo');
+    const upload = (cookie: string, bytes = png) =>
+      client().post(endpoint).set('Cookie', cookie).attach('logo', bytes, 'badge.png');
+    const remove = (cookie: string) => client().delete(endpoint).set('Cookie', cookie);
+    const website = '/api/v1/turfs/' + slug + '/website';
+
+    await client().post(endpoint).attach('logo', png, 'badge.png').expect(401);
+    await upload(owner).set('Origin', 'https://other.example.test').expect(403);
+    await upload(owner, Buffer.from('not an image')).expect(400);
+    const first = await upload(owner).expect(201);
+    const firstUrl = first.body.data.logoUrl as string;
+    expect(firstUrl).toContain('/api/v1/uploads/turf-logos/' + tenantId + '/');
+    expect((await get('/session', owner)).body.data.tenant.setupComplete).toBe(false);
+    expect((await get('/settings/venue', other)).body.data.logoUrl).toBeNull();
+    await remove(other).expect(200);
+    await client().get(firstUrl).expect(200);
+
+    try {
+      const saved = await put('/settings/venue', owner, venue).expect(200);
+      expect(saved.body.data.logoUrl).toBe(firstUrl);
+      const staffEmail = `logo-staff-${randomUUID()}@example.test`;
+      const staff = await post('/users', owner, {
+        email: staffEmail, name: 'Logo staff', password, role: 'manager',
+      }).expect(201);
+      userIds.push(staff.body.data.id);
+      const manager = (await signIn(staffEmail)).cookie;
+      await upload(manager).expect(403);
+      await remove(manager).expect(403);
+      expect((await get('/settings/venue', manager).expect(200)).body.data.logoUrl).toBe(firstUrl);
+
+      await put('/settings/website/portal', owner, { published: true }).expect(200);
+      expect((await client().get(website).expect(200)).body.data.venue.logoUrl).toBe(firstUrl);
+      const replacement = await upload(owner).expect(201);
+      const currentUrl = replacement.body.data.logoUrl as string;
+      expect(currentUrl).not.toBe(firstUrl);
+      await client().get(firstUrl).expect(404);
+      await client().get(currentUrl).expect('Content-Type', /image\/png/).expect(200);
+      expect((await client().get(website)).body.data.venue.logoUrl).toBe(currentUrl);
+      expect((await remove(owner).expect(200)).body.data.logoUrl).toBeNull();
+      await client().get(currentUrl).expect(404);
+      expect((await client().get(website)).body.data.venue.logoUrl).toBeNull();
+    } finally {
+      await put('/settings/website/portal', owner, { published: false }).expect(200);
+      await remove(owner).expect(200);
+    }
   });
 
   it('keeps dashboard appearance separate for each turf during and after setup', async () => {

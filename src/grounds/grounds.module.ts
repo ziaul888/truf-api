@@ -3,18 +3,18 @@ import { AuthModule } from '../auth/auth.module.js';
 import { SlotsModule } from '../slots/slots.module.js';
 import { AdminGroundPhotosController } from './admin-ground-photos.controller.js';
 import { AdminGroundsController } from './admin-grounds.controller.js';
-import { GroundPhotosService } from './ground-photos.service.js';
+import { GroundPhotosModule } from './ground-photos.module.js';
 import { GroundsController } from './grounds.controller.js';
 import { GroundsService } from './grounds.service.js';
 
 @Module({
-  imports: [AuthModule, SlotsModule],
+  imports: [AuthModule, SlotsModule, GroundPhotosModule],
   controllers: [
     GroundsController,
     AdminGroundsController,
     AdminGroundPhotosController,
   ],
-  providers: [GroundsService, GroundPhotosService],
+  providers: [GroundsService],
   exports: [GroundsService],
 })
 export class GroundsModule {}
