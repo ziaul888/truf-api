@@ -97,6 +97,7 @@ export class OwnerApplicationsService {
             inputHash,
             turfName: input.name,
             slug: input.slug,
+            logoDataUrl: input.logo,
             ownerName: input.ownerName,
             ownerEmail: input.ownerEmail,
             passwordHash,

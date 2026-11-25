@@ -24,6 +24,7 @@ export function applicationFingerprint(input: SubmitOwnerApplication) {
         paymentMethod: input.paymentMethod,
         paymentReference: input.paymentReference,
         paymentDate: input.paymentDate,
+        logo: input.logo,
       }),
     )
     .digest('hex');

@@ -1,5 +1,4 @@
 import { Injectable } from '@nestjs/common';
-import type { Paginated } from '../common/schemas.js';
 import type { Prisma, SlotStatus } from '../generated/prisma/client.js';
 import { peakRangesOf } from '../grounds/ground.dto.js';
 import { VISIBLE_GROUND } from '../grounds/ground-rules.js';
@@ -15,13 +14,13 @@ import {
   type SlotRow,
 } from './slot.dto.js';
 import { SlotSettingsService } from './slot-settings.service.js';
+import { listAdminSlots, SLOT_ORDER } from './slot-list.js';
 import {
   activeClosuresWhere,
   assertRange,
   closureOn,
   dateWhere,
   groundNotFound,
-  isOpenDay,
   slotNotFound,
 } from './slot-rules.js';
 import type {
@@ -32,10 +31,8 @@ import type {
 import { slotHour, slotTimes, type SlotTimes } from './slot-time.js';
 import {
   addDays,
-  datesBetween,
   fromDbDate,
   minutesUntil,
-  toDbDate,
   venueNow,
   weekdayOf,
   type IsoDate,
@@ -43,9 +40,6 @@ import {
 
 export const MAX_PUBLIC_DAYS = 14;
 export const MAX_CALENDAR_DAYS = 62;
-const MAX_LIST_DAYS = 366;
-
-export type SlotStats = Record<SlotStatus | 'total', number>;
 
 export interface CalendarSlot extends SlotTimes {
   id: string;
@@ -108,7 +102,7 @@ export async function slotCalendar(
     db.slot.findMany({
       where: { ...base, status: { in: ['held', 'booked', 'blocked'] } },
       include: SLOT_INCLUDE,
-      orderBy: ORDER,
+      orderBy: SLOT_ORDER,
     }),
     db.slot.groupBy({
       by: ['date', 'groundId'],
@@ -127,13 +121,6 @@ export async function slotCalendar(
   };
 }
 
-const ORDER: Prisma.SlotOrderByWithRelationInput[] = [
-  { date: 'asc' },
-  { startHour: 'asc' },
-  { startMinute: 'asc' },
-  { ground: { name: 'asc' } },
-];
-
 @Injectable()
 export class SlotsService {
   constructor(
@@ -141,71 +128,8 @@ export class SlotsService {
     private readonly settings: SlotSettingsService,
   ) {}
 
-  /** `stats` cover the same ground and dates but ignore the status, reason and open-day filters (the stat cards). */
-  async list({
-    page,
-    limit,
-    groundId,
-    from,
-    to,
-    status,
-    reason,
-    openDaysOnly,
-  }: ListSlotsQuery): Promise<Paginated<SlotDto> & { stats: SlotStats }> {
-    if (from && to) assertRange(from, to, MAX_LIST_DAYS);
-    const base: Prisma.SlotWhereInput = {
-      ...(groundId && { groundId }),
-      ...dateWhere(from, to),
-    };
-    const where: Prisma.SlotWhereInput = {
-      ...base,
-      ...(status && { status }),
-      ...(reason && { blockReason: reason }),
-      ...(openDaysOnly && (await this.openDatesWhere(groundId!, from!, to!))),
-    };
-    const [rows, total, counts] = await this.prisma.$transaction([
-      this.prisma.slot.findMany({
-        where,
-        include: SLOT_INCLUDE,
-        orderBy: ORDER,
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.prisma.slot.count({ where }),
-      this.prisma.slot.groupBy({
-        by: ['status'],
-        where: base,
-        orderBy: { status: 'asc' },
-        _count: { _all: true },
-      }),
-    ]);
-    const stats: SlotStats = {
-      total: 0,
-      available: 0,
-      held: 0,
-      booked: 0,
-      blocked: 0,
-    };
-    for (const c of counts) {
-      const n = (c._count as { _all: number })._all;
-      stats[c.status] = n;
-      stats.total += n;
-    }
-    return { data: rows.map(toSlotDto), total, page, limit, stats };
-  }
-
-  private async openDatesWhere(
-    groundId: string,
-    from: IsoDate,
-    to: IsoDate,
-  ): Promise<Prisma.SlotWhereInput> {
-    const ground = await this.prisma.ground.findUnique({
-      where: { id: groundId },
-    });
-    const open = ground
-      ? datesBetween(from, to).filter((date) => isOpenDay(ground, date))
-      : [];
-    return { date: { in: open.map(toDbDate) } };
+  list(query: ListSlotsQuery) {
+    return listAdminSlots(this.prisma, query);
   }
 
   async get(id: string): Promise<SlotDto> {

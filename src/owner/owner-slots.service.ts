@@ -23,16 +23,15 @@ import type {
   GenerateSlotsInput,
   ListSlotsQuery,
 } from '../slots/slots.schemas.js';
+import { listAdminSlots } from '../slots/slot-list.js';
 import { slotCalendar } from '../slots/slots.service.js';
 import { endMinutesOf, slotTimes, startMinutesOf } from '../slots/slot-time.js';
 import {
   datesBetween,
-  fromDbDate,
   toDbDate,
   venueNow,
   weekdayOf,
 } from '../slots/venue-time.js';
-import { ownerGround } from './owner-grounds.service.js';
 import type { TenantOperator } from './owner-session.js';
 import { planOwnerSlots } from './owner-slot-plan.js';
 import { ownerTransaction } from './owner-transaction.js';
@@ -75,58 +74,11 @@ export class OwnerSlotsService {
     };
   }
 
-  async list(owner: TenantOperator, query: ListSlotsQuery) {
+  list(owner: TenantOperator, query: ListSlotsQuery) {
     requireVenue(owner);
-    return this.dashboard.run(owner.user.tenant, () => this.listInTurf(query));
-  }
-
-  private async listInTurf(query: ListSlotsQuery) {
-    const { page, limit, groundId, from, to, status, reason, openDaysOnly } =
-      query;
-    const base: Prisma.SlotWhereInput = { groundId };
-    if (from && to) {
-      assertRange(from, to, 366);
-      base.date = { gte: toDbDate(from), lte: toDbDate(to) };
-    }
-    const where: Prisma.SlotWhereInput = {
-      ...base,
-      status,
-      blockReason: reason,
-    };
-    if (openDaysOnly && groundId && from && to) {
-      const ground = await ownerGround(this.db, groundId);
-      where.date = {
-        in: datesBetween(from, to)
-          .filter((date) => isOpenDay(ground, date))
-          .map(toDbDate),
-      };
-    }
-    const [rows, total, counts] = await this.db.$transaction([
-      this.db.slot.findMany({
-        where,
-        include: { ground: { select: { name: true } } },
-        orderBy: [
-          { date: 'asc' },
-          { startHour: 'asc' },
-          { startMinute: 'asc' },
-          { id: 'asc' },
-        ],
-        skip: (page - 1) * limit,
-        take: limit,
-      }),
-      this.db.slot.count({ where }),
-      this.db.slot.groupBy({
-        by: ['status'],
-        where: base,
-        _count: { _all: true },
-      }),
-    ]);
-    const stats = { available: 0, held: 0, booked: 0, blocked: 0, total: 0 };
-    for (const { status, _count } of counts) {
-      stats[status] = _count._all;
-      stats.total += _count._all;
-    }
-    return { data: rows.map(slotDto), total, page, limit, stats };
+    return this.dashboard.run(owner.user.tenant, () =>
+      listAdminSlots(this.db, query),
+    );
   }
 
   generate(session: TenantOperator['session'], input: GenerateSlotsInput) {
@@ -202,30 +154,6 @@ async function generateForOwner(
     }).length;
   }
   return result;
-}
-
-type SlotRow = Prisma.SlotGetPayload<{
-  include: { ground: { select: { name: true } } };
-}>;
-
-function slotDto(row: SlotRow) {
-  const { id, groundId, durationMinutes, price, status, createdAt, updatedAt } =
-    row;
-  return {
-    id,
-    groundId,
-    durationMinutes,
-    price,
-    status,
-    createdAt,
-    updatedAt,
-    groundName: row.ground.name,
-    date: fromDbDate(row.date),
-    ...slotTimes(row),
-    booking: null,
-    block: null,
-    heldUntil: null,
-  };
 }
 
 type TodayGroundRow = Prisma.GroundGetPayload<{

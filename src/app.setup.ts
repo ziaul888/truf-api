@@ -30,6 +30,14 @@ export function configureApp(app: INestApplication) {
       next();
     },
   );
+  // An application may include a 200 KiB logo encoded as base64.
+  const applicationJson = express.json({ limit: '280kb' });
+  // Wrap it so Nest still registers its regular, global JSON parser.
+  app.use(
+    '/api/v1/owner-applications',
+    (req: Request, res: Response, next: NextFunction) =>
+      applicationJson(req, res, next),
+  );
   // Stripe signs the exact bytes it sent, so this route keeps the raw body (Nest's JSON parser then skips it).
   app.use(
     '/api/v1/stripe/webhook',

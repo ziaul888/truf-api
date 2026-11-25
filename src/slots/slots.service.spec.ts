@@ -193,6 +193,7 @@ describe('SlotsService — admin', () => {
     const { service, prisma } = setup([
       slot({ status: 'blocked', blockReason: 'event', blockedAt: NOW }),
     ]);
+    prisma.slot.count.mockResolvedValueOnce(1).mockResolvedValueOnce(1);
     const result = await service.list({
       page: 1,
       limit: 20,
@@ -207,7 +208,8 @@ describe('SlotsService — admin', () => {
     );
     expect(result.stats).toEqual({
       total: 4,
-      available: 3,
+      available: 2,
+      past: 1,
       held: 0,
       booked: 0,
       blocked: 1,

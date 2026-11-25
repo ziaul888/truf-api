@@ -318,6 +318,7 @@ model OwnerApplication {
   inputHash       String
   turfName        String
   slug            String
+  logoDataUrl     String?
   ownerName       String
   ownerEmail      String
   passwordHash    String?

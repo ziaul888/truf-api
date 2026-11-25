@@ -27,7 +27,13 @@ export function turfLogoUrl(
   data: Prisma.JsonValue | undefined,
 ) {
   const name = turfLogoName(data);
-  return name ? imageUrl(turfLogoFolder(tenantId), name) : null;
+  if (name) return imageUrl(turfLogoFolder(tenantId), name);
+
+  const logo = setupData(data).venueLogo;
+  return typeof logo === 'string' &&
+    /^data:image\/(png|jpeg);base64,/.test(logo)
+    ? logo
+    : null;
 }
 
 export function assertTurfAvailable(owner: TenantOperator) {

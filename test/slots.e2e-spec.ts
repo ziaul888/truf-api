@@ -228,6 +228,67 @@ describe('Slots (e2e)', () => {
       });
     });
 
+    it('counts past starts and paginates the filtered schedule to the minute', async () => {
+      const date = '2026-10-28';
+      const windows = [
+        { startHour: 8, startMinute: 0 },
+        { startHour: 9, startMinute: 30 },
+        { startHour: 11, startMinute: 0 },
+        { startHour: 12, startMinute: 30 },
+      ];
+      await prisma.slot.createMany({
+        data: windows.map((window) => ({
+          ...window,
+          groundId,
+          date: toDbDate(date),
+          durationMinutes: 90,
+          price: 1500,
+        })),
+      });
+
+      vi.useFakeTimers({
+        now: new Date('2026-10-28T03:30:00Z'),
+        toFake: ['Date'],
+      });
+      try {
+        const agent = await signIn(manager);
+        const query = { groundId, date, status: 'available' };
+        const past = await agent
+          .get(SLOTS)
+          .query({ ...query, schedule: 'started' })
+          .expect(200);
+        expect(past.body.data).toMatchObject({
+          total: 2,
+          stats: { total: 4, past: 2, available: 2 },
+          data: [
+            { startTime: '08:00', hasStarted: true },
+            { startTime: '09:30', hasStarted: true },
+          ],
+        });
+        const upcoming = { ...query, schedule: 'upcoming', limit: 1 };
+        const first = await agent.get(SLOTS).query(upcoming).expect(200);
+        const second = await agent
+          .get(SLOTS)
+          .query({ ...upcoming, page: 2 })
+          .expect(200);
+        expect(first.body.data).toMatchObject({
+          page: 1,
+          total: 2,
+          data: [{ startTime: '11:00', hasStarted: false }],
+        });
+        expect(second.body.data).toMatchObject({
+          page: 2,
+          total: 2,
+          data: [{ startTime: '12:30', hasStarted: false }],
+        });
+        // The walk-in booking form uses the stored status and checks the end time.
+        const walkIn = await agent.get(SLOTS).query(query).expect(200);
+        expect(walkIn.body.data.total).toBe(4);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it('lets a manager block a slot, with a note and an audit record', async () => {
       const agent = await signIn(manager);
       const { id } = await slotAt(groundId, d1, 9);

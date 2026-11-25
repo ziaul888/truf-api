@@ -99,6 +99,9 @@ function createTurf(
       currency: application.currency,
       status: 'draft',
       memberships: { create: { userId, role: 'owner' } },
+      ...(application.logoDataUrl && {
+        setup: { create: { data: { venueLogo: application.logoDataUrl } } },
+      }),
     },
   });
 }
@@ -138,6 +141,7 @@ export async function activateApplication(
         paymentDate: toDbDate(payment.receivedOn),
       }),
       passwordHash: null,
+      logoDataUrl: null,
     },
   });
   return {
@@ -214,6 +218,7 @@ export async function rejectApplication(
       reviewedAt: new Date(),
       reviewedById: actorId,
       passwordHash: null,
+      logoDataUrl: null,
     },
   });
   if (updated.count !== 1) {

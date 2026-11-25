@@ -523,6 +523,28 @@ describe('Turf owner setup and operations', () => {
       price: 80_000,
       status: 'available',
     });
+    const filtered = new URLSearchParams({
+      groundId,
+      date,
+      status: 'available',
+      schedule: 'upcoming',
+      limit: '1',
+      page: '2',
+    });
+    const secondPage = await get(
+      `/operations/slots?${filtered}`,
+      cookieA,
+    ).expect(200);
+    expect(secondPage.body.data).toMatchObject({
+      total: 2,
+      page: 2,
+      data: [{ id: own.body.data.data[1].id, hasStarted: false }],
+    });
+    filtered.set('status', 'held');
+    const held = await get(`/operations/slots?${filtered}`, cookieA).expect(
+      200,
+    );
+    expect(held.body.data).toMatchObject({ total: 0, data: [] });
     const other = await get(`/slots?date=${date}`, cookieB).expect(200);
     expect(other.body.data.data).toEqual([]);
     const calendar = `/slots/calendar?from=${date}&to=${date}`;

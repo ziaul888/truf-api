@@ -7,6 +7,7 @@ import { configureApp } from '../src/app.setup.js';
 import { hashPassword } from '../src/auth/password.js';
 import { AuthModule } from '../src/auth/auth.module.js';
 import { Prisma } from '../src/generated/prisma/client.js';
+import { turfLogoUrl } from '../src/owner/owner-venue.js';
 import { OwnerApplicationsModule } from '../src/owner-applications/owner-applications.module.js';
 import type { SubmitOwnerApplication } from '../src/owner-applications/owner-applications.schemas.js';
 import { PlatformAuthService } from '../src/platform/platform-auth.service.js';
@@ -59,6 +60,7 @@ async function cleanup(db: PrismaService) {
   await db.platformInvoice.deleteMany({ where: { tenant } });
   await db.platformSubscription.deleteMany({ where: { tenant } });
   await db.tenantMembership.deleteMany({ where: { tenant } });
+  await db.tenantSetup.deleteMany({ where: { tenant } });
   await db.tenant.deleteMany({ where: tenant });
   await db.platformGrant.deleteMany({ where: { user } });
   await db.user.deleteMany({ where: user });
@@ -541,7 +543,21 @@ describe('Owner applications and SaaS admin activation', () => {
     }).expect(400);
     expect(paid.body.code).toBe('TRIAL_PAYMENT_NOT_REQUIRED');
 
-    const applied = await submit(input).expect(201);
+    const logo =
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l6UAAAAASUVORK5CYII=';
+    const invalidLogo = await submit({
+      ...input,
+      logo: 'data:image/png;base64,aGVsbG8=',
+    }).expect(400);
+    expect(invalidLogo.body.details).toEqual([
+      { field: 'logo', message: 'Upload a valid PNG or JPG logo up to 200 KB' },
+    ]);
+    const applied = await submit({ ...input, logo }).expect(201);
+    expect(applied.body.data).not.toHaveProperty('logoDataUrl');
+    expect((await submit({ ...input, logo }).expect(201)).body.data.id).toBe(
+      applied.body.data.id,
+    );
+    await submit(input).expect(409);
     expect(applied.body.data).toMatchObject({
       payment: null,
       plan: {
@@ -560,6 +576,17 @@ describe('Owner applications and SaaS admin activation', () => {
     ).expect(201);
 
     const tenantId = tenant.body.data.id as string;
+    const setup = await db.tenantSetup.findUniqueOrThrow({
+      where: { tenantId },
+    });
+    expect(setup.completedAt).toBeNull();
+    expect(turfLogoUrl(tenantId, setup.data)).toBe(logo);
+    expect(
+      await db.ownerApplication.findUnique({
+        where: { id: applied.body.data.id },
+        select: { logoDataUrl: true },
+      }),
+    ).toEqual({ logoDataUrl: null });
     const trialBillingPath =
       '/api/v1/platform/tenants/' + tenantId + '/billing';
     const billing = await request(app.getHttpServer())

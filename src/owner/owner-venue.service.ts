@@ -109,18 +109,19 @@ export class OwnerVenueService {
       assertTurfAdmin(owner);
       const where = { tenantId: session.tid };
       const current = await tx.tenantSetup.findUnique({ where });
+      const data = setupData(current?.data);
       const previous = turfLogoName(current?.data);
-      if (previous === name)
+      if ((data.venueLogo ?? null) === name)
         return {
           previous,
           venue: venueDto(owner, current?.data, current?.updatedAt ?? null),
         };
 
-      const data = { ...setupData(current?.data), venueLogo: name };
+      const next = { ...data, venueLogo: name };
       const saved = await tx.tenantSetup.upsert({
         where,
-        create: { ...where, data },
-        update: { data },
+        create: { ...where, data: next },
+        update: { data: next },
       });
       return { previous, venue: venueDto(owner, saved.data, saved.updatedAt) };
     }).catch(async (error: unknown) => {

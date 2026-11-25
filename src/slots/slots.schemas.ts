@@ -54,6 +54,8 @@ export const ListSlotsQuerySchema = PaginationSchema.extend({
   groundId: z.uuid('Invalid ground id').optional(),
   ...dateFields,
   status: oneOf(SLOT_STATUSES, 'Status').optional(),
+  /** Filter by the slot's start in the venue's timezone. */
+  schedule: z.enum(['upcoming', 'started']).optional(),
   reason: oneOf(BLOCK_REASONS, 'Reason').optional(),
   /** `?openDaysOnly=true` leaves out days the ground doesn't open (the booking form). Needs `groundId` and dates. */
   openDaysOnly: z
