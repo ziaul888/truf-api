@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { Test } from '@nestjs/testing';
 import type { INestApplication } from '@nestjs/common';
 import request from 'supertest';
@@ -37,7 +38,22 @@ const stripe = {
   openSessionUrl: vi.fn(async () => null),
   expireSession: vi.fn(async () => undefined),
 };
-const email = { send: vi.fn(async () => true) };
+const email = {
+  configured: true,
+  send: vi.fn(
+    async (_message: { to: string; text: string; kind: string }) => true,
+  ),
+};
+
+function emailCode(address: string, kind: string) {
+  const message = email.send.mock.calls
+    .map(([message]) => message)
+    .reverse()
+    .find((message) => message.to === address && message.kind === kind);
+  const code = message?.text.match(/\b\d{6}\b/)?.[0];
+  expect(code).toMatch(/^\d{6}$/);
+  return code!;
+}
 
 describe('Customer sign-in (e2e)', () => {
   let app: INestApplication<App>;
@@ -221,6 +237,138 @@ describe('Customer sign-in (e2e)', () => {
       .post(`${AUTH}/profile`)
       .send({ name: 'X', email: 'x@example.com' })
       .expect(401);
+  });
+
+  it('links a verified email, reuses the phone account, and consumes email codes only once', async () => {
+    const address = `email-login-${randomUUID()}${DOMAIN}`;
+    const { agent: phoneAgent } = await signIn(`${LOCAL}51`);
+    const saved = await phoneAgent
+      .post(`${AUTH}/profile`)
+      .send({ name: 'Email customer', email: address })
+      .expect(200);
+
+    await http()
+      .post(`${AUTH}/email/link/send-code`)
+      .send({ email: address })
+      .expect(401);
+
+    await phoneAgent
+      .post(`${AUTH}/email/link/send-code`)
+      .send({ email: address })
+      .expect(200);
+    const linkCode = emailCode(address, 'customer_email_link');
+    await http()
+      .post(`${AUTH}/email/verify`)
+      .send({ email: address, code: linkCode })
+      .expect(400);
+    const linked = await phoneAgent
+      .post(`${AUTH}/email/link/verify`)
+      .send({ email: address, code: linkCode })
+      .expect(200);
+    expect(linked.body.data).toMatchObject({
+      verifiedEmail: address,
+      customerId: saved.body.data.customerId,
+    });
+
+    const emailAgent = request.agent(app.getHttpServer());
+    await emailAgent
+      .post(`${AUTH}/email/send-code`)
+      .send({ email: address.toUpperCase() })
+      .expect(200);
+    const signInCode = emailCode(address, 'customer_email_sign_in');
+
+    const attempts = await Promise.all([
+      emailAgent
+        .post(`${AUTH}/email/verify`)
+        .send({ email: address, code: signInCode }),
+      http()
+        .post(`${AUTH}/email/verify`)
+        .send({ email: address, code: signInCode }),
+    ]);
+    expect(attempts.map(({ status }) => status).sort()).toEqual([200, 400]);
+    await http()
+      .post(`${AUTH}/email/verify`)
+      .send({ email: address, code: signInCode })
+      .expect(400);
+    const signedIn = attempts.find(({ status }) => status === 200)!;
+    expect(signedIn.body.data).toMatchObject({
+      phone: `${PHONE}51`,
+      customerId: saved.body.data.customerId,
+      signInMethod: 'email',
+    });
+    const cookie = (
+      signedIn.headers['set-cookie'] as unknown as string[]
+    )[0].split(';', 1)[0];
+    await http().get(`${AUTH}/me`).set('Cookie', cookie).expect(200);
+    await http()
+      .post(`${AUTH}/email/link/send-code`)
+      .set('Cookie', cookie)
+      .send({ email: address })
+      .expect(403);
+    await phoneAgent.post(`${AUTH}/logout`).expect(200);
+    await http().get(`${AUTH}/me`).set('Cookie', cookie).expect(401);
+  });
+
+  it('creates an email-first account and keeps unverified contact-email bookings private', async () => {
+    const address = `first-${randomUUID()}${DOMAIN}`;
+    const existing = await prisma.customer.create({
+      data: { name: 'Existing contact', phone: `${PHONE}52`, email: address },
+    });
+    const emailAgent = request.agent(app.getHttpServer());
+    await emailAgent
+      .post(`${AUTH}/email/send-code`)
+      .send({ email: address })
+      .expect(200);
+    expect(
+      await prisma.customer.findUnique({ where: { verifiedEmail: address } }),
+    ).toBeNull();
+    const code = emailCode(address, 'customer_email_sign_in');
+    const verified = await emailAgent
+      .post(`${AUTH}/email/verify`)
+      .send({ email: address, code })
+      .expect(200);
+    expect(verified.body.data).toMatchObject({
+      phone: null,
+      email: address,
+      needsProfile: true,
+      signInMethod: 'email',
+    });
+    expect(verified.body.data.customerId).not.toBe(existing.id);
+    const firstId = verified.body.data.customerId;
+    const cookie = (
+      verified.headers['set-cookie'] as unknown as string[]
+    )[0].split(';', 1)[0];
+    await emailAgent.get(`${AUTH}/me`).expect(200);
+    await emailAgent
+      .get(`${API}/customer/bookings`)
+      .expect(200)
+      .expect(({ body }) => expect(body.data.total).toBe(0));
+    await emailAgent
+      .post(`${AUTH}/profile`)
+      .send({ name: 'Email first', email: address })
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.data).toMatchObject({ phone: null, needsProfile: false }),
+      );
+    await emailAgent
+      .post(`${AUTH}/verify`)
+      .send({ phone: `${LOCAL}52`, code: '000000', linkPhone: true })
+      .expect(400);
+    await emailAgent
+      .post(`${AUTH}/verify`)
+      .send({ phone: `${LOCAL}52`, code: CODE, linkPhone: true })
+      .expect(200)
+      .expect(({ body }) =>
+        expect(body.data).toMatchObject({
+          phone: `${PHONE}52`,
+          customerId: existing.id,
+          signInMethod: 'email',
+        }),
+      );
+    await http().get(`${AUTH}/me`).set('Cookie', cookie).expect(401);
+    await emailAgent.get(`${AUTH}/me`).expect(200);
+    // The disposable test database also contains the superseded email-only identity.
+    await prisma.customer.delete({ where: { id: firstId } });
   });
 
   it('lists guest bookings made with the number, with their signed links', async () => {

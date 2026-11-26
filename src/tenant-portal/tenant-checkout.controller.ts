@@ -10,6 +10,7 @@ import { CancelRequestService } from '../bookings/cancel-request.service.js';
 import { CheckoutService } from '../bookings/checkout.service.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
+import { checkoutPhone } from '../customer-auth/customer-auth.types.js';
 import { CustomerAuthService } from '../customer-auth/customer-auth.service.js';
 import { OwnerOriginGuard } from '../owner/owner-origin.guard.js';
 import { TURF_CUSTOMER_COOKIE } from './tenant-customer.controller.js';
@@ -41,7 +42,7 @@ export class TenantCheckoutController {
   ) {
     return this.portal.run(slug, async () => {
       const session = await this.customer.optional(req.cookies?.[TURF_CUSTOMER_COOKIE]);
-      return this.checkout.start(body, session?.phone);
+      return this.checkout.start(body, checkoutPhone(session));
     });
   }
 

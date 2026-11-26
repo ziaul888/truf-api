@@ -184,11 +184,19 @@ export class CustomersService {
   }
 
   async update(id: string, input: UpdateCustomerInput): Promise<CustomerDto> {
-    await this.findOrThrow(id);
+    const existing = await this.findOrThrow(id);
+    const changedPhone =
+      input.phone !== undefined && input.phone !== existing.phone;
     const row = await this.write(() =>
       this.prisma.customer.update({
         where: { id },
-        data: input,
+        data: {
+          ...input,
+          ...(changedPhone && {
+            verifiedEmail: null,
+            sessionVersion: { increment: 1 },
+          }),
+        },
         include: CUSTOMER_SUMMARY_INCLUDE,
       }),
     );
@@ -215,7 +223,11 @@ export class CustomersService {
     }
     await this.prisma.customer.update({
       where: { id },
-      data: { deletedAt: new Date() },
+      data: {
+        deletedAt: new Date(),
+        verifiedEmail: null,
+        sessionVersion: { increment: 1 },
+      },
     });
     return { deleted: true };
   }

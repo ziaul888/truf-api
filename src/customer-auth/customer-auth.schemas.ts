@@ -10,6 +10,7 @@ export type SendCodeInput = z.infer<typeof SendCodeSchema>;
 
 export const VerifyCodeSchema = z.object({
   phone: PhoneSchema,
+  linkPhone: z.literal(true).optional(),
   code: z
     .string()
     .trim()
@@ -26,3 +27,14 @@ export const CustomerProfileSchema = z.object({
   email: OptionalEmailSchema,
 });
 export type CustomerProfileInput = z.infer<typeof CustomerProfileSchema>;
+
+export const EmailCodeRequestSchema = z.object({ email: EmailSchema });
+export type EmailCodeRequest = z.infer<typeof EmailCodeRequestSchema>;
+
+export const EmailCodeVerifySchema = EmailCodeRequestSchema.extend({
+  code: z
+    .string()
+    .trim()
+    .regex(/^\d{6}$/, 'Enter the six-digit code from your email'),
+});
+export type EmailCodeVerify = z.infer<typeof EmailCodeVerifySchema>;

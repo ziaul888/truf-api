@@ -1,6 +1,9 @@
 import { Module } from '@nestjs/common';
 import { JwtModule } from '@nestjs/jwt';
 import { env } from '../config/env.js';
+import { EmailModule } from '../email/email.module.js';
+import { CustomerEmailAuthService } from './customer-email-auth.service.js';
+import { CustomerEmailCodesService } from './customer-email-codes.service.js';
 import { SmsModule } from '../sms/sms.module.js';
 import { CustomerAuthController } from './customer-auth.controller.js';
 import { CustomerAuthGuard } from './customer-auth.guard.js';
@@ -13,6 +16,7 @@ import { CustomerAuthService } from './customer-auth.service.js';
 @Module({
   imports: [
     SmsModule,
+    EmailModule,
     JwtModule.register({
       secret: `${env.JWT_SECRET}:customer`,
       signOptions: {
@@ -24,7 +28,12 @@ import { CustomerAuthService } from './customer-auth.service.js';
     }),
   ],
   controllers: [CustomerAuthController],
-  providers: [CustomerAuthService, CustomerAuthGuard],
-  exports: [CustomerAuthService, CustomerAuthGuard],
+  providers: [
+    CustomerAuthService,
+    CustomerAuthGuard,
+    CustomerEmailAuthService,
+    CustomerEmailCodesService,
+  ],
+  exports: [CustomerAuthService, CustomerAuthGuard, CustomerEmailAuthService],
 })
 export class CustomerAuthModule {}

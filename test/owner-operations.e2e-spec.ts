@@ -7,6 +7,7 @@ import { configureApp } from '../src/app.setup.js';
 import { AppModule } from '../src/app.module.js';
 import { hashPassword } from '../src/auth/password.js';
 import { env } from '../src/config/env.js';
+import { EmailService } from '../src/email/email.service.js';
 import { PrismaService } from '../src/prisma/prisma.service.js';
 import { addDays, venueNow } from '../src/slots/venue-time.js';
 import { requireProofDatabase } from './tenant-isolation/test-database-safety.js';
@@ -38,6 +39,10 @@ const ground = {
 describe('Turf owner setup and operations', () => {
   let app: INestApplication<Server>;
   let db: PrismaService;
+  const email = {
+    configured: true,
+    send: vi.fn(async (_message: { to: string; text: string; kind: string }) => true),
+  };
   const tenantIds: string[] = [];
   const userIds: string[] = [];
   const planIds: string[] = [];
@@ -93,7 +98,7 @@ describe('Turf owner setup and operations', () => {
     requireProofDatabase();
     const module = await Test.createTestingModule({
       imports: [AppModule],
-    }).compile();
+    }).overrideProvider(EmailService).useValue(email).compile();
     app = configureApp(
       module.createNestApplication<INestApplication<Server>>(),
     );
@@ -811,6 +816,28 @@ describe('Turf owner setup and operations', () => {
     await client().get(portal(own, '/customer/bookings')).set('Cookie', cookie).expect(200).expect(({ body }) => {
       expect(body.data.total).toBe(1);
     });
+    const address = 'turf-portal-login@example.test';
+    const auth = '/customer/auth';
+    await client().post(portal(own, auth + '/email/send-code')).send({ email: address }).expect(200);
+    const signInCode = email.send.mock.calls.at(-1)?.[0].text.match(/\b\d{6}\b/)?.[0];
+    expect(signInCode).toMatch(/^\d{6}$/);
+    await client().post(portal(foreign, auth + '/email/verify'))
+      .send({ email: address, code: signInCode }).expect(400);
+    const emailLogin = await client().post(portal(own, auth + '/email/verify'))
+      .send({ email: address, code: signInCode }).expect(200);
+    expect(emailLogin.body.data).toMatchObject({ phone: null, email: address, signInMethod: 'email' });
+    const emailCookies = emailLogin.headers['set-cookie'] as unknown as string[];
+    expect(emailCookies[0]).toContain(`Path=/api/v1/turfs/${own}`);
+    const emailCookie = emailCookies[0].split(';', 1)[0];
+    await client().get(portal(foreign, auth + '/me')).set('Cookie', emailCookie).expect(401);
+    await client().get(portal(own, '/customer/bookings')).set('Cookie', emailCookie)
+      .expect(200).expect(({ body }) => expect(body.data.total).toBe(0));
+    await client().post(portal(own, '/checkout')).set('Cookie', emailCookie).send(form).expect(403);
+    const linked = await client().post(portal(own, auth + '/verify')).set('Cookie', emailCookie)
+      .send({ phone, code: env.TEST_OTP_CODE, linkPhone: true }).expect(200);
+    const linkedCookie = (linked.headers['set-cookie'] as unknown as string[])[0].split(';', 1)[0];
+    await client().get(portal(own, '/customer/bookings')).set('Cookie', linkedCookie)
+      .expect(200).expect(({ body }) => expect(body.data.data[0].id).toBe(bookingId));
     await get(`/bookings/${bookingId}`, owner).expect(200);
     await get(`/bookings/${bookingId}`, other).expect(404);
     await put(show, owner, { published: false }).expect(200);

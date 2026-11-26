@@ -19,6 +19,8 @@ const customerRow = (overrides: Partial<Customer> = {}): Customer => ({
   stripeCustomerId: null,
   adminNote: 'staff only',
   sessionVersion: 0,
+  verifiedEmail: null,
+  emailVersion: 0,
   createdAt: new Date(),
   updatedAt: new Date(),
   deletedAt: null,
@@ -117,16 +119,22 @@ describe('CustomerAuthService', () => {
   });
 
   it('saveProfile creates or updates the record for the verified phone', async () => {
-    const created = await setup(null).service.saveProfile(PHONE, {
-      name: 'Nadia',
-      email: 'n@x.test',
-    });
+    const created = await setup(null).service.saveProfile(
+      { phone: PHONE, customerId: null },
+      {
+        name: 'Nadia',
+        email: 'n@x.test',
+      },
+    );
     expect(created).toMatchObject({ customerId: 'c-new', needsProfile: false });
     const { service, prisma } = setup(customerRow());
-    const updated = await service.saveProfile(PHONE, {
-      name: 'Rakib H',
-      email: 'rh@x.test',
-    });
+    const updated = await service.saveProfile(
+      { phone: PHONE, customerId: null },
+      {
+        name: 'Rakib H',
+        email: 'rh@x.test',
+      },
+    );
     expect(prisma.customer.update).toHaveBeenCalled();
     expect(updated).toMatchObject({
       customerId: 'c-1',

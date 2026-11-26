@@ -24,6 +24,7 @@ export function configureApp(app: INestApplication) {
       '/api/v1/owner-applications',
       '/api/v1/turfs',
       '/api/v1/admin/auth',
+      '/api/v1/customer/auth',
     ],
     (_req: Request, res: Response, next: NextFunction) => {
       res.setHeader('Cache-Control', 'private, no-store');

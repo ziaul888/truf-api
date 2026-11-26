@@ -15,6 +15,7 @@ import type { Request } from 'express';
 import { AppError } from '../common/app-error.js';
 import { ZodValidationPipe } from '../common/pipes/zod-validation.pipe.js';
 import { IdParamSchema, type IdParam } from '../common/schemas.js';
+import { checkoutPhone } from '../customer-auth/customer-auth.types.js';
 import { CustomerAuthService } from '../customer-auth/customer-auth.service.js';
 import { CUSTOMER_COOKIE } from '../customer-auth/customer-cookie.js';
 import { BookingQueriesService } from './booking-queries.service.js';
@@ -64,7 +65,7 @@ export class PublicBookingsController {
     const customer = await this.customerAuth.optional(
       req.cookies?.[CUSTOMER_COOKIE],
     );
-    return this.checkout.start(body, customer?.phone);
+    return this.checkout.start(body, checkoutPhone(customer));
   }
 
   @Post('bookings/:id/checkout')

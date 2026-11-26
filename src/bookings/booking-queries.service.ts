@@ -191,9 +191,10 @@ export class BookingQueriesService {
 
   /** Every booking made with the signed-in customer's phone, guest and staff bookings included. */
   async listMine(
-    phone: string,
+    phone: string | null,
     q: MyBookingsQuery,
   ): Promise<Paginated<MyBookingDto>> {
+    if (!phone) return { data: [], total: 0, page: q.page, limit: q.limit };
     const now = venueNow();
     const upcoming: Prisma.BookingWhereInput = {
       status: { in: ['pending', 'confirmed'] },
