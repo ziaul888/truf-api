@@ -179,6 +179,7 @@ function notificationDto(
   return {
     email: {
       configured: false,
+      provider: null,
       fromEmail: '',
       fromName: prefs.fromName,
       replyTo: prefs.replyTo,

@@ -250,11 +250,12 @@ describe('Settings (e2e)', () => {
     expect(pub).not.toHaveProperty('updatedAt');
   });
 
-  it('notifications: always-on emails, sender follows the venue, test email needs SendGrid', async () => {
+  it('notifications: always-on emails, sender follows the venue, test email needs a configured provider', async () => {
     const res = await admin.get(`${S}/notifications`).expect(200);
     expect(res.body.data).toMatchObject({
       email: {
         configured: false,
+        provider: null,
         fromName: null,
         effectiveFromName: 'Arena Dhaka',
         effectiveReplyTo: 'help@arena.test',

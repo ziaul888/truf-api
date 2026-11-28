@@ -25,6 +25,13 @@ export interface Sender {
   replyTo: string;
 }
 
+export type EmailProvider = 'resend' | 'sendgrid';
+
+interface EmailTransport {
+  provider: EmailProvider;
+  apiKey: string;
+}
+
 const NOT_CONFIGURED =
   'Email is not configured (RESEND_API_KEY or SENDGRID_API_KEY)';
 
@@ -39,8 +46,20 @@ export class EmailService {
     private readonly settings: SettingsStore,
   ) {}
 
+  private get transport(): EmailTransport | null {
+    if (env.RESEND_API_KEY)
+      return { provider: 'resend', apiKey: env.RESEND_API_KEY };
+    if (env.SENDGRID_API_KEY)
+      return { provider: 'sendgrid', apiKey: env.SENDGRID_API_KEY };
+    return null;
+  }
+
+  get provider(): EmailProvider | null {
+    return this.transport?.provider ?? null;
+  }
+
   get configured(): boolean {
-    return Boolean(env.RESEND_API_KEY || env.SENDGRID_API_KEY);
+    return this.provider !== null;
   }
 
   /** Returns whether the provider accepted the message. */
@@ -85,19 +104,19 @@ export class EmailService {
   }
 
   private async attempt(message: EmailMessage): Promise<Delivery> {
-    const { RESEND_API_KEY: resendKey, SENDGRID_API_KEY: sendgridKey } = env;
-    if (!resendKey && !sendgridKey) {
+    const transport = this.transport;
+    if (!transport) {
       this.logger.log(NOT_CONFIGURED);
       return { ok: false, error: NOT_CONFIGURED };
     }
     try {
       const sender = await this.sender();
-      if (resendKey) {
+      if (transport.provider === 'resend') {
         const fromName = sender.fromName.replace(/[\r\n<>]/g, '').trim();
         const response = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
-            Authorization: 'Bearer ' + resendKey,
+            Authorization: 'Bearer ' + transport.apiKey,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
@@ -115,9 +134,9 @@ export class EmailService {
           throw new Error(
             'Resend rejected the email (HTTP ' + response.status + ')',
           );
-      } else if (sendgridKey) {
+      } else {
         if (!this.keySet) {
-          sendgrid.setApiKey(sendgridKey);
+          sendgrid.setApiKey(transport.apiKey);
           this.keySet = true;
         }
         await sendgrid.send({

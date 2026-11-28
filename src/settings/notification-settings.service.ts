@@ -1,7 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { AppError } from '../common/app-error.js';
-import { env } from '../config/env.js';
-import { EmailService } from '../email/email.service.js';
+import { EmailService, type EmailProvider } from '../email/email.service.js';
 import { PrismaService } from '../prisma/prisma.service.js';
 import {
   DEFAULT_SLOT_SETTINGS,
@@ -17,6 +16,7 @@ import { SettingsStore, type SectionMeta } from './settings-store.service.js';
 export interface NotificationsDto extends SectionMeta {
   email: {
     configured: boolean;
+    provider: EmailProvider | null;
     fromEmail: string;
     /** Null: the venue name (`effectiveFromName`). */
     fromName: string | null;
@@ -78,7 +78,8 @@ export class NotificationSettingsService {
     return {
       email: {
         configured: this.email.configured,
-        fromEmail: env.EMAIL_FROM,
+        provider: this.email.provider,
+        fromEmail: sender.fromEmail,
         fromName: prefs.fromName,
         replyTo: prefs.replyTo,
         effectiveFromName: sender.fromName,
